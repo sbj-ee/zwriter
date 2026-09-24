@@ -15,6 +15,7 @@ class QLabel;
 class QToolBar;
 class QAction;
 class QTimer;
+class QKeyEvent;
 class QMenu;
 class QPrinter;
 class QFontComboBox;
@@ -146,12 +147,18 @@ private:
     static QString suffixForFilter(const QString &filter);
     static void syncSaveNameToFilter(QFileDialog &dlg, const QString &filter);
     void doPrint(QPrinter *printer);
-    void paintPageOverlays();
-    void paintPageGuides(QPainter &painter, int pages, qreal pageH);
+    void paintPageOverlays(const QRect &clip);
+    void paintPageGuides(QPainter &painter, int firstPage, int lastPage, qreal pageH);
     void syncPageFrameHeight();
+    void refreshPageCount();
     void updatePageLabel();
+    void scheduleStatusUpdate();
+    void setRootFrameMargins(qreal left, qreal top, qreal right, qreal bottom, qreal documentMargin);
     void togglePageNumbers();
+    void forgetPageNumberState();
+    QString *headerFooterBand(int index); // 0..5: header L/C/R, footer L/C/R
     void insertPageBreak();
+    void handleEnterOnPageBreak(QKeyEvent *ke);
     bool pageNumbersOn() const;
     void paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
                            int pageNumber, int pageCount) const;
@@ -179,6 +186,20 @@ private:
     QLabel *m_pageLabel = nullptr;
     QAction *m_pageNumbersAction = nullptr;
     bool m_pageSyncQueued = false;
+    int m_pageCount = 1;              // cached QTextDocument::pageCount()
+    QTimer *m_statusTimer = nullptr;  // debounced word count / page label
+    bool m_suppressDirty = false;     // layout-only document changes in progress
+    // Format > Page Numbers: header/footer as it was when numbers were turned
+    // off (restored when turned back on), and the band the toggle itself filled.
+    struct PageNumbersSnapshot {
+        bool valid = false;
+        QString bands[6];
+        int addedBand = -1;
+        QString addedBandBefore;
+    };
+    PageNumbersSnapshot m_pageNumbersSnapshot;
+    int m_pageNumberBand = -1;
+    QString m_pageNumberBandBefore;
     bool m_mouseActive = false;       // pointer button held in the editor
     QWidget *m_desk = nullptr;
     QScrollArea *m_pageScroll = nullptr;

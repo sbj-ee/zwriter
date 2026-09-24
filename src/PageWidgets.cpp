@@ -60,6 +60,12 @@ void PageCanvas::setPaperMode(bool paper)
     update();
 }
 
+void PageCanvas::setPageBorderColor(const QColor &color)
+{
+    m_border = color;
+    update();
+}
+
 void PageCanvas::paintEvent(QPaintEvent *event)
 {
     if (!m_paper) {
@@ -75,4 +81,10 @@ void PageCanvas::paintEvent(QPaintEvent *event)
         p.setBrush(QColor(0, 0, 0, 5));
         p.drawRoundedRect(page.adjusted(-i, -i + 5, i, i + 5), 3 + i * 0.4, 3 + i * 0.4);
     }
+    // 1 px outline just outside the sheet (the page frame itself has no border,
+    // so the editor inside is exactly the page size).
+    p.setRenderHint(QPainter::Antialiasing, false);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(m_border);
+    p.drawRect(page.adjusted(-1, -1, 0, 0));
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QSizeF>
 #include <QTextEdit>
 #include <QWidget>
@@ -42,6 +43,7 @@ class PageCanvas : public QWidget
 public:
     explicit PageCanvas(QWidget *page, QWidget *parent = nullptr);
     void setPaperMode(bool paper);
+    void setPageBorderColor(const QColor &color);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -50,4 +52,5 @@ private:
     QWidget *m_page;
     QVBoxLayout *m_layout;
     bool m_paper = false;
+    QColor m_border{0xd8, 0xd2, 0xc6};
 };

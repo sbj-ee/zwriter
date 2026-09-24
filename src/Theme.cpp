@@ -59,7 +59,7 @@ QString styleSheet(const ThemeColors &c, bool fullPage, int bodyPt)
     QString css = QStringLiteral(R"CSS(
 QMainWindow { background-color: @windowBg; }
 #desk { background-color: @desk; }
-#pageFrame { background-color: @pageBg; border: 1px solid @pageBorder; }
+#pageFrame { background-color: @pageBg; border: none; } /* outline painted by PageCanvas: the editor must be exactly page-sized */
 
 QTextEdit {
   background-color: @pageBg;
