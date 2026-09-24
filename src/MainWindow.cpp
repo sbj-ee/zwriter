@@ -83,8 +83,10 @@ MainWindow::MainWindow(QWidget *parent)
     m_meta.ensureDefaults();
 
     m_printer = new QPrinter(QPrinter::HighResolution);
-    m_printer->setPageSize(QPageSize(QPageSize::Letter));
+    // Shipping default: A4 (210×297 mm). Overridden by QSettings when present.
+    m_printer->setPageSize(QPageSize(QPageSize::A4));
     m_printer->setPageMargins(QMarginsF(25.4, 25.4, 25.4, 25.4), QPageLayout::Millimeter);
+    loadPrinterSettings();
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -245,6 +247,63 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
     s.setValue(QStringLiteral("files/lastDir"), m_lastDocDir);
     s.setValue(QStringLiteral("files/lastSaveFilter"), m_lastSaveFilter);
+    savePrinterSettings();
+}
+
+void MainWindow::loadPrinterSettings()
+{
+    if (!m_printer) {
+        return;
+    }
+    QSettings s;
+    // First-run / missing key → A4 (210 × 297 mm).
+    const int idVal = s.value(QStringLiteral("print/pageSizeId"),
+                              static_cast<int>(QPageSize::A4)).toInt();
+    QPageSize pageSize;
+    if (idVal == static_cast<int>(QPageSize::Custom)) {
+        const qreal wMm = s.value(QStringLiteral("print/pageWidthMm"), 210.0).toDouble();
+        const qreal hMm = s.value(QStringLiteral("print/pageHeightMm"), 297.0).toDouble();
+        pageSize = QPageSize(QSizeF(wMm, hMm), QPageSize::Millimeter,
+                             QStringLiteral("Custom"), QPageSize::ExactMatch);
+    } else {
+        pageSize = QPageSize(static_cast<QPageSize::PageSizeId>(idVal));
+    }
+    if (!pageSize.isValid()) {
+        pageSize = QPageSize(QPageSize::A4);
+    }
+    m_printer->setPageSize(pageSize);
+
+    const int orientVal = s.value(QStringLiteral("print/orientation"),
+                                  static_cast<int>(QPageLayout::Portrait)).toInt();
+    m_printer->setPageOrientation(static_cast<QPageLayout::Orientation>(orientVal));
+
+    const qreal ml = s.value(QStringLiteral("print/marginLeftMm"), 25.4).toDouble();
+    const qreal mt = s.value(QStringLiteral("print/marginTopMm"), 25.4).toDouble();
+    const qreal mr = s.value(QStringLiteral("print/marginRightMm"), 25.4).toDouble();
+    const qreal mb = s.value(QStringLiteral("print/marginBottomMm"), 25.4).toDouble();
+    m_printer->setPageMargins(QMarginsF(ml, mt, mr, mb), QPageLayout::Millimeter);
+}
+
+void MainWindow::savePrinterSettings() const
+{
+    if (!m_printer) {
+        return;
+    }
+    QSettings s;
+    const QPageLayout layout = m_printer->pageLayout();
+    const QPageSize ps = layout.pageSize();
+    s.setValue(QStringLiteral("print/pageSizeId"), static_cast<int>(ps.id()));
+    if (ps.id() == QPageSize::Custom) {
+        const QSizeF mm = ps.size(QPageSize::Millimeter);
+        s.setValue(QStringLiteral("print/pageWidthMm"), mm.width());
+        s.setValue(QStringLiteral("print/pageHeightMm"), mm.height());
+    }
+    s.setValue(QStringLiteral("print/orientation"), static_cast<int>(layout.orientation()));
+    const QMarginsF m = layout.margins(QPageLayout::Millimeter);
+    s.setValue(QStringLiteral("print/marginLeftMm"), m.left());
+    s.setValue(QStringLiteral("print/marginTopMm"), m.top());
+    s.setValue(QStringLiteral("print/marginRightMm"), m.right());
+    s.setValue(QStringLiteral("print/marginBottomMm"), m.bottom());
 }
 
 void MainWindow::buildFileMenu()
@@ -1924,14 +1983,21 @@ void MainWindow::filePrint()
     if (dlg.exec() != QDialog::Accepted) {
         return;
     }
+    savePrinterSettings();
+    if (m_fullPageView) {
+        updateFullPageGeometry();
+    }
     doPrint(m_printer);
 }
 
 void MainWindow::filePageSetup()
 {
     QPageSetupDialog dlg(m_printer, this);
-    if (dlg.exec() == QDialog::Accepted && m_fullPageView) {
-        updateFullPageGeometry();
+    if (dlg.exec() == QDialog::Accepted) {
+        savePrinterSettings();
+        if (m_fullPageView) {
+            updateFullPageGeometry();
+        }
     }
 }
 
@@ -1963,7 +2029,7 @@ void MainWindow::toggleFullPageView()
 QSizeF MainWindow::printerPageSizePx() const
 {
     if (!m_printer) {
-        return QSizeF(816, 1056); // Letter @ 96 DPI fallback
+        return QSizeF(794, 1123); // A4 @ 96 DPI fallback (210×297 mm)
     }
     const QPageLayout layout = m_printer->pageLayout();
     const QSizeF sizePt = layout.pageSize().size(QPageSize::Point); // 1/72 in
@@ -2016,7 +2082,7 @@ void MainWindow::updateFullPageGeometry()
     }
 
     const QSizeF native = printerPageSizePx();
-    const qreal aspect = native.height() > 0 ? native.width() / native.height() : (8.5 / 11.0);
+    const qreal aspect = native.height() > 0 ? native.width() / native.height() : (210.0 / 297.0); // A4
 
     // Fit one page in the desk with breathing room.
     constexpr int kPad = 36;

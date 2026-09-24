@@ -26,13 +26,13 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 
 - **Hide-away formatting toolbar** (FocusWriter-style — not a permanent ribbon): **font family** (system `QFontComboBox`) + **font size** (pt spin), bold, italic, paragraph / H1 / H2 / H3; reveal on mouse near top/bottom edge or Esc; hides again when the pointer leaves / after a short idle; toolbar follows the caret’s current face/size
 - **Paper-white page** (default theme) — near-white writing surface + dark typewriter text; dark hide-away chrome; View → Theme → Paper / Dark room (persisted in QSettings)
-- **Full Page view** (default **on**) — centered paper page on a desk background, zoom-to-fit one page, margins from Page Setup / print geometry; View → Full Page (Ctrl+Shift+P); off = continuous strip; persisted in QSettings
+- **Full Page view** (default **on**) — centered paper page on a desk background, zoom-to-fit one page; shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF follow that size (changeable; persisted in QSettings); View → Full Page (Ctrl+Shift+P); off = continuous strip
 - **Default body face: typewriter / Courier-class monospace** (`Courier New` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts
 - **Hide-away File + View menus**: Open / Save / Save As / Recent / Export PDF / Print / Print Preview / Page Setup / Properties / Page Guides; View toggles for **Full Page**, typewriter scroll, focus mode, smart quotes, **Theme (Paper / Dark room)**
 - **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
 - **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1)
 - **Export PDF…** (export-only — not a native edit/save format) via `QPrinter` PdfFormat
-- **Print options** (lean): native OS print dialog, page setup (paper / orientation / margins), print preview
+- **Print options** (lean): native OS print dialog, page setup (paper / orientation / margins; default **A4**), print preview; paper size persisted in QSettings
 - **Page guides** toggle (Ctrl+G) — simple column margin guides, not a Word ruler
 - **Bottom status bar** with live **word count**, **character count**, and **reading time** (~N min at 225 WPM)
 - **Document Properties** (Author, Created, Last edit); in-memory always; **ODT meta.xml** round-trip best-effort
@@ -63,7 +63,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - Fullscreen / hide-away chrome
 - **Hide-away formatting toolbar** (font family / size / bold / italic / headings)
 - **Paper-white page** default theme (dark chrome); Dark room optional
-- **Full Page view** (default on) — page-shaped canvas on desk; continuous strip when off
+- **Full Page view** (default on) — A4 page-shaped canvas on desk (Page Setup can change size); continuous strip when off
 - **Typewriter / Courier-class default body font** (system monospace fallbacks); user-selectable
 - **Bottom status bar** with live word + character counts + **reading time**
 - **Export PDF** (export-only)

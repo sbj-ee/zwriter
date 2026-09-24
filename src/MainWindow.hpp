@@ -109,6 +109,8 @@ private:
     void addToRecentFiles(const QString &path);
     void loadSettings();
     void saveSettings() const;
+    void loadPrinterSettings();
+    void savePrinterSettings() const;
     void revealHideAway();
     void scheduleHideAway();
     void considerMouseHideAway(const QPoint &globalPos);
