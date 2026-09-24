@@ -53,6 +53,8 @@ add_executable(zwriter
   src/FindReplaceBar.hpp
   src/UpdateChecker.cpp
   src/UpdateChecker.hpp
+  src/InsertTableDialog.cpp
+  src/InsertTableDialog.hpp
 )
 
 target_link_libraries(zwriter PRIVATE Qt6::Widgets Qt6::PrintSupport Qt6::Network)

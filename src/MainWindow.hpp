@@ -17,6 +17,7 @@ class QMenu;
 class QPrinter;
 class TypewriterSounds;
 class FindReplaceBar;
+class QTextTable;
 class QFileDialog;
 class UpdateChecker;
 
@@ -66,6 +67,11 @@ private slots:
     void fileProperties();
     void openRecentFile();
     void clearRecentFiles();
+    void insertTable();
+    void tableInsertRow();
+    void tableInsertColumn();
+    void tableRemoveRow();
+    void tableRemoveColumn();
     void helpAbout();
     void helpCheckUpdates();
     void onUpdateAvailable(const QString &tag, const QString &url);
@@ -86,6 +92,7 @@ private:
     void buildFileMenu();
     void buildViewMenu();
     void buildHelpMenu();
+    void buildInsertMenu();
     void rebuildRecentMenu();
     void addToRecentFiles(const QString &path);
     void loadSettings();
@@ -115,6 +122,8 @@ private:
     bool trySmartTypography(QKeyEvent *event);
     bool findInDoc(bool forward);
     void syncViewActions();
+    QTextTable *currentTable() const;
+    void updateTableActions();
 
     QTextEdit *m_editor = nullptr;
     FindReplaceBar *m_findBar = nullptr;
@@ -141,6 +150,11 @@ private:
     UpdateChecker *m_updateChecker = nullptr;
     QAction *m_checkUpdatesAction = nullptr;
     QMenu *m_helpMenu = nullptr;
+    QMenu *m_insertMenu = nullptr;
+    QAction *m_tableInsertRowAction = nullptr;
+    QAction *m_tableInsertColAction = nullptr;
+    QAction *m_tableRemoveRowAction = nullptr;
+    QAction *m_tableRemoveColAction = nullptr;
     QPrinter *m_printer = nullptr;
 
     QString m_currentPath;

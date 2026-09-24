@@ -2,6 +2,7 @@
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
 #include "FindReplaceBar.hpp"
+#include "InsertTableDialog.hpp"
 #include "PropertiesDialog.hpp"
 #include "TypewriterSounds.hpp"
 #include "UpdateChecker.hpp"
@@ -45,6 +46,9 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextTable>
+#include <QTextTableFormat>
+#include <QTextLength>
 #include <QTextEdit>
 #include <QTimer>
 #include <QToolBar>
@@ -106,6 +110,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     buildFileMenu();
     buildViewMenu();
+    buildInsertMenu();
     buildHelpMenu();
     buildFormatToolbar();
 
@@ -302,6 +307,134 @@ void MainWindow::buildViewMenu()
 }
 
 
+
+void MainWindow::buildInsertMenu()
+{
+    m_insertMenu = menuBar()->addMenu(QStringLiteral("&Insert"));
+
+    auto *tableAct = m_insertMenu->addAction(QStringLiteral("&Table…"));
+    tableAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
+    tableAct->setToolTip(QStringLiteral("Insert a table (Ctrl+Shift+I)"));
+    connect(tableAct, &QAction::triggered, this, &MainWindow::insertTable);
+    addAction(tableAct);
+
+    m_insertMenu->addSeparator();
+
+    m_tableInsertRowAction = m_insertMenu->addAction(QStringLiteral("Insert &Row"));
+    connect(m_tableInsertRowAction, &QAction::triggered, this, &MainWindow::tableInsertRow);
+    m_tableInsertColAction = m_insertMenu->addAction(QStringLiteral("Insert &Column"));
+    connect(m_tableInsertColAction, &QAction::triggered, this, &MainWindow::tableInsertColumn);
+    m_tableRemoveRowAction = m_insertMenu->addAction(QStringLiteral("Remove Ro&w"));
+    connect(m_tableRemoveRowAction, &QAction::triggered, this, &MainWindow::tableRemoveRow);
+    m_tableRemoveColAction = m_insertMenu->addAction(QStringLiteral("Remove Colu&mn"));
+    connect(m_tableRemoveColAction, &QAction::triggered, this, &MainWindow::tableRemoveColumn);
+
+    updateTableActions();
+}
+
+QTextTable *MainWindow::currentTable() const
+{
+    if (!m_editor) {
+        return nullptr;
+    }
+    return m_editor->textCursor().currentTable();
+}
+
+void MainWindow::updateTableActions()
+{
+    const bool inTable = currentTable() != nullptr;
+    for (QAction *a : {m_tableInsertRowAction, m_tableInsertColAction,
+                       m_tableRemoveRowAction, m_tableRemoveColAction}) {
+        if (a) {
+            a->setEnabled(inTable);
+        }
+    }
+}
+
+void MainWindow::insertTable()
+{
+    InsertTableDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    const int rows = dlg.rows();
+    const int cols = dlg.columns();
+    if (rows < 1 || cols < 1) {
+        return;
+    }
+
+    QTextCursor cursor = m_editor->textCursor();
+    cursor.beginEditBlock();
+    QTextTable *table = cursor.insertTable(rows, cols);
+    if (table) {
+        QTextTableFormat fmt = table->format();
+        fmt.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+        fmt.setBorder(1.5);
+        fmt.setBorderBrush(QColor(QStringLiteral("#a0a0a0")));
+        fmt.setCellPadding(8);
+        fmt.setCellSpacing(0);
+        fmt.setWidth(QTextLength(QTextLength::PercentageLength, 100));
+        table->setFormat(fmt);
+    }
+    cursor.endEditBlock();
+    m_editor->setFocus();
+    updateTableActions();
+    markDirty();
+}
+
+void MainWindow::tableInsertRow()
+{
+    QTextTable *table = currentTable();
+    if (!table) {
+        return;
+    }
+    QTextCursor c = m_editor->textCursor();
+    const int row = table->cellAt(c).row();
+    table->insertRows(row + 1, 1);
+    updateTableActions();
+    markDirty();
+}
+
+void MainWindow::tableInsertColumn()
+{
+    QTextTable *table = currentTable();
+    if (!table) {
+        return;
+    }
+    QTextCursor c = m_editor->textCursor();
+    const int col = table->cellAt(c).column();
+    table->insertColumns(col + 1, 1);
+    updateTableActions();
+    markDirty();
+}
+
+void MainWindow::tableRemoveRow()
+{
+    QTextTable *table = currentTable();
+    if (!table || table->rows() <= 1) {
+        return;
+    }
+    QTextCursor c = m_editor->textCursor();
+    const int row = table->cellAt(c).row();
+    table->removeRows(row, 1);
+    updateTableActions();
+    markDirty();
+}
+
+void MainWindow::tableRemoveColumn()
+{
+    QTextTable *table = currentTable();
+    if (!table || table->columns() <= 1) {
+        return;
+    }
+    QTextCursor c = m_editor->textCursor();
+    const int col = table->cellAt(c).column();
+    table->removeColumns(col, 1);
+    updateTableActions();
+    markDirty();
+}
+
+
 void MainWindow::buildHelpMenu()
 {
     m_helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
@@ -476,6 +609,10 @@ void MainWindow::buildFormatToolbar()
     });
 
     m_formatBar->addSeparator();
+
+    auto *tableAction = m_formatBar->addAction(QStringLiteral("Table…"));
+    tableAction->setToolTip(QStringLiteral("Insert table (Ctrl+Shift+I)"));
+    connect(tableAction, &QAction::triggered, this, &MainWindow::insertTable);
 
     auto *exportAction = m_formatBar->addAction(QStringLiteral("Export PDF…"));
     exportAction->setToolTip(QStringLiteral("Export as PDF (Ctrl+Shift+E)"));
@@ -798,6 +935,7 @@ void MainWindow::onCursorMoved()
     syncFormatActions();
     centerCaret();
     updateFocusHighlight();
+    updateTableActions();
 }
 
 void MainWindow::centerCaret()
@@ -1671,6 +1809,40 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     QApplication::processEvents();
     grab().save(dir + QStringLiteral("/find-bar.png"), "PNG");
     hideFindBar();
+
+    // Table demo shot.
+    {
+        m_focusMode = false;
+        updateFocusHighlight();
+        QTextCursor cursor = m_editor->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertBlock();
+        cursor.insertText(QStringLiteral("Scene notes"));
+        cursor.insertBlock();
+        QTextTable *table = cursor.insertTable(3, 3);
+        QTextTableFormat fmt = table->format();
+        fmt.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+        fmt.setBorder(1.5);
+        fmt.setBorderBrush(QColor(QStringLiteral("#a0a0a0")));
+        fmt.setCellPadding(8);
+        fmt.setCellSpacing(0);
+        fmt.setWidth(QTextLength(QTextLength::PercentageLength, 100));
+        table->setFormat(fmt);
+        const QStringList cells = {
+            QStringLiteral("Beat"), QStringLiteral("Place"), QStringLiteral("Note"),
+            QStringLiteral("1"), QStringLiteral("Harbor"), QStringLiteral("Rain"),
+            QStringLiteral("2"), QStringLiteral("Desk"), QStringLiteral("First sentence"),
+        };
+        for (int i = 0; i < cells.size(); ++i) {
+            table->cellAt(i / 3, i % 3).firstCursorPosition().insertText(cells.at(i));
+        }
+        m_editor->setTextCursor(table->cellAt(1, 1).firstCursorPosition());
+        updateStats();
+        updateTableActions();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/editor-table.png"), "PNG");
+    }
+
 
     // 4) About dialog grab.
     QMessageBox about(this);

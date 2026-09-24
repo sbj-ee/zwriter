@@ -41,6 +41,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - Esc chrome pin/unpin, F11 fullscreen
 - Optional typewriter key-sound toggle (**default off**)
 - Typewriter icon branding
+- **Tables** (QTextTable): Insert → Table… / toolbar; Tab between cells; add/remove row or column; ODT + PDF/print
 - **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
 - CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg`)
 
@@ -71,6 +72,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Recent files** menu (QSettings)
 - **Smart quotes / dashes** (toggle, default **off**)
 - **Help → About** + **Check for Updates** (GitHub latest release)
+- **Tables** (insert, edit cells, add/remove row/column; ODT round-trip)
 - Themes
 - Autosave + restore cursor
 - Multi-document / sessions
@@ -171,6 +173,8 @@ cd build && cpack -G DragNDrop
 | `Ctrl+Shift+T` | Toggle typewriter scroll (default on) |
 | `Ctrl+Shift+F` | Toggle focus mode |
 | `Ctrl+Shift+K` | Toggle typewriter key sounds (default off) |
+| `Ctrl+Shift+I` | Insert table… |
+| `Tab` / `Shift+Tab` | Next / previous table cell |
 
 ## License
 
