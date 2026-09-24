@@ -27,7 +27,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Hide-away formatting toolbar** (FocusWriter-style — not a permanent ribbon): **font family** (system `QFontComboBox`) + **font size** (pt spin), bold, italic, paragraph / H1 / H2 / H3; reveal on mouse near top/bottom edge or Esc; hides again when the pointer leaves / after a short idle; toolbar follows the caret’s current face/size
 - **Paper-white page** (default theme) — near-white writing surface + dark typewriter text; dark hide-away chrome; View → Theme → Paper / Dark room (persisted in QSettings)
 - **Full Page view** (default **on**) — centered paper page on a desk background at **true physical size** (mm → DIPs via logical DPI; scroll if the window is smaller); shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF use the same page metrics; View → Full Page (Ctrl+Shift+P); off = continuous strip
-- **Default body face: typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
+- **Default body face: typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Courier` → `Courier Prime` → `Nimbus Mono PS` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
 - **Hide-away File + View menus**: Open / Save / Save As / Recent / Export PDF / Print / Print Preview / Page Setup / Properties / Page Guides; View toggles for **Full Page**, typewriter scroll, focus mode, smart quotes, **Theme (Paper / Dark room)**
 - **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
 - **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1)
@@ -66,7 +66,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Hide-away formatting toolbar** (font family / size / bold / italic / headings)
 - **Paper-white page** default theme (dark chrome); Dark room optional
 - **Full Page view** (default on) — A4 at true screen DIP size on desk (Page Setup can change size); continuous strip when off
-- **Typewriter / Courier-class default body font at 12 pt** (system monospace fallbacks); user-selectable
+- **Courier default body font at 12 pt** (Courier-class monospace fallbacks); user-selectable
 - **Bottom status bar** with live word + character counts + **reading time**
 - **Export PDF** (export-only)
 - **Print** + page setup + print preview (lean; no Word-style advanced print UI)
@@ -151,6 +151,16 @@ cmake --build build
 
 # package .deb (optional):
 cd build && cpack -G DEB
+```
+
+**Dock / taskbar icon when running from the build tree.** The icon is embedded in
+the binary and the window announces the app id `zwriter`, but GNOME and other
+desktops take the dock icon and hover name from a `zwriter.desktop` entry. A
+`.deb` install provides one; for `./build/zwriter` run:
+
+```bash
+tools/install-desktop-entry.sh            # registers build/zwriter (per-user, no sudo)
+tools/install-desktop-entry.sh --remove   # undo
 ```
 
 `qt6-base-dev` already pulls in Widgets + PrintSupport (PDF export + print).

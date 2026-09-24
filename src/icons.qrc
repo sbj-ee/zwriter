@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file alias="zwriter-16.png">../assets/icons/zwriter-16.png</file>
+        <file alias="zwriter-24.png">../assets/icons/zwriter-24.png</file>
+        <file alias="zwriter-32.png">../assets/icons/zwriter-32.png</file>
+        <file alias="zwriter-48.png">../assets/icons/zwriter-48.png</file>
+        <file alias="zwriter-64.png">../assets/icons/zwriter-64.png</file>
+        <file alias="zwriter-128.png">../assets/icons/zwriter-128.png</file>
+        <file alias="zwriter-256.png">../assets/icons/zwriter-256.png</file>
+        <file alias="zwriter-512.png">../assets/icons/zwriter-512.png</file>
+    </qresource>
+</RCC>

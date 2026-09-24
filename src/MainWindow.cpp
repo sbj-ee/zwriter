@@ -133,7 +133,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_editor = new QTextEdit(m_pageFrame);
     m_editor->setAcceptRichText(true);
     m_editor->setFrameShape(QFrame::NoFrame);
-    m_editor->setPlaceholderText(QStringLiteral("Start writing…"));
+    // Clear vertical bar caret. Qt draws it by inverting the pixels under it:
+    // near-black on the paper page, light on the dark theme.
+    m_editor->setCursorWidth(2);
     pageLayout->addWidget(m_editor);
 
     m_pageScroll->setWidget(m_pageFrame);
@@ -881,19 +883,8 @@ void MainWindow::buildFormatToolbar()
 
 void MainWindow::loadWindowIcon()
 {
-    const QStringList candidates = {
-        QCoreApplication::applicationDirPath() + QStringLiteral("/assets/icons/zwriter-128.png"),
-        QStringLiteral("assets/icons/zwriter-128.png"),
-        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(
-            QStringLiteral("../assets/icons/zwriter-128.png")),
-        QStringLiteral(":/icons/zwriter-128.png"),
-    };
-    for (const QString &path : candidates) {
-        if (QFile::exists(path)) {
-            setWindowIcon(QIcon(path));
-            return;
-        }
-    }
+    // Set application-wide in main() from the embedded resources.
+    setWindowIcon(QApplication::windowIcon());
 }
 
 bool MainWindow::isPaperTheme() const
@@ -903,14 +894,16 @@ bool MainWindow::isPaperTheme() const
 
 QFont MainWindow::defaultDocumentFont() const
 {
-    // Shipping default: typewriter / Courier-class monospace (user can switch via toolbar).
+    // Shipping default: Courier, 12 pt (falls back through Courier-class monospace
+    // faces; user can switch via toolbar).
     QFont font;
     font.setFamilies({
         QStringLiteral("Courier New"),
-        QStringLiteral("Liberation Mono"),
-        QStringLiteral("Noto Sans Mono"),
         QStringLiteral("Courier"),
         QStringLiteral("Courier Prime"),
+        QStringLiteral("Nimbus Mono PS"),
+        QStringLiteral("Liberation Mono"),
+        QStringLiteral("Noto Sans Mono"),
         QStringLiteral("Menlo"),
         QStringLiteral("Monaco"),
         QStringLiteral("DejaVu Sans Mono"),
@@ -1000,7 +993,7 @@ void MainWindow::applyTheme()
         "  color: %2;"
         "  selection-background-color: %3;"
         "  selection-color: %4;"
-        "  font-family: 'Courier New', 'Liberation Mono', 'Noto Sans Mono', 'Courier', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace;"
+        "  font-family: 'Courier New', 'Courier', 'Courier Prime', 'Nimbus Mono PS', 'Liberation Mono', 'Noto Sans Mono', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace;"
         "  font-size: %8pt;"
         "  padding: %7;"
         "}"
@@ -2757,7 +2750,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
             cursor.insertBlock();
         };
         insertStyled(QStringLiteral("Liberation Mono"), kDefaultBodyPointSize,
-                     QStringLiteral("Liberation Mono — default typewriter body (Courier New when installed)."));
+                     QStringLiteral("Liberation Mono — metric-compatible fallback when Courier is not installed."));
         insertStyled(QStringLiteral("Courier Prime"), kDefaultBodyPointSize,
                      QStringLiteral("Courier Prime — classic typewriter face."));
         insertStyled(QStringLiteral("DejaVu Sans"), kDefaultBodyPointSize,

@@ -61,6 +61,7 @@ add_executable(zwriter
   src/SpellChecker.hpp
   src/SpellHighlighter.cpp
   src/SpellHighlighter.hpp
+  src/icons.qrc
 )
 
 target_link_libraries(zwriter PRIVATE Qt6::Widgets Qt6::PrintSupport Qt6::Network)

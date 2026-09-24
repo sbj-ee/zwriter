@@ -3,7 +3,23 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QIcon>
 #include <QTimer>
+
+namespace {
+
+// Icon embedded in the binary (src/icons.qrc) so it is present wherever the
+// app runs from: build tree, .deb install, or .dmg.
+QIcon appIcon()
+{
+    QIcon icon;
+    for (const int size : {16, 24, 32, 48, 64, 128, 256, 512}) {
+        icon.addFile(QStringLiteral(":/icons/zwriter-%1.png").arg(size), QSize(size, size));
+    }
+    return icon;
+}
+
+} // namespace
 
 int main(int argc, char *argv[])
 {
@@ -11,6 +27,13 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("zwriter"));
     QApplication::setOrganizationName(QStringLiteral("sbj-ee"));
     QApplication::setApplicationVersion(QString::fromUtf8(zwriter::kVersionString));
+    QApplication::setApplicationDisplayName(QStringLiteral("zwriter"));
+    // Blink the caret at a steady 1 s cycle regardless of the desktop setting.
+    QApplication::setCursorFlashTime(1000);
+    // Must match zwriter.desktop: on Wayland/GNOME this is the app id the shell
+    // uses to pick the dock/taskbar icon and hover name.
+    QGuiApplication::setDesktopFileName(QStringLiteral("zwriter"));
+    QApplication::setWindowIcon(appIcon());
 
     QString captureDir;
     const QStringList args = app.arguments();

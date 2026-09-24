@@ -31,9 +31,14 @@ if(UNIX AND NOT APPLE)
   install(FILES ${CMAKE_SOURCE_DIR}/assets/linux/zwriter.desktop
           DESTINATION share/applications
           COMPONENT zwriter)
-  install(FILES ${CMAKE_SOURCE_DIR}/assets/icons/zwriter-128.png
-          DESTINATION share/icons/hicolor/128x128/apps
-          RENAME zwriter.png
+  foreach(_sz 16 24 32 48 64 128 256 512)
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/icons/zwriter-${_sz}.png
+            DESTINATION share/icons/hicolor/${_sz}x${_sz}/apps
+            RENAME zwriter.png
+            COMPONENT zwriter)
+  endforeach()
+  install(FILES ${CMAKE_SOURCE_DIR}/assets/icons/zwriter.svg
+          DESTINATION share/icons/hicolor/scalable/apps
           COMPONENT zwriter)
   install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/
           DESTINATION share/zwriter/assets
