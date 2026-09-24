@@ -79,6 +79,7 @@ private slots:
     void openRecentFile();
     void clearRecentFiles();
     void insertTable();
+    void editHeaderFooter();
     void tableInsertRow();
     void tableInsertColumn();
     void tableRemoveRow();
@@ -131,6 +132,12 @@ private:
     static void syncSaveNameToFilter(QFileDialog &dlg, const QString &filter);
     void doPrint(QPrinter *printer);
     void paintPageGuides();
+    void paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
+                           int pageNumber, int pageCount) const;
+    QString expandHeaderFooterTokens(const QString &pattern, int pageNumber,
+                                    int pageCount) const;
+    int visiblePageNumber() const;
+    int documentPageCount() const;
     void applyFullPageView();
     void updateFullPageGeometry();
     QSizeF printerPageSizePx() const;

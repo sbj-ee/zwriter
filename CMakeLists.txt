@@ -55,6 +55,8 @@ add_executable(zwriter
   src/UpdateChecker.hpp
   src/InsertTableDialog.cpp
   src/InsertTableDialog.hpp
+  src/HeaderFooterDialog.cpp
+  src/HeaderFooterDialog.hpp
 )
 
 target_link_libraries(zwriter PRIVATE Qt6::Widgets Qt6::PrintSupport Qt6::Network)

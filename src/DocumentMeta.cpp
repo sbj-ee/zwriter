@@ -46,6 +46,16 @@ void DocumentMeta::ensureDefaults()
     if (!lastEdited.isValid()) {
         lastEdited = created;
     }
+    if (!headerFooterSeeded) {
+        footerCenter = QStringLiteral("{page}");
+        headerFooterSeeded = true;
+    }
+}
+
+bool DocumentMeta::hasHeaderFooter() const
+{
+    return !(headerLeft.isEmpty() && headerCenter.isEmpty() && headerRight.isEmpty()
+             && footerLeft.isEmpty() && footerCenter.isEmpty() && footerRight.isEmpty());
 }
 
 void DocumentMeta::touchEdited()
@@ -101,6 +111,19 @@ QString buildMetaXml(const DocumentMeta &meta)
     }
     w.writeTextElement(QStringLiteral("meta:generator"), QStringLiteral("zwriter/0.1"));
 
+    auto writeUser = [&w](const QString &name, const QString &value) {
+        w.writeStartElement(QStringLiteral("meta:user-defined"));
+        w.writeAttribute(QStringLiteral("meta:name"), name);
+        w.writeCharacters(value);
+        w.writeEndElement();
+    };
+    writeUser(QStringLiteral("zwriter:header-left"), meta.headerLeft);
+    writeUser(QStringLiteral("zwriter:header-center"), meta.headerCenter);
+    writeUser(QStringLiteral("zwriter:header-right"), meta.headerRight);
+    writeUser(QStringLiteral("zwriter:footer-left"), meta.footerLeft);
+    writeUser(QStringLiteral("zwriter:footer-center"), meta.footerCenter);
+    writeUser(QStringLiteral("zwriter:footer-right"), meta.footerRight);
+
     w.writeEndElement(); // office:meta
     w.writeEndElement(); // office:document-meta
     w.writeEndDocument();
@@ -110,6 +133,7 @@ QString buildMetaXml(const DocumentMeta &meta)
 void parseMetaXml(const QByteArray &xml, DocumentMeta *meta)
 {
     QXmlStreamReader reader(xml);
+    bool sawHeaderFooter = false;
     while (!reader.atEnd()) {
         if (reader.readNext() != QXmlStreamReader::StartElement) {
             continue;
@@ -124,7 +148,32 @@ void parseMetaXml(const QByteArray &xml, DocumentMeta *meta)
             meta->created = fromOdfDate(reader.readElementText());
         } else if (name == QLatin1String("date")) {
             meta->lastEdited = fromOdfDate(reader.readElementText());
+        } else if (name == QLatin1String("user-defined")) {
+            const QString key = reader.attributes().value(QStringLiteral("meta:name")).toString();
+            const QString v = reader.readElementText();
+            if (key == QLatin1String("zwriter:header-left")) {
+                meta->headerLeft = v;
+                sawHeaderFooter = true;
+            } else if (key == QLatin1String("zwriter:header-center")) {
+                meta->headerCenter = v;
+                sawHeaderFooter = true;
+            } else if (key == QLatin1String("zwriter:header-right")) {
+                meta->headerRight = v;
+                sawHeaderFooter = true;
+            } else if (key == QLatin1String("zwriter:footer-left")) {
+                meta->footerLeft = v;
+                sawHeaderFooter = true;
+            } else if (key == QLatin1String("zwriter:footer-center")) {
+                meta->footerCenter = v;
+                sawHeaderFooter = true;
+            } else if (key == QLatin1String("zwriter:footer-right")) {
+                meta->footerRight = v;
+                sawHeaderFooter = true;
+            }
         }
+    }
+    if (sawHeaderFooter) {
+        meta->headerFooterSeeded = true;
     }
 }
 

@@ -2,6 +2,7 @@
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
 #include "FindReplaceBar.hpp"
+#include "HeaderFooterDialog.hpp"
 #include "InsertTableDialog.hpp"
 #include "PropertiesDialog.hpp"
 #include "TypewriterSounds.hpp"
@@ -9,6 +10,7 @@
 #include "version.hpp"
 
 #include <QApplication>
+#include <QAbstractTextDocumentLayout>
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
@@ -32,6 +34,7 @@
 #include <QPageLayout>
 #include <QPageSetupDialog>
 #include <QPageSize>
+#include <QPaintDevice>
 #include <QPainter>
 #include <QPen>
 #include <QPixmap>
@@ -457,6 +460,11 @@ void MainWindow::buildInsertMenu()
     tableAct->setToolTip(QStringLiteral("Insert a table (Ctrl+Shift+I)"));
     connect(tableAct, &QAction::triggered, this, &MainWindow::insertTable);
     addAction(tableAct);
+
+    auto *hfAct = m_insertMenu->addAction(QStringLiteral("&Header & Footer…"));
+    hfAct->setToolTip(QStringLiteral("Edit page header and footer (page numbers via {page} / {pages})"));
+    connect(hfAct, &QAction::triggered, this, &MainWindow::editHeaderFooter);
+    addAction(hfAct);
 
     m_insertMenu->addSeparator();
 
@@ -1984,13 +1992,59 @@ void MainWindow::exportPdf()
     pdf.setPageOrientation(m_printer->pageLayout().orientation());
     pdf.setPageMargins(m_printer->pageLayout().margins(), QPageLayout::Millimeter);
 
-    m_editor->document()->print(&pdf);
+    doPrint(&pdf);
     statusBar()->showMessage(QStringLiteral("Exported PDF: %1").arg(QFileInfo(path).fileName()), 4000);
 }
 
 void MainWindow::doPrint(QPrinter *printer)
 {
-    m_editor->document()->print(printer);
+    if (!printer || !m_editor || !m_editor->document()) {
+        return;
+    }
+
+    QTextDocument *src = m_editor->document();
+    QTextDocument printDoc;
+    printDoc.setDefaultFont(src->defaultFont());
+    printDoc.setHtml(src->toHtml());
+    printDoc.setDocumentMargin(0);
+
+    // Paint the full physical sheet so margin bands match Full Page (header/footer).
+    const bool savedFullPage = printer->fullPage();
+    printer->setFullPage(true);
+
+    const QSizeF sizeMm = printer->pageLayout().pageSize().size(QPageSize::Millimeter);
+    const qreal dpiX = printer->logicalDpiX();
+    const qreal dpiY = printer->logicalDpiY();
+    const QSizeF pageSizePx(sizeMm.width() * dpiX / 25.4, sizeMm.height() * dpiY / 25.4);
+    printDoc.setPageSize(pageSizePx);
+
+    const QMarginsF marginsMm = printer->pageLayout().margins(QPageLayout::Millimeter);
+    QTextFrameFormat fmt = printDoc.rootFrame()->frameFormat();
+    fmt.setLeftMargin(marginsMm.left() * dpiX / 25.4);
+    fmt.setRightMargin(marginsMm.right() * dpiX / 25.4);
+    fmt.setTopMargin(marginsMm.top() * dpiY / 25.4);
+    fmt.setBottomMargin(marginsMm.bottom() * dpiY / 25.4);
+    printDoc.rootFrame()->setFrameFormat(fmt);
+
+    const int pages = qMax(1, printDoc.pageCount());
+    const QRectF pageRect(0, 0, pageSizePx.width(), pageSizePx.height());
+
+    QPainter painter(printer);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    for (int i = 0; i < pages; ++i) {
+        if (i > 0) {
+            printer->newPage();
+        }
+        painter.save();
+        const QRectF view(0, i * pageRect.height(), pageRect.width(), pageRect.height());
+        painter.setClipRect(pageRect);
+        painter.translate(0, -i * pageRect.height());
+        printDoc.drawContents(&painter, view);
+        painter.restore();
+        paintHeaderFooter(&painter, pageRect, i + 1, pages);
+    }
+
+    printer->setFullPage(savedFullPage);
 }
 
 void MainWindow::filePrint()
@@ -2159,6 +2213,115 @@ void MainWindow::togglePageGuides()
     m_editor->viewport()->update();
 }
 
+QString MainWindow::expandHeaderFooterTokens(const QString &pattern, int pageNumber,
+                                             int pageCount) const
+{
+    QString out = pattern;
+    out.replace(QStringLiteral("{page}"), QString::number(pageNumber));
+    out.replace(QStringLiteral("{pages}"), QString::number(pageCount));
+    return out;
+}
+
+int MainWindow::documentPageCount() const
+{
+    if (!m_editor || !m_editor->document()) {
+        return 1;
+    }
+    const int n = m_editor->document()->pageCount();
+    return n > 0 ? n : 1;
+}
+
+int MainWindow::visiblePageNumber() const
+{
+    if (!m_editor || !m_editor->document()) {
+        return 1;
+    }
+    QTextDocument *doc = m_editor->document();
+    const qreal pageH = doc->pageSize().height();
+    if (pageH <= 1.0) {
+        return 1;
+    }
+    // Prefer caret page; fall back to top of viewport.
+    const QTextCursor cursor = m_editor->textCursor();
+    qreal y = 0.0;
+    if (auto *layout = doc->documentLayout()) {
+        y = layout->blockBoundingRect(cursor.block()).top();
+    }
+    if (y <= 0.0 && m_editor->verticalScrollBar()) {
+        y = m_editor->verticalScrollBar()->value();
+    }
+    const int page = int(y / pageH) + 1;
+    return qBound(1, page, documentPageCount());
+}
+
+void MainWindow::paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
+                                   int pageNumber, int pageCount) const
+{
+    if (!painter || !m_meta.hasHeaderFooter()) {
+        return;
+    }
+
+    QFont font = m_editor ? m_editor->document()->defaultFont() : QFont();
+    const qreal bodyPt = font.pointSizeF() > 0 ? font.pointSizeF() : qreal(kDefaultBodyPointSize);
+    font.setPointSizeF(qMax(8.0, bodyPt - 2.0));
+    painter->setFont(font);
+    painter->setPen(isPaperTheme() ? QColor(QStringLiteral("#1a1a1a"))
+                                   : QColor(QStringLiteral("#d4d4d4")));
+
+    qreal leftM = pageRect.width() * 0.12;
+    qreal rightM = leftM;
+    qreal topM = pageRect.height() * 0.085;
+    qreal bottomM = topM;
+
+    if (m_editor && m_editor->document() && m_fullPageView
+        && painter->device() == static_cast<const QPaintDevice *>(m_editor->viewport())) {
+        const QTextFrameFormat fmt = m_editor->document()->rootFrame()->frameFormat();
+        leftM = fmt.leftMargin();
+        rightM = fmt.rightMargin();
+        topM = fmt.topMargin();
+        bottomM = fmt.bottomMargin();
+    } else if (m_printer) {
+        const QMarginsF mm = m_printer->pageLayout().margins(QPageLayout::Millimeter);
+        const QSizeF paperMm = m_printer->pageLayout().pageSize().size(QPageSize::Millimeter);
+        if (paperMm.width() > 0 && paperMm.height() > 0) {
+            const qreal sx = pageRect.width() / paperMm.width();
+            const qreal sy = pageRect.height() / paperMm.height();
+            leftM = mm.left() * sx;
+            rightM = mm.right() * sx;
+            topM = mm.top() * sy;
+            bottomM = mm.bottom() * sy;
+        }
+    }
+
+    const QRectF headerBand(pageRect.left() + leftM,
+                            pageRect.top(),
+                            qMax(0.0, pageRect.width() - leftM - rightM),
+                            topM);
+    const QRectF footerBand(pageRect.left() + leftM,
+                            pageRect.bottom() - bottomM,
+                            qMax(0.0, pageRect.width() - leftM - rightM),
+                            bottomM);
+
+    auto drawBand = [&](const QRectF &band, const QString &left, const QString &center,
+                        const QString &right) {
+        const QString l = expandHeaderFooterTokens(left, pageNumber, pageCount);
+        const QString c = expandHeaderFooterTokens(center, pageNumber, pageCount);
+        const QString r = expandHeaderFooterTokens(right, pageNumber, pageCount);
+        if (!l.isEmpty()) {
+            painter->drawText(band, Qt::AlignLeft | Qt::AlignVCenter, l);
+        }
+        if (!c.isEmpty()) {
+            painter->drawText(band, Qt::AlignHCenter | Qt::AlignVCenter, c);
+        }
+        if (!r.isEmpty()) {
+            painter->drawText(band, Qt::AlignRight | Qt::AlignVCenter, r);
+        }
+    };
+
+    drawBand(headerBand, m_meta.headerLeft, m_meta.headerCenter, m_meta.headerRight);
+    drawBand(footerBand, m_meta.footerLeft, m_meta.footerCenter, m_meta.footerRight);
+}
+
 void MainWindow::paintPageGuides()
 {
     QWidget *vp = m_editor->viewport();
@@ -2187,6 +2350,22 @@ void MainWindow::paintPageGuides()
     } else {
         painter.drawLine(left, 0, left, h);
         painter.drawLine(right, 0, right, h);
+    }
+}
+
+void MainWindow::editHeaderFooter()
+{
+    m_meta.ensureDefaults();
+    HeaderFooterDialog dlg(m_meta, this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    dlg.applyTo(&m_meta);
+    m_meta.headerFooterSeeded = true;
+    m_dirty = true;
+    updateWindowTitle();
+    if (m_editor) {
+        m_editor->viewport()->update();
     }
 }
 
@@ -2278,6 +2457,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     m_themeId = QStringLiteral("paper");
     m_fullPageView = true;
     applyDocumentDefaults();
+    m_meta.ensureDefaults();
     applyTheme();
     applyFullPageView();
     syncViewActions();
@@ -2417,6 +2597,11 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         }
         m_hideAwayPinned = true;
         setChromeVisible(true);
+        // Demo header/footer (shipping default footer is {page}; show a title header too).
+        m_meta.ensureDefaults();
+        m_meta.headerCenter = QStringLiteral("Lorem Draft");
+        m_meta.footerCenter = QStringLiteral("{page}");
+        m_meta.headerFooterSeeded = true;
         m_editor->setPlainText(
             loremBody + QStringLiteral("\n\n— full page view — A4 · 12pt typewriter body —"));
         m_editor->moveCursor(QTextCursor::Start);
@@ -2554,11 +2739,19 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         }
     }
 
-    if (watched == m_editor->viewport() && event->type() == QEvent::Paint && m_pageGuides) {
+    if (watched == m_editor->viewport() && event->type() == QEvent::Paint
+        && (m_pageGuides || (m_fullPageView && m_meta.hasHeaderFooter()))) {
         watched->removeEventFilter(this);
         QCoreApplication::sendEvent(watched, event);
         watched->installEventFilter(this);
-        paintPageGuides();
+        if (m_pageGuides) {
+            paintPageGuides();
+        }
+        if (m_fullPageView && m_meta.hasHeaderFooter() && m_editor) {
+            QPainter painter(m_editor->viewport());
+            const QRectF pageRect(m_editor->viewport()->rect());
+            paintHeaderFooter(&painter, pageRect, visiblePageNumber(), documentPageCount());
+        }
         return true;
     }
 

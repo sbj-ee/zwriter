@@ -8,6 +8,7 @@
 
 PropertiesDialog::PropertiesDialog(const DocumentMeta &meta, QWidget *parent)
     : QDialog(parent)
+    , m_source(meta)
 {
     setWindowTitle(QStringLiteral("Document Properties"));
     setModal(true);
@@ -42,7 +43,7 @@ PropertiesDialog::PropertiesDialog(const DocumentMeta &meta, QWidget *parent)
 
 DocumentMeta PropertiesDialog::meta() const
 {
-    DocumentMeta m;
+    DocumentMeta m = m_source;
     m.author = m_author->text().trimmed();
     m.created = m_created->dateTime().toUTC();
     m.lastEdited = m_edited->dateTime().toUTC();

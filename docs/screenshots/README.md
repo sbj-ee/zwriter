@@ -11,4 +11,4 @@ Captured via `./build/zwriter --capture-screenshots docs/screenshots` (xvfb-run 
 | `editor-table.png` | Inserted QTextTable with cell editing (ODT/PDF-safe) |
 | `save-document.png` | Polished Save Document dialog — ODT default, sidebar, **New Folder**, type filter |
 | `fonts-toolbar.png` | Paper-white page + font family/size controls; sample text in typewriter + other faces |
-| `full-page.png` | Full Page view — centered **A4** at true DIP size + 12 pt typewriter density (Lorem body; page guides) |
+| `full-page.png` | Full Page view — A4 · 12 pt density · Lorem body · header/footer page # (page guides) |

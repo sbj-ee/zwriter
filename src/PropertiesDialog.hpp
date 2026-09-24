@@ -18,6 +18,7 @@ public:
     DocumentMeta meta() const;
 
 private:
+    DocumentMeta m_source;
     QLineEdit *m_author = nullptr;
     QDateTimeEdit *m_created = nullptr;
     QDateTimeEdit *m_edited = nullptr;

@@ -9,9 +9,22 @@ struct DocumentMeta {
     QDateTime created;
     QDateTime lastEdited;
 
+    // Header / footer bands (plain text). Tokens: {page}, {pages}.
+    QString headerLeft;
+    QString headerCenter;
+    QString headerRight;
+    QString footerLeft;
+    QString footerCenter; // shipping default: "{page}"
+    QString footerRight;
+
     static QString defaultAuthor();
     void ensureDefaults();
     void touchEdited();
+
+    bool hasHeaderFooter() const;
+
+    // False until defaults or ODT load seeds header/footer fields.
+    bool headerFooterSeeded = false;
 };
 
 // Best-effort ODT meta.xml round-trip via unzip/zip. QTextDocumentWriter

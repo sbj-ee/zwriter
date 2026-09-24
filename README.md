@@ -45,6 +45,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - Optional typewriter key-sound toggle (**default off**) — mechanical `key.wav` click + `return.wav` carriage; typing/Return only (not arrow navigation)
 - Typewriter icon branding
 - **Tables** (QTextTable): Insert → Table… / toolbar; Tab between cells; add/remove row or column; ODT + PDF/print
+- **Header & Footer** (Insert → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; default footer center `{page}`
 - **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
 - CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg`)
 
@@ -80,6 +81,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Smart quotes / dashes** (toggle, default **off**)
 - **Help → About** + **Check for Updates** (GitHub latest release)
 - **Tables** (insert, edit cells, add/remove row/column; ODT round-trip)
+- **Header & Footer** + page numbers (`{page}` / `{pages}`)
 - Themes (Paper default + Dark room; fuller packs later)
 - Autosave + restore cursor
 - Multi-document / sessions
