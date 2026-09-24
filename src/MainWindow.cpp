@@ -2018,6 +2018,18 @@ bool MainWindow::maybeSave()
     QPushButton *cancel = box.addButton(QStringLiteral("Cancel"), QMessageBox::RejectRole);
     box.setDefaultButton(save);
     box.setEscapeButton(cancel);
+    // QMessageBox gives every button one fixed width that ignores its text, which
+    // clips longer labels with wider fonts. Size them from their own text instead
+    // (one shared width keeps the row tidy).
+    int buttonWidth = 84;
+    for (QPushButton *b : {save, discard, cancel}) {
+        const int textWidth = b->fontMetrics().horizontalAdvance(
+            QString(b->text()).remove(QLatin1Char('&')));
+        buttonWidth = qMax(buttonWidth, textWidth + 2 * 16 + 16); // padding + slack
+    }
+    for (QPushButton *b : {save, discard, cancel}) {
+        b->setMinimumWidth(buttonWidth);
+    }
     box.exec();
     if (box.clickedButton() == discard) {
         return true;
