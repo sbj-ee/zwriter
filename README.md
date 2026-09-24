@@ -42,7 +42,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Recent files** — File → Open Recent; persisted via QSettings; stale paths cleared
 - **Smart quotes / dashes** (default **off**) — curly quotes and en/em dashes from ASCII while typing
 - Esc chrome pin/unpin, F11 fullscreen
-- Optional typewriter key-sound toggle (**default off**) — rotating `key-1..4.wav` type-bar strikes + `return.wav` carriage slide and bell; typing/Return only (not arrow navigation)
+- Optional typewriter key-sound toggle (**default off**) — old-manual-typewriter `key-1..6.wav` strikes (random variant per key), `space.wav` for Space/Backspace, and `return.wav` carriage slide and bell; typing/Return only (not arrow navigation)
 - Typewriter icon branding
 - **Tables** (QTextTable): Insert → Table… / toolbar; Tab between cells; add/remove row or column; ODT + PDF/print
 - **Header & Footer** (Insert → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; default footer center `{page}`
@@ -73,7 +73,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Page guides** toggle
 - **Document Properties** (author / created / last edit; ODT metadata best-effort)
 - **ODT** native default save; **TXT** + basic **RTF** open/save
-- **Optional typewriter key sounds** (toggle, default **off**; bundled `assets/sounds/key-1..4.wav` + `return.wav`, synthesized by `tools/gen_typewriter_sounds.py`; Qt Multimedia / QSoundEffect)
+- **Optional typewriter key sounds** (toggle, default **off**; bundled `assets/sounds/key-1..6.wav` + `space.wav` + `return.wav`, synthesized by `tools/gen_typewriter_sounds.py`; Qt Multimedia / QSoundEffect)
 - **Typewriter icon** branding
 - **Typewriter scrolling** (toggle, default **on**)
 - **Focus mode** (sentence or paragraph scope)

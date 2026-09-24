@@ -2956,8 +2956,9 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             if (mods == Qt::NoModifier) {
                 if (key == Qt::Key_Return || key == Qt::Key_Enter) {
                     m_keySounds->playReturn();
-                } else if (key == Qt::Key_Backspace || key == Qt::Key_Delete) {
-                    m_keySounds->playKey();
+                } else if (key == Qt::Key_Space || key == Qt::Key_Backspace
+                           || key == Qt::Key_Delete) {
+                    m_keySounds->playSpace();
                 } else if (!ke->text().isEmpty() && ke->text().at(0).isPrint()) {
                     m_keySounds->playKey();
                 }

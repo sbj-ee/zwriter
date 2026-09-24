@@ -85,6 +85,9 @@ if(TARGET Qt6::Multimedia)
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-2.wav
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-3.wav
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-4.wav
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-5.wav
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-6.wav
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/space.wav
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/return.wav)
   message(STATUS "zwriter: Qt6 Multimedia found — typewriter key sounds enabled")
 else()
