@@ -22,18 +22,24 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport)
 find_package(Qt6 COMPONENTS Multimedia QUIET)
 
 add_executable(zwriter
   src/main.cpp
   src/MainWindow.cpp
   src/MainWindow.hpp
+  src/DocumentIo.cpp
+  src/DocumentIo.hpp
+  src/DocumentMeta.cpp
+  src/DocumentMeta.hpp
+  src/PropertiesDialog.cpp
+  src/PropertiesDialog.hpp
   src/TypewriterSounds.cpp
   src/TypewriterSounds.hpp
 )
 
-target_link_libraries(zwriter PRIVATE Qt6::Widgets)
+target_link_libraries(zwriter PRIVATE Qt6::Widgets Qt6::PrintSupport)
 target_include_directories(zwriter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 if(TARGET Qt6::Multimedia)
