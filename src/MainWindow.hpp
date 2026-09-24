@@ -18,6 +18,7 @@ class QPrinter;
 class QFontComboBox;
 class QSpinBox;
 class QFrame;
+class QScrollArea;
 class QWidget;
 class QGraphicsDropShadowEffect;
 class TypewriterSounds;
@@ -147,6 +148,7 @@ private:
 
     QTextEdit *m_editor = nullptr;
     QWidget *m_desk = nullptr;
+    QScrollArea *m_pageScroll = nullptr;
     QFrame *m_pageFrame = nullptr;
     QGraphicsDropShadowEffect *m_pageShadow = nullptr;
     FindReplaceBar *m_findBar = nullptr;

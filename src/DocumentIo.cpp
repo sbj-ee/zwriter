@@ -150,7 +150,7 @@ QString odtXmlToHtml(const QByteArray &xml)
 {
     struct StyleInfo {
         QString fontFamily;
-        QString fontSize; // e.g. "16pt"
+        QString fontSize; // e.g. "12pt"
         bool bold = false;
         bool italic = false;
     };
@@ -202,7 +202,7 @@ QString odtXmlToHtml(const QByteArray &xml)
     QXmlStreamReader reader(xml);
     QString html = QStringLiteral(
         "<html><body style=\"font-family: 'Courier New', 'Liberation Mono', 'Noto Sans Mono', "
-        "Courier, Menlo, Monaco, 'DejaVu Sans Mono', monospace; font-size: 16pt; color: #1a1a1a;\">");
+        "Courier, Menlo, Monaco, 'DejaVu Sans Mono', monospace; font-size: 12pt; color: #1a1a1a;\">");
 
     int headingLevel = 0;
     bool inBold = false;

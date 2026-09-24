@@ -39,6 +39,7 @@
 #include <QPrintDialog>
 #include <QPrintPreviewDialog>
 #include <QPrinter>
+#include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -70,6 +71,8 @@ namespace {
 // Reading-time assumption: average adult silent reading ~225 WPM.
 constexpr int kReadingWpm = 225;
 constexpr int kMaxRecentFiles = 8;
+// Typewriter body density on A4 (~pica / 10 CPI). User can enlarge via the picker.
+constexpr int kDefaultBodyPointSize = 12;
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -96,15 +99,25 @@ MainWindow::MainWindow(QWidget *parent)
     m_findBar = new FindReplaceBar(central);
     layout->addWidget(m_findBar);
 
-    // Desk + centered page frame (full page view) or expanding strip (continuous).
+    // Desk + scrollable centered page frame (full page view) or expanding strip (continuous).
+    // Document page metrics always use true physical size (mm → DIPs via logicalDpi);
+    // the scroll area lets small windows pan a real A4 instead of shrinking metrics
+    // (which made pt fonts look huge — classic Qt pageSize trap).
     m_desk = new QWidget(central);
     m_desk->setObjectName(QStringLiteral("desk"));
-    auto *deskLayout = new QHBoxLayout(m_desk);
+    auto *deskLayout = new QVBoxLayout(m_desk);
     deskLayout->setContentsMargins(0, 0, 0, 0);
     deskLayout->setSpacing(0);
-    deskLayout->addStretch(1);
 
-    m_pageFrame = new QFrame(m_desk);
+    m_pageScroll = new QScrollArea(m_desk);
+    m_pageScroll->setObjectName(QStringLiteral("pageScroll"));
+    m_pageScroll->setFrameShape(QFrame::NoFrame);
+    m_pageScroll->setWidgetResizable(false);
+    m_pageScroll->setAlignment(Qt::AlignCenter);
+    m_pageScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_pageScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    m_pageFrame = new QFrame;
     m_pageFrame->setObjectName(QStringLiteral("pageFrame"));
     m_pageFrame->setFrameShape(QFrame::NoFrame);
     auto *pageLayout = new QVBoxLayout(m_pageFrame);
@@ -117,8 +130,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_editor->setPlaceholderText(QStringLiteral("Start writing…"));
     pageLayout->addWidget(m_editor);
 
-    deskLayout->addWidget(m_pageFrame, 0, Qt::AlignCenter);
-    deskLayout->addStretch(1);
+    m_pageScroll->setWidget(m_pageFrame);
+    deskLayout->addWidget(m_pageScroll, 1);
 
     m_pageShadow = new QGraphicsDropShadowEffect(m_pageFrame);
     m_pageShadow->setBlurRadius(32);
@@ -714,7 +727,7 @@ void MainWindow::buildFormatToolbar()
     m_fontSizeSpin->setObjectName(QStringLiteral("fontSizeSpin"));
     m_fontSizeSpin->setToolTip(QStringLiteral("Font size (pt) — applies to selection or typing style"));
     m_fontSizeSpin->setRange(6, 96);
-    m_fontSizeSpin->setValue(16);
+    m_fontSizeSpin->setValue(kDefaultBodyPointSize);
     m_fontSizeSpin->setSuffix(QStringLiteral(" pt"));
     m_fontSizeSpin->setFixedWidth(78);
     m_formatBar->addWidget(m_fontSizeSpin);
@@ -819,7 +832,7 @@ QFont MainWindow::defaultDocumentFont() const
         QStringLiteral("DejaVu Sans Mono"),
         QStringLiteral("monospace"),
     });
-    font.setPointSize(16);
+    font.setPointSize(kDefaultBodyPointSize);
     font.setStyleHint(QFont::TypeWriter);
     font.setFixedPitch(true);
     return font;
@@ -843,7 +856,7 @@ void MainWindow::applyDocumentDefaults()
     }
     if (m_fontSizeSpin) {
         const QSignalBlocker b(m_fontSizeSpin);
-        m_fontSizeSpin->setValue(16);
+        m_fontSizeSpin->setValue(kDefaultBodyPointSize);
     }
 }
 
@@ -904,7 +917,7 @@ void MainWindow::applyTheme()
         "  selection-background-color: %3;"
         "  selection-color: %4;"
         "  font-family: 'Courier New', 'Liberation Mono', 'Noto Sans Mono', 'Courier', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace;"
-        "  font-size: 16pt;"
+        "  font-size: %8pt;"
         "  padding: %7;"
         "}"
         "QMenuBar {"
@@ -1004,8 +1017,12 @@ void MainWindow::applyTheme()
         "#findReplaceBar QPushButton:hover { background-color: #505050; }"
     ).arg(pageBg, pageFg, selBg, selFg, deskColor,
           paper ? QStringLiteral("#d4cfc7") : QStringLiteral("#3c3c3c"),
-          editorPad);
+          editorPad,
+          QString::number(kDefaultBodyPointSize));
     setStyleSheet(style);
+    if (m_pageScroll) {
+        m_pageScroll->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; border: none; }"));
+    }
 
     // Keep default char format colors aligned with the page theme for new typing.
     if (m_editor) {
@@ -1572,16 +1589,16 @@ void MainWindow::applyHeading()
 
     QTextCharFormat charFmt;
     if (level == 0) {
-        charFmt.setFontPointSize(16);
+        charFmt.setFontPointSize(kDefaultBodyPointSize);
         charFmt.setFontWeight(QFont::Normal);
     } else if (level == 1) {
-        charFmt.setFontPointSize(28);
-        charFmt.setFontWeight(QFont::Bold);
-    } else if (level == 2) {
         charFmt.setFontPointSize(22);
         charFmt.setFontWeight(QFont::Bold);
-    } else {
+    } else if (level == 2) {
         charFmt.setFontPointSize(18);
+        charFmt.setFontWeight(QFont::Bold);
+    } else {
+        charFmt.setFontPointSize(14);
         charFmt.setFontWeight(QFont::DemiBold);
     }
     cursor.mergeBlockCharFormat(charFmt);
@@ -1625,7 +1642,7 @@ void MainWindow::syncFormatActions()
             pts = m_editor->document()->defaultFont().pointSizeF();
         }
         if (pts <= 0) {
-            pts = 16;
+            pts = kDefaultBodyPointSize;
         }
         m_fontSizeSpin->setValue(int(pts + 0.5));
     }
@@ -2028,13 +2045,17 @@ void MainWindow::toggleFullPageView()
 
 QSizeF MainWindow::printerPageSizePx() const
 {
+    // True physical page in device-independent pixels (mm → px via logical DPI).
+    // Do NOT use a fitted on-screen frame size here — that classic Qt trap makes
+    // point-size fonts look huge relative to the page.
     if (!m_printer) {
         return QSizeF(794, 1123); // A4 @ 96 DPI fallback (210×297 mm)
     }
     const QPageLayout layout = m_printer->pageLayout();
-    const QSizeF sizePt = layout.pageSize().size(QPageSize::Point); // 1/72 in
-    const qreal dpi = m_editor ? m_editor->logicalDpiX() : 96.0;
-    return QSizeF(sizePt.width() * dpi / 72.0, sizePt.height() * dpi / 72.0);
+    const QSizeF sizeMm = layout.pageSize().size(QPageSize::Millimeter);
+    const qreal dpiX = m_editor ? m_editor->logicalDpiX() : 96.0;
+    const qreal dpiY = m_editor ? m_editor->logicalDpiY() : 96.0;
+    return QSizeF(sizeMm.width() * dpiX / 25.4, sizeMm.height() * dpiY / 25.4);
 }
 
 void MainWindow::applyDocumentPageMetrics(const QSize &pagePx)
@@ -2081,30 +2102,11 @@ void MainWindow::updateFullPageGeometry()
         return;
     }
 
+    // Always size the paper + QTextDocument to the true physical page in DIPs.
+    // Small windows scroll (m_pageScroll); we never shrink pageSize under the font DPI.
     const QSizeF native = printerPageSizePx();
-    const qreal aspect = native.height() > 0 ? native.width() / native.height() : (210.0 / 297.0); // A4
-
-    // Fit one page in the desk with breathing room.
-    constexpr int kPad = 36;
-    QSize avail = m_desk->size() - QSize(kPad * 2, kPad * 2);
-    avail.setWidth(qMax(200, avail.width()));
-    avail.setHeight(qMax(260, avail.height()));
-
-    int pageH = avail.height();
-    int pageW = qRound(pageH * aspect);
-    if (pageW > avail.width()) {
-        pageW = avail.width();
-        pageH = qRound(pageW / aspect);
-    }
-
-    // Do not upscale past the printer page at screen DPI — keep true size when it fits.
-    if (native.width() > 0 && pageW > native.width()) {
-        pageW = qRound(native.width());
-        pageH = qRound(native.height());
-    }
-
-    pageW = qMax(pageW, 280);
-    pageH = qMax(pageH, 360);
+    const int pageW = qMax(1, qRound(native.width()));
+    const int pageH = qMax(1, qRound(native.height()));
 
     if (m_pageFrame->size() != QSize(pageW, pageH)) {
         m_pageFrame->setFixedSize(pageW, pageH);
@@ -2119,36 +2121,33 @@ void MainWindow::applyFullPageView()
         return;
     }
 
-    auto *deskLayout = qobject_cast<QHBoxLayout *>(m_desk->layout());
     if (m_fullPageView) {
         if (m_pageShadow) {
             m_pageShadow->setEnabled(true);
         }
+        if (m_pageScroll) {
+            m_pageScroll->setWidgetResizable(false);
+            m_pageScroll->setAlignment(Qt::AlignCenter);
+        }
         m_pageFrame->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        // Page frame is the paper; scroll inside the editor for multi-page body,
+        // and m_pageScroll pans when the window is smaller than true A4.
         m_editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         m_editor->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-        if (deskLayout) {
-            deskLayout->setStretch(0, 1);
-            deskLayout->setStretch(1, 0);
-            deskLayout->setStretch(2, 1);
-            deskLayout->setContentsMargins(0, 0, 0, 0);
-        }
         updateFullPageGeometry();
     } else {
         if (m_pageShadow) {
             m_pageShadow->setEnabled(false);
+        }
+        if (m_pageScroll) {
+            m_pageScroll->setWidgetResizable(true);
+            m_pageScroll->setAlignment(Qt::AlignCenter);
         }
         m_pageFrame->setMinimumSize(0, 0);
         m_pageFrame->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
         m_pageFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         m_editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
         m_editor->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-        if (deskLayout) {
-            deskLayout->setStretch(0, 0);
-            deskLayout->setStretch(1, 1);
-            deskLayout->setStretch(2, 0);
-            deskLayout->setContentsMargins(0, 0, 0, 0);
-        }
         clearDocumentPageMetrics();
         m_editor->viewport()->update();
     }
@@ -2272,6 +2271,9 @@ void MainWindow::onUpdateCheckFailed()
 
 void MainWindow::captureDemoScreenshots(const QString &dir)
 {
+    // Tall enough to show a full A4 page at screen logical DPI without clipping.
+    resize(1024, 1400);
+
     // Screenshots use the default paper theme (near-white page) + full page view.
     m_themeId = QStringLiteral("paper");
     m_fullPageView = true;
@@ -2280,12 +2282,28 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     applyFullPageView();
     syncViewActions();
 
-    m_editor->setPlainText(
-        QStringLiteral(
-            "The rain settled over the harbor like a soft curtain.\n\n"
-            "She opened the notebook and wrote the first true sentence of the day. "
-            "Everything else could wait. The typewriter clicked once, then again.\n\n"
-            "Across the water, lights blinked on one by one. Focus returned."));
+    const QString loremBody = QStringLiteral(
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod "
+        "tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, "
+        "quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\n"
+        "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu "
+        "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
+        "culpa qui officia deserunt mollit anim id est laborum. Curabitur pretium tincidunt "
+        "lacus. Nulla gravida orci a odio.\n\n"
+        "Nullam varius, turpis et commodo pharetra, est eros bibendum elit, nec luctus magna "
+        "felis sollicitudin mauris. Integer in mauris eu nibh euismod gravida. Duis ac tellus "
+        "et risus vulputate vehicula. Donec lobortis risus a elit. Etiam tempor.\n\n"
+        "Ut ullamcorper, ligula eu tempor congue, eros est euismod turpis, id tincidunt sapien "
+        "risus a quam. Maecenas fermentum consequat mi. Donec fermentum. Pellentesque malesuada "
+        "nulla a mi. Duis sapien sem, aliquet nec, commodo eget, consequat quis, neque.\n\n"
+        "Aliquam faucibus, elit ut dictum aliquet, felis nisl adipiscing sapien, sed malesuada "
+        "diam lacus eget erat. Cras mollis scelerisque nunc. Nullam arcu. Aliquam consequat. "
+        "Curabitur augue lorem, dapibus quis, laoreet et, pretium ac, nisi.\n\n"
+        "Aenean magna nisl, mollis quis, molestie eu, feugiat in, orci. In hac habitasse platea "
+        "dictumst. Integer tempus convallis augue. Etiam facilisis. Nunc elementum fermentum "
+        "wisi. Aenean placerat. Ut imperdiet, enim sed gravida sollicitudin.");
+
+    m_editor->setPlainText(loremBody);
     m_editor->moveCursor(QTextCursor::Start);
     for (int i = 0; i < 2; ++i) {
         m_editor->moveCursor(QTextCursor::Down);
@@ -2314,7 +2332,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     grab().save(dir + QStringLiteral("/editor-focus.png"), "PNG");
 
     // 3) Find bar open.
-    m_findBar->setFindText(QStringLiteral("typewriter"));
+    m_findBar->setFindText(QStringLiteral("ipsum"));
     m_findBar->showFind();
     findNext();
     QApplication::processEvents();
@@ -2371,14 +2389,14 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
             cursor.insertText(text, fmt);
             cursor.insertBlock();
         };
-        insertStyled(QStringLiteral("Liberation Mono"), 16,
+        insertStyled(QStringLiteral("Liberation Mono"), kDefaultBodyPointSize,
                      QStringLiteral("Liberation Mono — default typewriter body (Courier New when installed)."));
-        insertStyled(QStringLiteral("Courier Prime"), 16,
+        insertStyled(QStringLiteral("Courier Prime"), kDefaultBodyPointSize,
                      QStringLiteral("Courier Prime — classic typewriter face."));
-        insertStyled(QStringLiteral("DejaVu Sans"), 16,
+        insertStyled(QStringLiteral("DejaVu Sans"), kDefaultBodyPointSize,
                      QStringLiteral("DejaVu Sans — switch away via the font picker anytime."));
-        insertStyled(QStringLiteral("Noto Serif"), 18,
-                     QStringLiteral("Noto Serif 18pt — optional serif for long reading."));
+        insertStyled(QStringLiteral("Noto Serif"), 14,
+                     QStringLiteral("Noto Serif 14pt — optional serif for long reading."));
         m_editor->moveCursor(QTextCursor::Start);
         syncFormatActions();
         updateStats();
@@ -2400,12 +2418,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         m_hideAwayPinned = true;
         setChromeVisible(true);
         m_editor->setPlainText(
-            QStringLiteral(
-                "The rain settled over the harbor like a soft curtain.\n\n"
-                "She opened the notebook and wrote the first true sentence of the day. "
-                "Everything else could wait. The typewriter clicked once, then again.\n\n"
-                "Across the water, lights blinked on one by one. Focus returned.\n\n"
-                "— full page view —"));
+            loremBody + QStringLiteral("\n\n— full page view — A4 · 12pt typewriter body —"));
         m_editor->moveCursor(QTextCursor::Start);
         applyTheme();
         applyFullPageView();
