@@ -1,4 +1,5 @@
 #include "DocumentMeta.hpp"
+#include "version.hpp"
 
 #include <QTimeZone>
 
@@ -108,7 +109,7 @@ QString buildMetaXml(const DocumentMeta &meta)
     if (meta.lastEdited.isValid()) {
         w.writeTextElement(QStringLiteral("dc:date"), toOdfDate(meta.lastEdited));
     }
-    w.writeTextElement(QStringLiteral("meta:generator"), QStringLiteral("zwriter/0.1"));
+    w.writeTextElement(QStringLiteral("meta:generator"), QStringLiteral("zwriter/") + QString::fromUtf8(zwriter::kVersionString));
 
     auto writeUser = [&w](const QString &name, const QString &value) {
         w.writeStartElement(QStringLiteral("meta:user-defined"));

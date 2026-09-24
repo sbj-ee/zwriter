@@ -20,7 +20,8 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
+**1.0.0** — first stable release. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg`) are on the
+[Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Implemented now
 
@@ -58,7 +59,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - Daily word / time goal, scene / chapter navigation
 - Richer ODT/RTF style round-trip (colours, images, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is plain-text-oriented best-effort
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it. Headings are written as `text:h` the same way (a patch of `content.xml`); without `zip` they save as styled paragraphs and reopen as body text
-- macOS `.dmg` ships the binary (not a full `.app` + macdeployqt bundle yet)
+- macOS `.dmg` holds a bare arm64 `zwriter` executable (plus `share/zwriter/assets`), not a `.app` bundle. It is not built with macdeployqt: it links Homebrew Qt and Hunspell under `/opt/homebrew`, so `brew install qt hunspell` is required. It is unsigned and not notarized, so Gatekeeper blocks the first launch (Control-click → Open, or `xattr -d com.apple.quarantine zwriter`); double-clicking it opens Terminal. A proper `.app` is planned
 - Status extras (pages / paragraphs) — later
 - Mouse-drag selection does not auto-scroll past the window edge in Full Page view (scroll, then shift-click); no widow/orphan control or keep-with-next
 
@@ -134,7 +135,7 @@ ODT open uses `unzip` to read `content.xml` / `meta.xml` (Linux + macOS). Prefer
 a version header.
 
 ```cmake
-project(zwriter VERSION 0.1.0 LANGUAGES CXX)  # example bump
+project(zwriter VERSION 1.0.0 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:
