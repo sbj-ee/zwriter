@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="zwriter typewriter">
+  <!-- Classic typewriter silhouette: body, platen, keys -->
+  <rect width="128" height="128" rx="24" fill="#1e1e1e"/>
+  <!-- Platen / roller -->
+  <rect x="28" y="28" width="72" height="14" rx="7" fill="#d4d4d4"/>
+  <rect x="24" y="32" width="8" height="6" rx="2" fill="#a0a0a0"/>
+  <rect x="96" y="32" width="8" height="6" rx="2" fill="#a0a0a0"/>
+  <!-- Paper -->
+  <rect x="40" y="18" width="48" height="22" rx="2" fill="#f0f0f0"/>
+  <line x1="48" y1="26" x2="80" y2="26" stroke="#c0c0c0" stroke-width="1.5"/>
+  <line x1="48" y1="32" x2="72" y2="32" stroke="#c0c0c0" stroke-width="1.5"/>
+  <!-- Body -->
+  <path d="M22 46 h84 a8 8 0 0 1 8 8 v36 a10 10 0 0 1-10 10 H24 a10 10 0 0 1-10-10 V54 a8 8 0 0 1 8-8z" fill="#3c3c3c"/>
+  <!-- Key rows -->
+  <g fill="#d4d4d4">
+    <rect x="34" y="56" width="10" height="8" rx="2"/>
+    <rect x="48" y="56" width="10" height="8" rx="2"/>
+    <rect x="62" y="56" width="10" height="8" rx="2"/>
+    <rect x="76" y="56" width="10" height="8" rx="2"/>
+    <rect x="90" y="56" width="10" height="8" rx="2"/>
+    <rect x="40" y="68" width="10" height="8" rx="2"/>
+    <rect x="54" y="68" width="10" height="8" rx="2"/>
+    <rect x="68" y="68" width="10" height="8" rx="2"/>
+    <rect x="82" y="68" width="10" height="8" rx="2"/>
+    <!-- Space bar -->
+    <rect x="44" y="80" width="40" height="8" rx="2"/>
+  </g>
+  <!-- Carriage return lever hint -->
+  <path d="M104 58 h6 a4 4 0 0 1 4 4 v14" fill="none" stroke="#a0a0a0" stroke-width="3" stroke-linecap="round"/>
+</svg>

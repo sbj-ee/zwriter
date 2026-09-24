@@ -1,0 +1,66 @@
+# zwriter CI — Linux amd64 + Apple Silicon
+#
+# REAL today:
+#   - Install Qt6 / cmake / ninja
+#   - Configure + build the zwriter binary
+#
+# TODO stubs (echo only; must not fail the job):
+#   - Linux .deb via CPack (cmake/Packaging.cmake not wired yet)
+#   - macOS arm64 .dmg via CPack + macdeployqt (same)
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  linux:
+    name: Linux amd64 (build real, .deb TODO)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 + build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq qt6-base-dev cmake ninja-build g++
+
+      - name: Configure (REAL)
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (REAL)
+        run: cmake --build build
+
+      - name: Package .deb (TODO stub)
+        run: |
+          echo "TODO: wire CPack DEB in cmake/Packaging.cmake"
+          echo "TODO: missing — CPACK_GENERATOR=DEB, maintainer, depends=libqt6widgets6"
+          echo "TODO: cpack -G DEB from build/ once Packaging.cmake is complete"
+          # Intentionally not failing: packaging is not required for CI green.
+
+  macos:
+    name: macOS arm64 (build real, .dmg TODO)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt + build tools (brew)
+        run: brew install qt cmake ninja
+
+      - name: Configure arm64 (REAL)
+        run: |
+          # CMAKE_OSX_ARCHITECTURES=arm64 is forced in CMakeLists.txt before project()
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (REAL)
+        run: cmake --build build
+
+      - name: Package .dmg (TODO stub)
+        run: |
+          echo "TODO: wire CPack DragNDrop in cmake/Packaging.cmake"
+          echo "TODO: missing — macdeployqt bundle of Qt frameworks, CPACK_GENERATOR=DragNDrop"
+          echo "TODO: produce arm64-only .dmg (no Intel Mac / universal binary)"
+          # Intentionally not failing: packaging is not required for CI green.
