@@ -17,6 +17,9 @@ class QMenu;
 class QPrinter;
 class QFontComboBox;
 class QSpinBox;
+class QFrame;
+class QWidget;
+class QGraphicsDropShadowEffect;
 class TypewriterSounds;
 class FindReplaceBar;
 class QTextTable;
@@ -51,6 +54,7 @@ private slots:
     void setThemePaper();
     void setThemeDark();
     void togglePageGuides();
+    void toggleFullPageView();
     void toggleTypewriterScroll();
     void toggleFocusMode();
     void setFocusScopeSentence();
@@ -124,6 +128,11 @@ private:
     static void syncSaveNameToFilter(QFileDialog &dlg, const QString &filter);
     void doPrint(QPrinter *printer);
     void paintPageGuides();
+    void applyFullPageView();
+    void updateFullPageGeometry();
+    QSizeF printerPageSizePx() const;
+    void applyDocumentPageMetrics(const QSize &pagePx);
+    void clearDocumentPageMetrics();
     void centerCaret();
     void updateFocusHighlight();
     QPair<int, int> focusRange() const; // start, end positions in document
@@ -135,6 +144,9 @@ private:
     bool isPaperTheme() const;
 
     QTextEdit *m_editor = nullptr;
+    QWidget *m_desk = nullptr;
+    QFrame *m_pageFrame = nullptr;
+    QGraphicsDropShadowEffect *m_pageShadow = nullptr;
     FindReplaceBar *m_findBar = nullptr;
     QLabel *m_statsLabel = nullptr;
     QLabel *m_keysLabel = nullptr;
@@ -154,6 +166,7 @@ private:
     QAction *m_h3Action = nullptr;
     QAction *m_paragraphAction = nullptr;
     QAction *m_pageGuidesAction = nullptr;
+    QAction *m_fullPageViewAction = nullptr;
     QAction *m_typewriterScrollAction = nullptr;
     QAction *m_focusModeAction = nullptr;
     QAction *m_focusSentenceAction = nullptr;
@@ -180,6 +193,7 @@ private:
     bool m_chromeVisible = false;
     bool m_hideAwayPinned = false;
     bool m_pageGuides = false;
+    bool m_fullPageView = true;        // default ON — paper page frame
     bool m_typewriterScroll = true;   // default ON — distraction-free
     bool m_focusMode = false;         // default OFF
     bool m_focusSentence = false;     // false = paragraph scope

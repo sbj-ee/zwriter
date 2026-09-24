@@ -57,6 +57,12 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QUrl>
+#include <QFrame>
+#include <QGraphicsDropShadowEffect>
+#include <QHBoxLayout>
+#include <QSizePolicy>
+#include <QTextFrame>
+#include <QTextFrameFormat>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -78,6 +84,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_printer = new QPrinter(QPrinter::HighResolution);
     m_printer->setPageSize(QPageSize(QPageSize::Letter));
+    m_printer->setPageMargins(QMarginsF(25.4, 25.4, 25.4, 25.4), QPageLayout::Millimeter);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -87,12 +94,39 @@ MainWindow::MainWindow(QWidget *parent)
     m_findBar = new FindReplaceBar(central);
     layout->addWidget(m_findBar);
 
-    m_editor = new QTextEdit(central);
+    // Desk + centered page frame (full page view) or expanding strip (continuous).
+    m_desk = new QWidget(central);
+    m_desk->setObjectName(QStringLiteral("desk"));
+    auto *deskLayout = new QHBoxLayout(m_desk);
+    deskLayout->setContentsMargins(0, 0, 0, 0);
+    deskLayout->setSpacing(0);
+    deskLayout->addStretch(1);
+
+    m_pageFrame = new QFrame(m_desk);
+    m_pageFrame->setObjectName(QStringLiteral("pageFrame"));
+    m_pageFrame->setFrameShape(QFrame::NoFrame);
+    auto *pageLayout = new QVBoxLayout(m_pageFrame);
+    pageLayout->setContentsMargins(0, 0, 0, 0);
+    pageLayout->setSpacing(0);
+
+    m_editor = new QTextEdit(m_pageFrame);
     m_editor->setAcceptRichText(true);
     m_editor->setFrameShape(QFrame::NoFrame);
     m_editor->setPlaceholderText(QStringLiteral("Start writing…"));
-    layout->addWidget(m_editor, 1);
+    pageLayout->addWidget(m_editor);
+
+    deskLayout->addWidget(m_pageFrame, 0, Qt::AlignCenter);
+    deskLayout->addStretch(1);
+
+    m_pageShadow = new QGraphicsDropShadowEffect(m_pageFrame);
+    m_pageShadow->setBlurRadius(32);
+    m_pageShadow->setOffset(0, 8);
+    m_pageShadow->setColor(QColor(0, 0, 0, 100));
+    m_pageFrame->setGraphicsEffect(m_pageShadow);
+
+    layout->addWidget(m_desk, 1);
     setCentralWidget(central);
+    m_desk->installEventFilter(this);
 
     m_keySounds = new TypewriterSounds(this);
     m_updateChecker = new UpdateChecker(this);
@@ -171,6 +205,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     applyDocumentDefaults();
     applyTheme();
+    applyFullPageView();
     setChromeVisible(false);
     m_dirty = false;
     syncViewActions();
@@ -188,6 +223,7 @@ void MainWindow::loadSettings()
     m_focusMode = s.value(QStringLiteral("view/focusMode"), false).toBool();
     m_focusSentence = s.value(QStringLiteral("view/focusSentence"), false).toBool();
     m_smartQuotes = s.value(QStringLiteral("view/smartQuotes"), false).toBool();
+    m_fullPageView = s.value(QStringLiteral("view/fullPageView"), true).toBool();
     m_themeId = s.value(QStringLiteral("theme/id"), QStringLiteral("paper")).toString();
     if (m_themeId != QLatin1String("dark")) {
         m_themeId = QStringLiteral("paper");
@@ -204,6 +240,7 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("view/focusMode"), m_focusMode);
     s.setValue(QStringLiteral("view/focusSentence"), m_focusSentence);
     s.setValue(QStringLiteral("view/smartQuotes"), m_smartQuotes);
+    s.setValue(QStringLiteral("view/fullPageView"), m_fullPageView);
     s.setValue(QStringLiteral("theme/id"), m_themeId);
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
     s.setValue(QStringLiteral("files/lastDir"), m_lastDocDir);
@@ -301,6 +338,13 @@ void MainWindow::buildViewMenu()
     connect(m_focusSentenceAction, &QAction::triggered, this,
             &MainWindow::setFocusScopeSentence);
 
+    m_fullPageViewAction = m_viewMenu->addAction(QStringLiteral("Full &Page"));
+    m_fullPageViewAction->setCheckable(true);
+    m_fullPageViewAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
+    m_fullPageViewAction->setToolTip(
+        QStringLiteral("Show a centered paper page on the desk (Ctrl+Shift+P); off = continuous strip"));
+    connect(m_fullPageViewAction, &QAction::triggered, this, &MainWindow::toggleFullPageView);
+
     m_viewMenu->addSeparator();
 
     auto *themeMenu = m_viewMenu->addMenu(QStringLiteral("Th&eme"));
@@ -327,6 +371,7 @@ void MainWindow::buildViewMenu()
 
     addAction(m_typewriterScrollAction);
     addAction(m_focusModeAction);
+    addAction(m_fullPageViewAction);
 }
 
 
@@ -569,6 +614,10 @@ void MainWindow::syncViewActions()
         const QSignalBlocker b(m_smartQuotesAction);
         m_smartQuotesAction->setChecked(m_smartQuotes);
     }
+    if (m_fullPageViewAction) {
+        const QSignalBlocker b(m_fullPageViewAction);
+        m_fullPageViewAction->setChecked(m_fullPageView);
+    }
     if (m_focusParagraphAction && m_focusSentenceAction) {
         const QSignalBlocker b1(m_focusParagraphAction);
         const QSignalBlocker b2(m_focusSentenceAction);
@@ -776,9 +825,20 @@ void MainWindow::applyTheme()
     const QString pageFg = paper ? QStringLiteral("#1a1a1a") : QStringLiteral("#d4d4d4");
     const QString selBg = paper ? QStringLiteral("#c5d8f0") : QStringLiteral("#264f78");
     const QString selFg = paper ? QStringLiteral("#000000") : QStringLiteral("#ffffff");
+    // Desk behind the paper page (full page view). Continuous mode paints desk = page.
+    const QString deskBg = paper ? QStringLiteral("#6b6560") : QStringLiteral("#121212");
+
+    const QString editorPad = m_fullPageView ? QStringLiteral("0px")
+                                             : QStringLiteral("48px 20%");
+    const QString deskColor = m_fullPageView ? deskBg : pageBg;
 
     const QString style = QStringLiteral(
         "QMainWindow { background-color: #1e1e1e; }"
+        "#desk { background-color: %5; }"
+        "#pageFrame {"
+        "  background-color: %1;"
+        "  border: 1px solid %6;"
+        "}"
         "QTextEdit {"
         "  background-color: %1;"
         "  color: %2;"
@@ -786,7 +846,7 @@ void MainWindow::applyTheme()
         "  selection-color: %4;"
         "  font-family: 'Courier New', 'Liberation Mono', 'Noto Sans Mono', 'Courier', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace;"
         "  font-size: 16pt;"
-        "  padding: 48px 20%;"
+        "  padding: %7;"
         "}"
         "QMenuBar {"
         "  background-color: #252526;"
@@ -883,7 +943,9 @@ void MainWindow::applyTheme()
         "}"
         "#findReplaceBar QCheckBox { background: transparent; border: none; }"
         "#findReplaceBar QPushButton:hover { background-color: #505050; }"
-    ).arg(pageBg, pageFg, selBg, selFg);
+    ).arg(pageBg, pageFg, selBg, selFg, deskColor,
+          paper ? QStringLiteral("#d4cfc7") : QStringLiteral("#3c3c3c"),
+          editorPad);
     setStyleSheet(style);
 
     // Keep default char format colors aligned with the page theme for new typing.
@@ -1868,7 +1930,9 @@ void MainWindow::filePrint()
 void MainWindow::filePageSetup()
 {
     QPageSetupDialog dlg(m_printer, this);
-    dlg.exec();
+    if (dlg.exec() == QDialog::Accepted && m_fullPageView) {
+        updateFullPageGeometry();
+    }
 }
 
 void MainWindow::filePrintPreview()
@@ -1882,6 +1946,146 @@ void MainWindow::filePrintPreview()
 void MainWindow::printPreview(QPrinter *printer)
 {
     doPrint(printer);
+}
+
+void MainWindow::toggleFullPageView()
+{
+    m_fullPageView = m_fullPageViewAction && m_fullPageViewAction->isChecked();
+    applyTheme();
+    applyFullPageView();
+    saveSettings();
+    syncViewActions();
+    if (m_pageGuides) {
+        m_editor->viewport()->update();
+    }
+}
+
+QSizeF MainWindow::printerPageSizePx() const
+{
+    if (!m_printer) {
+        return QSizeF(816, 1056); // Letter @ 96 DPI fallback
+    }
+    const QPageLayout layout = m_printer->pageLayout();
+    const QSizeF sizePt = layout.pageSize().size(QPageSize::Point); // 1/72 in
+    const qreal dpi = m_editor ? m_editor->logicalDpiX() : 96.0;
+    return QSizeF(sizePt.width() * dpi / 72.0, sizePt.height() * dpi / 72.0);
+}
+
+void MainWindow::applyDocumentPageMetrics(const QSize &pagePx)
+{
+    if (!m_editor || !m_printer) {
+        return;
+    }
+    QTextDocument *doc = m_editor->document();
+    doc->setPageSize(QSizeF(pagePx));
+
+    const QSizeF pageMm = m_printer->pageLayout().pageSize().size(QPageSize::Millimeter);
+    const QMarginsF marginsMm = m_printer->pageLayout().margins(QPageLayout::Millimeter);
+    const qreal sx = pageMm.width() > 0 ? pagePx.width() / pageMm.width() : 1.0;
+    const qreal sy = pageMm.height() > 0 ? pagePx.height() / pageMm.height() : 1.0;
+
+    QTextFrameFormat fmt = doc->rootFrame()->frameFormat();
+    fmt.setLeftMargin(marginsMm.left() * sx);
+    fmt.setRightMargin(marginsMm.right() * sx);
+    fmt.setTopMargin(marginsMm.top() * sy);
+    fmt.setBottomMargin(marginsMm.bottom() * sy);
+    doc->rootFrame()->setFrameFormat(fmt);
+    doc->setDocumentMargin(0);
+}
+
+void MainWindow::clearDocumentPageMetrics()
+{
+    if (!m_editor) {
+        return;
+    }
+    QTextDocument *doc = m_editor->document();
+    doc->setPageSize(QSizeF(0, 0)); // continuous layout
+    QTextFrameFormat fmt = doc->rootFrame()->frameFormat();
+    fmt.setLeftMargin(0);
+    fmt.setRightMargin(0);
+    fmt.setTopMargin(0);
+    fmt.setBottomMargin(0);
+    doc->rootFrame()->setFrameFormat(fmt);
+    doc->setDocumentMargin(4);
+}
+
+void MainWindow::updateFullPageGeometry()
+{
+    if (!m_fullPageView || !m_desk || !m_pageFrame || !m_editor) {
+        return;
+    }
+
+    const QSizeF native = printerPageSizePx();
+    const qreal aspect = native.height() > 0 ? native.width() / native.height() : (8.5 / 11.0);
+
+    // Fit one page in the desk with breathing room.
+    constexpr int kPad = 36;
+    QSize avail = m_desk->size() - QSize(kPad * 2, kPad * 2);
+    avail.setWidth(qMax(200, avail.width()));
+    avail.setHeight(qMax(260, avail.height()));
+
+    int pageH = avail.height();
+    int pageW = qRound(pageH * aspect);
+    if (pageW > avail.width()) {
+        pageW = avail.width();
+        pageH = qRound(pageW / aspect);
+    }
+
+    // Do not upscale past the printer page at screen DPI — keep true size when it fits.
+    if (native.width() > 0 && pageW > native.width()) {
+        pageW = qRound(native.width());
+        pageH = qRound(native.height());
+    }
+
+    pageW = qMax(pageW, 280);
+    pageH = qMax(pageH, 360);
+
+    if (m_pageFrame->size() != QSize(pageW, pageH)) {
+        m_pageFrame->setFixedSize(pageW, pageH);
+    }
+    applyDocumentPageMetrics(QSize(pageW, pageH));
+    m_editor->viewport()->update();
+}
+
+void MainWindow::applyFullPageView()
+{
+    if (!m_desk || !m_pageFrame || !m_editor) {
+        return;
+    }
+
+    auto *deskLayout = qobject_cast<QHBoxLayout *>(m_desk->layout());
+    if (m_fullPageView) {
+        if (m_pageShadow) {
+            m_pageShadow->setEnabled(true);
+        }
+        m_pageFrame->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        m_editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_editor->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        if (deskLayout) {
+            deskLayout->setStretch(0, 1);
+            deskLayout->setStretch(1, 0);
+            deskLayout->setStretch(2, 1);
+            deskLayout->setContentsMargins(0, 0, 0, 0);
+        }
+        updateFullPageGeometry();
+    } else {
+        if (m_pageShadow) {
+            m_pageShadow->setEnabled(false);
+        }
+        m_pageFrame->setMinimumSize(0, 0);
+        m_pageFrame->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+        m_pageFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        m_editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        m_editor->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        if (deskLayout) {
+            deskLayout->setStretch(0, 0);
+            deskLayout->setStretch(1, 1);
+            deskLayout->setStretch(2, 0);
+            deskLayout->setContentsMargins(0, 0, 0, 0);
+        }
+        clearDocumentPageMetrics();
+        m_editor->viewport()->update();
+    }
 }
 
 void MainWindow::togglePageGuides()
@@ -1901,10 +2105,24 @@ void MainWindow::paintPageGuides()
 
     const int w = vp->width();
     const int h = vp->height();
-    const int left = qMax(24, w / 10);
-    const int right = w - left;
-    painter.drawLine(left, 0, left, h);
-    painter.drawLine(right, 0, right, h);
+    int left = qMax(24, w / 10);
+    int right = w - left;
+    int top = 0;
+    int bottom = h;
+    if (m_fullPageView && m_editor->document()) {
+        const QTextFrameFormat fmt = m_editor->document()->rootFrame()->frameFormat();
+        left = qRound(fmt.leftMargin());
+        right = w - qRound(fmt.rightMargin());
+        top = qRound(fmt.topMargin());
+        bottom = h - qRound(fmt.bottomMargin());
+        painter.drawLine(left, top, left, bottom);
+        painter.drawLine(right, top, right, bottom);
+        painter.drawLine(left, top, right, top);
+        painter.drawLine(left, bottom, right, bottom);
+    } else {
+        painter.drawLine(left, 0, left, h);
+        painter.drawLine(right, 0, right, h);
+    }
 }
 
 void MainWindow::fileProperties()
@@ -1988,10 +2206,12 @@ void MainWindow::onUpdateCheckFailed()
 
 void MainWindow::captureDemoScreenshots(const QString &dir)
 {
-    // Screenshots use the default paper theme (near-white page).
+    // Screenshots use the default paper theme (near-white page) + full page view.
     m_themeId = QStringLiteral("paper");
+    m_fullPageView = true;
     applyDocumentDefaults();
     applyTheme();
+    applyFullPageView();
     syncViewActions();
 
     m_editor->setPlainText(
@@ -2100,6 +2320,43 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         grab().save(dir + QStringLiteral("/fonts-toolbar.png"), "PNG");
     }
 
+    // Full page view: centered paper page + margins on desk (paper theme).
+    {
+        m_focusMode = false;
+        updateFocusHighlight();
+        hideFindBar();
+        m_fullPageView = true;
+        m_pageGuides = true;
+        if (m_pageGuidesAction) {
+            const QSignalBlocker b(m_pageGuidesAction);
+            m_pageGuidesAction->setChecked(true);
+        }
+        m_hideAwayPinned = true;
+        setChromeVisible(true);
+        m_editor->setPlainText(
+            QStringLiteral(
+                "The rain settled over the harbor like a soft curtain.\n\n"
+                "She opened the notebook and wrote the first true sentence of the day. "
+                "Everything else could wait. The typewriter clicked once, then again.\n\n"
+                "Across the water, lights blinked on one by one. Focus returned.\n\n"
+                "— full page view —"));
+        m_editor->moveCursor(QTextCursor::Start);
+        applyTheme();
+        applyFullPageView();
+        syncViewActions();
+        updateStats();
+        QApplication::processEvents();
+        // Second pass after desk has a real size under xvfb.
+        updateFullPageGeometry();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/full-page.png"), "PNG");
+        m_pageGuides = false;
+        if (m_pageGuidesAction) {
+            const QSignalBlocker b(m_pageGuidesAction);
+            m_pageGuidesAction->setChecked(false);
+        }
+    }
+
     // 4) About dialog grab.
     QMessageBox about(this);
     about.setWindowTitle(QStringLiteral("About zwriter"));
@@ -2137,6 +2394,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
 
     // Deferred exit so dialog teardown cannot keep the event loop alive under xvfb.
     QTimer::singleShot(0, qApp, &QCoreApplication::quit);
+    QTimer::singleShot(250, qApp, &QCoreApplication::quit);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -2180,6 +2438,15 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     if (watched == m_keysLabel && event->type() == QEvent::MouseButtonRelease) {
         toggleKeySounds();
         return true;
+    }
+
+    if (watched == m_desk && event->type() == QEvent::Resize && m_fullPageView && !m_centering) {
+        // Defer so we don't re-enter layout mid-resize.
+        QTimer::singleShot(0, this, [this]() {
+            if (m_fullPageView) {
+                updateFullPageGeometry();
+            }
+        });
     }
 
     if (watched == m_editor && event->type() == QEvent::KeyPress) {
