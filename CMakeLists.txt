@@ -177,6 +177,22 @@ else()
   message(STATUS "zwriter: Hunspell not found — spell check stubs as no-op")
 endif()
 
+# Headless ODT round-trip regression test (ctest). Needs unzip + zip at run time.
+option(ZWRITER_BUILD_TESTS "Build the zwriter regression tests" ON)
+if(ZWRITER_BUILD_TESTS)
+  enable_testing()
+  find_package(Qt6 REQUIRED COMPONENTS Gui)
+  add_executable(odt_roundtrip_test
+    tests/odt_roundtrip_test.cpp
+    src/DocumentIo.cpp
+    src/DocumentIo.hpp
+  )
+  target_include_directories(odt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(odt_roundtrip_test PRIVATE Qt6::Gui)
+  add_test(NAME odt_roundtrip COMMAND odt_roundtrip_test)
+  set_tests_properties(odt_roundtrip PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 # Packaging (.deb / .dmg) — owns install() rules + CPack.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Packaging.cmake")
   include(cmake/Packaging.cmake)
