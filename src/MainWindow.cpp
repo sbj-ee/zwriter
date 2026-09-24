@@ -18,6 +18,9 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontComboBox>
+#include <QFontInfo>
 #include <QIcon>
 #include <QKeyEvent>
 #include <QKeySequence>
@@ -39,6 +42,7 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTextBlock>
@@ -121,11 +125,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_editor, &QTextEdit::textChanged, this, &MainWindow::updateStats);
     connect(m_editor, &QTextEdit::textChanged, this, &MainWindow::markDirty);
-    connect(m_editor, &QTextEdit::textChanged, this, [this]() {
-        if (m_keySounds) {
-            m_keySounds->playKey();
-        }
-    });
+    // Key sounds fire from the editor keyPress eventFilter (typing + Return),
+    // not textChanged — avoids clicks on paste/programmatic edits/nav side-effects.
     connect(m_editor, &QTextEdit::cursorPositionChanged, this, &MainWindow::onCursorMoved);
     connect(m_editor, &QTextEdit::currentCharFormatChanged, this,
             [this](const QTextCharFormat &) { syncFormatActions(); });
@@ -168,7 +169,8 @@ MainWindow::MainWindow(QWidget *parent)
         menuBar()->installEventFilter(this);
     }
 
-    applyDarkTheme();
+    applyDocumentDefaults();
+    applyTheme();
     setChromeVisible(false);
     m_dirty = false;
     syncViewActions();
@@ -186,6 +188,10 @@ void MainWindow::loadSettings()
     m_focusMode = s.value(QStringLiteral("view/focusMode"), false).toBool();
     m_focusSentence = s.value(QStringLiteral("view/focusSentence"), false).toBool();
     m_smartQuotes = s.value(QStringLiteral("view/smartQuotes"), false).toBool();
+    m_themeId = s.value(QStringLiteral("theme/id"), QStringLiteral("paper")).toString();
+    if (m_themeId != QLatin1String("dark")) {
+        m_themeId = QStringLiteral("paper");
+    }
     m_recentFiles = s.value(QStringLiteral("files/recent")).toStringList();
     m_lastDocDir = s.value(QStringLiteral("files/lastDir")).toString();
     m_lastSaveFilter = s.value(QStringLiteral("files/lastSaveFilter")).toString();
@@ -198,6 +204,7 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("view/focusMode"), m_focusMode);
     s.setValue(QStringLiteral("view/focusSentence"), m_focusSentence);
     s.setValue(QStringLiteral("view/smartQuotes"), m_smartQuotes);
+    s.setValue(QStringLiteral("theme/id"), m_themeId);
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
     s.setValue(QStringLiteral("files/lastDir"), m_lastDocDir);
     s.setValue(QStringLiteral("files/lastSaveFilter"), m_lastSaveFilter);
@@ -293,6 +300,22 @@ void MainWindow::buildViewMenu()
             &MainWindow::setFocusScopeParagraph);
     connect(m_focusSentenceAction, &QAction::triggered, this,
             &MainWindow::setFocusScopeSentence);
+
+    m_viewMenu->addSeparator();
+
+    auto *themeMenu = m_viewMenu->addMenu(QStringLiteral("Th&eme"));
+    auto *themeGroup = new QActionGroup(this);
+    themeGroup->setExclusive(true);
+    m_themePaperAction = themeMenu->addAction(QStringLiteral("&Paper (default)"));
+    m_themePaperAction->setCheckable(true);
+    m_themePaperAction->setToolTip(QStringLiteral("Near-white page, dark text — default writing surface"));
+    m_themeDarkAction = themeMenu->addAction(QStringLiteral("&Dark room"));
+    m_themeDarkAction->setCheckable(true);
+    m_themeDarkAction->setToolTip(QStringLiteral("Dark canvas page (legacy)"));
+    themeGroup->addAction(m_themePaperAction);
+    themeGroup->addAction(m_themeDarkAction);
+    connect(m_themePaperAction, &QAction::triggered, this, &MainWindow::setThemePaper);
+    connect(m_themeDarkAction, &QAction::triggered, this, &MainWindow::setThemeDark);
 
     m_viewMenu->addSeparator();
 
@@ -552,6 +575,13 @@ void MainWindow::syncViewActions()
         m_focusParagraphAction->setChecked(!m_focusSentence);
         m_focusSentenceAction->setChecked(m_focusSentence);
     }
+    if (m_themePaperAction && m_themeDarkAction) {
+        const QSignalBlocker b1(m_themePaperAction);
+        const QSignalBlocker b2(m_themeDarkAction);
+        const bool paper = isPaperTheme();
+        m_themePaperAction->setChecked(paper);
+        m_themeDarkAction->setChecked(!paper);
+    }
 }
 
 void MainWindow::buildFormatToolbar()
@@ -562,6 +592,28 @@ void MainWindow::buildFormatToolbar()
     m_formatBar->setFloatable(false);
     m_formatBar->setIconSize(QSize(16, 16));
     m_formatBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+
+    m_fontCombo = new QFontComboBox(m_formatBar);
+    m_fontCombo->setObjectName(QStringLiteral("fontCombo"));
+    m_fontCombo->setToolTip(QStringLiteral("Font family — applies to selection or typing style"));
+    m_fontCombo->setMaximumWidth(220);
+    m_fontCombo->setCurrentFont(defaultDocumentFont());
+    m_formatBar->addWidget(m_fontCombo);
+    connect(m_fontCombo, &QFontComboBox::currentFontChanged,
+            this, &MainWindow::onFontFamilyChosen);
+
+    m_fontSizeSpin = new QSpinBox(m_formatBar);
+    m_fontSizeSpin->setObjectName(QStringLiteral("fontSizeSpin"));
+    m_fontSizeSpin->setToolTip(QStringLiteral("Font size (pt) — applies to selection or typing style"));
+    m_fontSizeSpin->setRange(6, 96);
+    m_fontSizeSpin->setValue(16);
+    m_fontSizeSpin->setSuffix(QStringLiteral(" pt"));
+    m_fontSizeSpin->setFixedWidth(78);
+    m_formatBar->addWidget(m_fontSizeSpin);
+    connect(m_fontSizeSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, &MainWindow::onFontSizeChosen);
+
+    m_formatBar->addSeparator();
 
     m_boldAction = m_formatBar->addAction(QStringLiteral("Bold"));
     m_boldAction->setCheckable(true);
@@ -639,16 +691,100 @@ void MainWindow::loadWindowIcon()
     }
 }
 
-void MainWindow::applyDarkTheme()
+bool MainWindow::isPaperTheme() const
 {
+    return m_themeId != QLatin1String("dark");
+}
+
+QFont MainWindow::defaultDocumentFont() const
+{
+    // Shipping default: typewriter / Courier-class monospace (user can switch via toolbar).
+    QFont font;
+    font.setFamilies({
+        QStringLiteral("Courier New"),
+        QStringLiteral("Liberation Mono"),
+        QStringLiteral("Noto Sans Mono"),
+        QStringLiteral("Courier"),
+        QStringLiteral("Courier Prime"),
+        QStringLiteral("Menlo"),
+        QStringLiteral("Monaco"),
+        QStringLiteral("DejaVu Sans Mono"),
+        QStringLiteral("monospace"),
+    });
+    font.setPointSize(16);
+    font.setStyleHint(QFont::TypeWriter);
+    font.setFixedPitch(true);
+    return font;
+}
+
+void MainWindow::applyDocumentDefaults()
+{
+    if (!m_editor) {
+        return;
+    }
+    const QFont font = defaultDocumentFont();
+    m_editor->document()->setDefaultFont(font);
+    QTextCharFormat fmt;
+    fmt.setFont(font);
+    fmt.setForeground(isPaperTheme() ? QColor(QStringLiteral("#1a1a1a"))
+                                      : QColor(QStringLiteral("#d4d4d4")));
+    m_editor->setCurrentCharFormat(fmt);
+    if (m_fontCombo) {
+        const QSignalBlocker b(m_fontCombo);
+        m_fontCombo->setCurrentFont(font);
+    }
+    if (m_fontSizeSpin) {
+        const QSignalBlocker b(m_fontSizeSpin);
+        m_fontSizeSpin->setValue(16);
+    }
+}
+
+void MainWindow::setThemePaper()
+{
+    if (m_themeId == QLatin1String("paper")) {
+        return;
+    }
+    m_themeId = QStringLiteral("paper");
+    applyTheme();
+    saveSettings();
+    syncViewActions();
+    updateFocusHighlight();
+    if (m_pageGuides) {
+        paintPageGuides();
+    }
+}
+
+void MainWindow::setThemeDark()
+{
+    if (m_themeId == QLatin1String("dark")) {
+        return;
+    }
+    m_themeId = QStringLiteral("dark");
+    applyTheme();
+    saveSettings();
+    syncViewActions();
+    updateFocusHighlight();
+    if (m_pageGuides) {
+        paintPageGuides();
+    }
+}
+
+void MainWindow::applyTheme()
+{
+    const bool paper = isPaperTheme();
+    const QString pageBg = paper ? QStringLiteral("#f7f4ef") : QStringLiteral("#1e1e1e");
+    const QString pageFg = paper ? QStringLiteral("#1a1a1a") : QStringLiteral("#d4d4d4");
+    const QString selBg = paper ? QStringLiteral("#c5d8f0") : QStringLiteral("#264f78");
+    const QString selFg = paper ? QStringLiteral("#000000") : QStringLiteral("#ffffff");
+
     const QString style = QStringLiteral(
         "QMainWindow { background-color: #1e1e1e; }"
         "QTextEdit {"
-        "  background-color: #1e1e1e;"
-        "  color: #d4d4d4;"
-        "  selection-background-color: #264f78;"
-        "  selection-color: #ffffff;"
-        "  font-family: 'Georgia', 'Times New Roman', serif;"
+        "  background-color: %1;"
+        "  color: %2;"
+        "  selection-background-color: %3;"
+        "  selection-color: %4;"
+        "  font-family: 'Courier New', 'Liberation Mono', 'Noto Sans Mono', 'Courier', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace;"
         "  font-size: 16pt;"
         "  padding: 48px 20%;"
         "}"
@@ -702,6 +838,29 @@ void MainWindow::applyDarkTheme()
         "  width: 1px;"
         "  margin: 4px 6px;"
         "}"
+        "QToolBar QFontComboBox, QToolBar QSpinBox {"
+        "  background-color: #1e1e1e;"
+        "  color: #d4d4d4;"
+        "  border: 1px solid #3c3c3c;"
+        "  border-radius: 3px;"
+        "  padding: 2px 4px;"
+        "  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;"
+        "  font-size: 11pt;"
+        "  min-height: 22px;"
+        "}"
+        "QToolBar QFontComboBox:hover, QToolBar QSpinBox:hover {"
+        "  border-color: #505050;"
+        "}"
+        "QToolBar QFontComboBox QAbstractItemView {"
+        "  background-color: #2d2d2d;"
+        "  color: #d4d4d4;"
+        "  selection-background-color: #264f78;"
+        "}"
+        "QToolBar QSpinBox::up-button, QToolBar QSpinBox::down-button {"
+        "  background-color: #3c3c3c;"
+        "  border: none;"
+        "  width: 14px;"
+        "}"
         "#findReplaceBar {"
         "  background-color: #252526;"
         "  border-bottom: 1px solid #3c3c3c;"
@@ -724,8 +883,15 @@ void MainWindow::applyDarkTheme()
         "}"
         "#findReplaceBar QCheckBox { background: transparent; border: none; }"
         "#findReplaceBar QPushButton:hover { background-color: #505050; }"
-    );
+    ).arg(pageBg, pageFg, selBg, selFg);
     setStyleSheet(style);
+
+    // Keep default char format colors aligned with the page theme for new typing.
+    if (m_editor) {
+        QTextCharFormat cur = m_editor->currentCharFormat();
+        cur.setForeground(QColor(pageFg));
+        m_editor->mergeCurrentCharFormat(cur);
+    }
 }
 
 void MainWindow::setChromeVisible(bool visible)
@@ -1011,7 +1177,8 @@ void MainWindow::updateFocusHighlight()
     QList<QTextEdit::ExtraSelection> extras;
 
     QTextCharFormat dimFmt;
-    dimFmt.setForeground(QColor(QStringLiteral("#5a5a5a")));
+    dimFmt.setForeground(isPaperTheme() ? QColor(QStringLiteral("#b0b0b0"))
+                                        : QColor(QStringLiteral("#5a5a5a")));
 
     if (range.first > 0) {
         QTextEdit::ExtraSelection before;
@@ -1217,6 +1384,36 @@ bool MainWindow::trySmartTypography(QKeyEvent *event)
     return false;
 }
 
+void MainWindow::onFontFamilyChosen(const QFont &font)
+{
+    if (!m_editor) {
+        return;
+    }
+    QTextCharFormat fmt;
+    fmt.setFontFamilies(font.families().isEmpty()
+                            ? QStringList{font.family()}
+                            : font.families());
+    // Preserve point size from spin (or current) — family change alone.
+    const qreal size = m_fontSizeSpin ? m_fontSizeSpin->value()
+                                      : m_editor->currentCharFormat().fontPointSize();
+    if (size > 0) {
+        fmt.setFontPointSize(size);
+    }
+    m_editor->mergeCurrentCharFormat(fmt);
+    m_editor->setFocus();
+}
+
+void MainWindow::onFontSizeChosen(int pointSize)
+{
+    if (!m_editor || pointSize < 1) {
+        return;
+    }
+    QTextCharFormat fmt;
+    fmt.setFontPointSize(pointSize);
+    m_editor->mergeCurrentCharFormat(fmt);
+    m_editor->setFocus();
+}
+
 void MainWindow::toggleBold()
 {
     QTextCharFormat fmt;
@@ -1290,6 +1487,26 @@ void MainWindow::syncFormatActions()
     if (m_italicAction) {
         const QSignalBlocker b(m_italicAction);
         m_italicAction->setChecked(italic);
+    }
+
+    if (m_fontCombo) {
+        const QSignalBlocker b(m_fontCombo);
+        QFont shown = fmt.font();
+        if (shown.family().isEmpty()) {
+            shown = m_editor->document()->defaultFont();
+        }
+        m_fontCombo->setCurrentFont(shown);
+    }
+    if (m_fontSizeSpin) {
+        const QSignalBlocker b(m_fontSizeSpin);
+        qreal pts = fmt.fontPointSize();
+        if (pts <= 0) {
+            pts = m_editor->document()->defaultFont().pointSizeF();
+        }
+        if (pts <= 0) {
+            pts = 16;
+        }
+        m_fontSizeSpin->setValue(int(pts + 0.5));
     }
 
     const int level = m_editor->textCursor().blockFormat().headingLevel();
@@ -1371,6 +1588,8 @@ bool MainWindow::openPath(const QString &path)
         m_meta.ensureDefaults();
     }
     setCurrentFile(path, fmt);
+    // Keep shipping default for new typing; loaded spans keep their own faces.
+    m_editor->document()->setDefaultFont(defaultDocumentFont());
     updateStats();
     syncFormatActions();
     updateFocusHighlight();
@@ -1676,7 +1895,7 @@ void MainWindow::paintPageGuides()
     QWidget *vp = m_editor->viewport();
     QPainter painter(vp);
     painter.setRenderHint(QPainter::Antialiasing, false);
-    QPen pen(QColor(80, 80, 80, 160));
+    QPen pen(isPaperTheme() ? QColor(160, 150, 140, 180) : QColor(80, 80, 80, 160));
     pen.setStyle(Qt::DotLine);
     painter.setPen(pen);
 
@@ -1769,6 +1988,12 @@ void MainWindow::onUpdateCheckFailed()
 
 void MainWindow::captureDemoScreenshots(const QString &dir)
 {
+    // Screenshots use the default paper theme (near-white page).
+    m_themeId = QStringLiteral("paper");
+    applyDocumentDefaults();
+    applyTheme();
+    syncViewActions();
+
     m_editor->setPlainText(
         QStringLiteral(
             "The rain settled over the harbor like a soft curtain.\n\n"
@@ -1844,6 +2069,37 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     }
 
 
+    // Fonts toolbar: paper page + family/size controls + mixed face sample.
+    {
+        m_focusMode = false;
+        updateFocusHighlight();
+        m_hideAwayPinned = true;
+        setChromeVisible(true);
+        m_editor->clear();
+        QTextCursor cursor(m_editor->document());
+        auto insertStyled = [&](const QString &family, int pt, const QString &text) {
+            QTextCharFormat fmt;
+            fmt.setFontFamilies({family});
+            fmt.setFontPointSize(pt);
+            fmt.setForeground(QColor(QStringLiteral("#1a1a1a")));
+            cursor.insertText(text, fmt);
+            cursor.insertBlock();
+        };
+        insertStyled(QStringLiteral("Liberation Mono"), 16,
+                     QStringLiteral("Liberation Mono — default typewriter body (Courier New when installed)."));
+        insertStyled(QStringLiteral("Courier Prime"), 16,
+                     QStringLiteral("Courier Prime — classic typewriter face."));
+        insertStyled(QStringLiteral("DejaVu Sans"), 16,
+                     QStringLiteral("DejaVu Sans — switch away via the font picker anytime."));
+        insertStyled(QStringLiteral("Noto Serif"), 18,
+                     QStringLiteral("Noto Serif 18pt — optional serif for long reading."));
+        m_editor->moveCursor(QTextCursor::Start);
+        syncFormatActions();
+        updateStats();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/fonts-toolbar.png"), "PNG");
+    }
+
     // 4) About dialog grab.
     QMessageBox about(this);
     about.setWindowTitle(QStringLiteral("About zwriter"));
@@ -1879,7 +2135,8 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         dlg.close();
     }
 
-    QCoreApplication::quit();
+    // Deferred exit so dialog teardown cannot keep the event loop alive under xvfb.
+    QTimer::singleShot(0, qApp, &QCoreApplication::quit);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -1928,7 +2185,26 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     if (watched == m_editor && event->type() == QEvent::KeyPress) {
         auto *ke = static_cast<QKeyEvent *>(event);
         if (trySmartTypography(ke)) {
+            if (m_keySounds) {
+                m_keySounds->playKey();
+            }
             return true;
+        }
+        // Mechanical typewriter clicks: printable typing + Return only.
+        // Skip pure navigation, modifiers alone, and chorded shortcuts.
+        if (m_keySounds && m_keySounds->isEnabled()) {
+            const int key = ke->key();
+            const Qt::KeyboardModifiers mods = ke->modifiers()
+                & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+            if (mods == Qt::NoModifier) {
+                if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+                    m_keySounds->playReturn();
+                } else if (key == Qt::Key_Backspace || key == Qt::Key_Delete) {
+                    m_keySounds->playKey();
+                } else if (!ke->text().isEmpty() && ke->text().at(0).isPrint()) {
+                    m_keySounds->playKey();
+                }
+            }
         }
     }
 

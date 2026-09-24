@@ -23,7 +23,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            qt6-base-dev cmake ninja-build g++ \
+            qt6-base-dev qt6-multimedia-dev cmake ninja-build g++ \
             unzip zip dpkg-dev
 
       - name: Configure

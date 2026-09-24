@@ -15,6 +15,8 @@ class QAction;
 class QTimer;
 class QMenu;
 class QPrinter;
+class QFontComboBox;
+class QSpinBox;
 class TypewriterSounds;
 class FindReplaceBar;
 class QTextTable;
@@ -44,6 +46,10 @@ private slots:
     void toggleBold();
     void toggleItalic();
     void applyHeading();
+    void onFontFamilyChosen(const QFont &font);
+    void onFontSizeChosen(int pointSize);
+    void setThemePaper();
+    void setThemeDark();
     void togglePageGuides();
     void toggleTypewriterScroll();
     void toggleFocusMode();
@@ -84,7 +90,9 @@ private slots:
     void onCursorMoved();
 
 private:
-    void applyDarkTheme();
+    void applyTheme();
+    void applyDocumentDefaults();
+    QFont defaultDocumentFont() const;
     void setChromeVisible(bool visible);
     void loadWindowIcon();
     void updateKeySoundsLabel();
@@ -124,6 +132,7 @@ private:
     void syncViewActions();
     QTextTable *currentTable() const;
     void updateTableActions();
+    bool isPaperTheme() const;
 
     QTextEdit *m_editor = nullptr;
     FindReplaceBar *m_findBar = nullptr;
@@ -136,6 +145,10 @@ private:
     QTimer *m_hideTimer = nullptr;
     QAction *m_boldAction = nullptr;
     QAction *m_italicAction = nullptr;
+    QFontComboBox *m_fontCombo = nullptr;
+    QSpinBox *m_fontSizeSpin = nullptr;
+    QAction *m_themePaperAction = nullptr;
+    QAction *m_themeDarkAction = nullptr;
     QAction *m_h1Action = nullptr;
     QAction *m_h2Action = nullptr;
     QAction *m_h3Action = nullptr;
@@ -172,4 +185,5 @@ private:
     bool m_focusSentence = false;     // false = paragraph scope
     bool m_smartQuotes = false;       // default OFF
     bool m_centering = false;         // re-entrancy guard for scroll
+    QString m_themeId = QStringLiteral("paper"); // paper (default) | dark
 };

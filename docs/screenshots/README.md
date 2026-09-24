@@ -10,3 +10,4 @@ Captured via `./build/zwriter --capture-screenshots docs/screenshots` (xvfb-run 
 | `about.png` | Help → About zwriter (version from PROJECT_VERSION) |
 | `editor-table.png` | Inserted QTextTable with cell editing (ODT/PDF-safe) |
 | `save-document.png` | Polished Save Document dialog — ODT default, sidebar, **New Folder**, type filter |
+| `fonts-toolbar.png` | Paper-white page + font family/size controls; sample text in typewriter + other faces |

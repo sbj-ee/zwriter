@@ -24,8 +24,10 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 
 ### Implemented now
 
-- **Hide-away formatting toolbar** (FocusWriter-style — not a permanent ribbon): bold, italic, paragraph / H1 / H2 / H3; reveal on mouse near top/bottom edge or Esc; hides again when the pointer leaves / after a short idle
-- **Hide-away File + View menus**: Open / Save / Save As / Recent / Export PDF / Print / Print Preview / Page Setup / Properties / Page Guides; View toggles for typewriter scroll, focus mode, smart quotes
+- **Hide-away formatting toolbar** (FocusWriter-style — not a permanent ribbon): **font family** (system `QFontComboBox`) + **font size** (pt spin), bold, italic, paragraph / H1 / H2 / H3; reveal on mouse near top/bottom edge or Esc; hides again when the pointer leaves / after a short idle; toolbar follows the caret’s current face/size
+- **Paper-white page** (default theme) — near-white writing surface + dark typewriter text; dark hide-away chrome; View → Theme → Paper / Dark room (persisted in QSettings)
+- **Default body face: typewriter / Courier-class monospace** (`Courier New` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts
+- **Hide-away File + View menus**: Open / Save / Save As / Recent / Export PDF / Print / Print Preview / Page Setup / Properties / Page Guides; View toggles for typewriter scroll, focus mode, smart quotes, **Theme (Paper / Dark room)**
 - **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
 - **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1)
 - **Export PDF…** (export-only — not a native edit/save format) via `QPrinter` PdfFormat
@@ -39,7 +41,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Recent files** — File → Open Recent; persisted via QSettings; stale paths cleared
 - **Smart quotes / dashes** (default **off**) — curly quotes and en/em dashes from ASCII while typing
 - Esc chrome pin/unpin, F11 fullscreen
-- Optional typewriter key-sound toggle (**default off**)
+- Optional typewriter key-sound toggle (**default off**) — mechanical `key.wav` click + `return.wav` carriage; typing/Return only (not arrow navigation)
 - Typewriter icon branding
 - **Tables** (QTextTable): Insert → Table… / toolbar; Tab between cells; add/remove row or column; ODT + PDF/print
 - **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
@@ -47,7 +49,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 
 ### Still roadmap / known limits
 
-- Themes pack, autosave + restore cursor, multi-document / sessions
+- Richer themes pack (beyond Paper / Dark room), autosave + restore cursor, multi-document / sessions
 - Daily word / time goal, spell-check, scene / chapter navigation
 - Richer ODT/RTF style round-trip; RTF is plain-text-oriented best-effort
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it
@@ -57,14 +59,16 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 ## v1 IN
 
 - Fullscreen / hide-away chrome
-- **Hide-away formatting toolbar** (bold / italic / headings)
+- **Hide-away formatting toolbar** (font family / size / bold / italic / headings)
+- **Paper-white page** default theme (dark chrome); Dark room optional
+- **Typewriter / Courier-class default body font** (system monospace fallbacks); user-selectable
 - **Bottom status bar** with live word + character counts + **reading time**
 - **Export PDF** (export-only)
 - **Print** + page setup + print preview (lean; no Word-style advanced print UI)
 - **Page guides** toggle
 - **Document Properties** (author / created / last edit; ODT metadata best-effort)
 - **ODT** native default save; **TXT** + basic **RTF** open/save
-- **Optional typewriter key sounds** (toggle, default **off**; swappable sample pack)
+- **Optional typewriter key sounds** (toggle, default **off**; bundled `assets/sounds/key.wav` + `return.wav` procedural placeholders; Qt Multimedia / QSoundEffect)
 - **Typewriter icon** branding
 - **Typewriter scrolling** (toggle, default **on**)
 - **Focus mode** (sentence or paragraph scope)
@@ -73,7 +77,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Smart quotes / dashes** (toggle, default **off**)
 - **Help → About** + **Check for Updates** (GitHub latest release)
 - **Tables** (insert, edit cells, add/remove row/column; ODT round-trip)
-- Themes
+- Themes (Paper default + Dark room; fuller packs later)
 - Autosave + restore cursor
 - Multi-document / sessions
 - Daily word / time goal
@@ -92,6 +96,9 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - Proprietary `.zwriter` format
 - DOCX (not required for v1)
 - Full Word Document Properties dump
+- Per-theme locked font packs / downloadable font store
+- OpenType feature UI
+- Word-style style gallery
 
 ## Formats
 

@@ -3,6 +3,7 @@
 #include <QStringView>
 
 #include <QFile>
+#include <QHash>
 #include <QIODevice>
 #include <QFileInfo>
 #include <QProcess>
@@ -143,17 +144,71 @@ QString plainToRtf(const QString &plain)
 }
 
 // Convert a slice of ODT content.xml into simple HTML for QTextDocument.
+// Parses automatic styles for font-family / size / weight / style so ODT
+// round-trip preserves the hide-away toolbar font choices.
 QString odtXmlToHtml(const QByteArray &xml)
 {
+    struct StyleInfo {
+        QString fontFamily;
+        QString fontSize; // e.g. "16pt"
+        bool bold = false;
+        bool italic = false;
+    };
+
+    QHash<QString, StyleInfo> styles;
+    {
+        QXmlStreamReader pass1(xml);
+        QString currentStyle;
+        while (!pass1.atEnd()) {
+            const auto token = pass1.readNext();
+            if (token == QXmlStreamReader::StartElement) {
+                const QStringView name = pass1.name();
+                if (name == QLatin1String("style")) {
+                    currentStyle = pass1.attributes().value(QStringLiteral("style:name")).toString();
+                } else if (name == QLatin1String("text-properties") && !currentStyle.isEmpty()) {
+                    StyleInfo info = styles.value(currentStyle);
+                    const auto attrs = pass1.attributes();
+                    QString family = attrs.value(QStringLiteral("fo:font-family")).toString();
+                    if (family.isEmpty()) {
+                        family = attrs.value(QStringLiteral("style:font-name")).toString();
+                    }
+                    family.remove(QLatin1Char('\''));
+                    if (!family.isEmpty()) {
+                        info.fontFamily = family;
+                    }
+                    const QString size = attrs.value(QStringLiteral("fo:font-size")).toString();
+                    if (!size.isEmpty()) {
+                        info.fontSize = size;
+                    }
+                    const QString weight = attrs.value(QStringLiteral("fo:font-weight")).toString().toLower();
+                    if (weight == QLatin1String("bold") || weight == QLatin1String("700")
+                        || weight == QLatin1String("800") || weight == QLatin1String("900")) {
+                        info.bold = true;
+                    }
+                    const QString fstyle = attrs.value(QStringLiteral("fo:font-style")).toString().toLower();
+                    if (fstyle == QLatin1String("italic") || fstyle == QLatin1String("oblique")) {
+                        info.italic = true;
+                    }
+                    styles.insert(currentStyle, info);
+                }
+            } else if (token == QXmlStreamReader::EndElement) {
+                if (pass1.name() == QLatin1String("style")) {
+                    currentStyle.clear();
+                }
+            }
+        }
+    }
+
     QXmlStreamReader reader(xml);
     QString html = QStringLiteral(
-        "<html><body style=\"font-family: Georgia, serif; font-size: 16pt; color: #d4d4d4;\">");
+        "<html><body style=\"font-family: 'Courier New', 'Liberation Mono', 'Noto Sans Mono', "
+        "Courier, Menlo, Monaco, 'DejaVu Sans Mono', monospace; font-size: 16pt; color: #1a1a1a;\">");
 
     int headingLevel = 0;
     bool inBold = false;
     bool inItalic = false;
     bool inP = false;
-    bool inSpan = false;
+    bool inStyleSpan = false;
 
     auto closeInline = [&]() {
         if (inItalic) {
@@ -164,9 +219,24 @@ QString odtXmlToHtml(const QByteArray &xml)
             html += QStringLiteral("</b>");
             inBold = false;
         }
+        if (inStyleSpan) {
+            html += QStringLiteral("</span>");
+            inStyleSpan = false;
+        }
     };
 
-    auto openParagraph = [&](int level) {
+    auto cssFromStyle = [&](const StyleInfo &info) -> QString {
+        QString css;
+        if (!info.fontFamily.isEmpty()) {
+            css += QStringLiteral("font-family:'%1';").arg(info.fontFamily.toHtmlEscaped());
+        }
+        if (!info.fontSize.isEmpty()) {
+            css += QStringLiteral("font-size:%1;").arg(info.fontSize.toHtmlEscaped());
+        }
+        return css;
+    };
+
+    auto openParagraph = [&](int level, const QString &styleName) {
         if (inP) {
             closeInline();
             html += (headingLevel > 0)
@@ -175,14 +245,27 @@ QString odtXmlToHtml(const QByteArray &xml)
         }
         headingLevel = level;
         inP = true;
+        const StyleInfo info = styles.value(styleName);
+        const QString css = cssFromStyle(info);
+        const QString styleAttr = css.isEmpty()
+            ? QString()
+            : QStringLiteral(" style=\"%1\"").arg(css);
         if (level == 1) {
-            html += QStringLiteral("<h1>");
+            html += QStringLiteral("<h1%1>").arg(styleAttr);
         } else if (level == 2) {
-            html += QStringLiteral("<h2>");
+            html += QStringLiteral("<h2%1>").arg(styleAttr);
         } else if (level >= 3) {
-            html += QStringLiteral("<h3>");
+            html += QStringLiteral("<h3%1>").arg(styleAttr);
         } else {
-            html += QStringLiteral("<p>");
+            html += QStringLiteral("<p%1>").arg(styleAttr);
+        }
+        if (info.bold) {
+            html += QStringLiteral("<b>");
+            inBold = true;
+        }
+        if (info.italic) {
+            html += QStringLiteral("<i>");
+            inItalic = true;
         }
     };
 
@@ -200,20 +283,33 @@ QString odtXmlToHtml(const QByteArray &xml)
                 if (level > 3) {
                     level = 3;
                 }
-                openParagraph(level);
+                const QString styleName =
+                    reader.attributes().value(QStringLiteral("text:style-name")).toString();
+                openParagraph(level, styleName);
             } else if (name == QLatin1String("p")) {
-                openParagraph(0);
+                const QString styleName =
+                    reader.attributes().value(QStringLiteral("text:style-name")).toString();
+                openParagraph(0, styleName);
             } else if (name == QLatin1String("span")) {
-                inSpan = true;
                 const QString style = reader.attributes().value(QStringLiteral("text:style-name")).toString();
-                // Style names are opaque; common LO exports use Strong/Emphasis-like
-                // automatic styles. Heuristic on style name substrings.
+                const StyleInfo info = styles.value(style);
+                const QString css = cssFromStyle(info);
+                if (!css.isEmpty()) {
+                    html += QStringLiteral("<span style=\"%1\">").arg(css);
+                    inStyleSpan = true;
+                }
                 const QString lower = style.toLower();
-                if (lower.contains(QLatin1String("bold")) || lower.contains(QLatin1String("strong"))) {
+                const bool bold = info.bold
+                    || lower.contains(QLatin1String("bold"))
+                    || lower.contains(QLatin1String("strong"));
+                const bool italic = info.italic
+                    || lower.contains(QLatin1String("italic"))
+                    || lower.contains(QLatin1String("emphas"));
+                if (bold) {
                     html += QStringLiteral("<b>");
                     inBold = true;
                 }
-                if (lower.contains(QLatin1String("italic")) || lower.contains(QLatin1String("emphas"))) {
+                if (italic) {
                     html += QStringLiteral("<i>");
                     inItalic = true;
                 }
@@ -230,8 +326,6 @@ QString odtXmlToHtml(const QByteArray &xml)
             const QStringView name = reader.name();
             if (name == QLatin1String("span")) {
                 closeInline();
-                inSpan = false;
-                Q_UNUSED(inSpan);
             } else if (name == QLatin1String("p") || name == QLatin1String("h")) {
                 closeInline();
                 if (inP) {

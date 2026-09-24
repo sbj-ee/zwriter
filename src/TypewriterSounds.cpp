@@ -1,6 +1,7 @@
 #include "TypewriterSounds.hpp"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QUrl>
 
@@ -8,21 +9,28 @@
 #  include <QSoundEffect>
 #endif
 
-TypewriterSounds::TypewriterSounds(QObject *parent)
-    : QObject(parent)
+QString TypewriterSounds::findSample(const QString &fileName)
 {
-    // Prefer shipped sample; fall back to a few conventional names.
     const QStringList candidates = {
-        QCoreApplication::applicationDirPath() + QStringLiteral("/assets/sounds/key.wav"),
-        QStringLiteral("assets/sounds/key.wav"),
-        QStringLiteral(":/sounds/key.wav"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/assets/sounds/") + fileName,
+        QStringLiteral("assets/sounds/") + fileName,
+        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(
+            QStringLiteral("../assets/sounds/") + fileName),
+        QStringLiteral(":/sounds/") + fileName,
     };
     for (const QString &path : candidates) {
         if (QFile::exists(path)) {
-            m_samplePath = path;
-            break;
+            return path;
         }
     }
+    return {};
+}
+
+TypewriterSounds::TypewriterSounds(QObject *parent)
+    : QObject(parent)
+{
+    m_keyPath = findSample(QStringLiteral("key.wav"));
+    m_returnPath = findSample(QStringLiteral("return.wav"));
 }
 
 TypewriterSounds::~TypewriterSounds() = default;
@@ -31,21 +39,26 @@ void TypewriterSounds::setEnabled(bool enabled)
 {
     m_enabled = enabled;
     if (m_enabled) {
-        ensureEffect();
+        ensureEffects();
     }
 }
 
-void TypewriterSounds::ensureEffect()
+void TypewriterSounds::ensureEffects()
 {
 #ifdef ZWRITER_HAS_MULTIMEDIA
-    if (m_effect || m_samplePath.isEmpty()) {
-        return;
+    if (!m_keyEffect && !m_keyPath.isEmpty()) {
+        m_keyEffect = new QSoundEffect(this);
+        m_keyEffect->setSource(QUrl::fromLocalFile(m_keyPath));
+        m_keyEffect->setVolume(0.40f);
     }
-    m_effect = new QSoundEffect(this);
-    m_effect->setSource(QUrl::fromLocalFile(m_samplePath));
-    m_effect->setVolume(0.35f); // tasteful, not cheesy
+    if (!m_returnEffect && !m_returnPath.isEmpty()) {
+        m_returnEffect = new QSoundEffect(this);
+        m_returnEffect->setSource(QUrl::fromLocalFile(m_returnPath));
+        m_returnEffect->setVolume(0.45f);
+    }
 #else
-    Q_UNUSED(m_samplePath);
+    Q_UNUSED(m_keyPath);
+    Q_UNUSED(m_returnPath);
 #endif
 }
 
@@ -55,9 +68,33 @@ void TypewriterSounds::playKey()
         return;
     }
 #ifdef ZWRITER_HAS_MULTIMEDIA
-    ensureEffect();
-    if (m_effect && m_effect->isLoaded()) {
-        m_effect->play();
+    ensureEffects();
+    if (m_keyEffect && m_keyEffect->status() != QSoundEffect::Error) {
+        // Restart quickly for rapid typing; QSoundEffect handles overlap poorly
+        // on some backends, so stop-then-play keeps latency low.
+        if (m_keyEffect->isPlaying()) {
+            m_keyEffect->stop();
+        }
+        m_keyEffect->play();
+    }
+#endif
+}
+
+void TypewriterSounds::playReturn()
+{
+    if (!m_enabled) {
+        return;
+    }
+#ifdef ZWRITER_HAS_MULTIMEDIA
+    ensureEffects();
+    if (m_returnEffect && m_returnEffect->status() != QSoundEffect::Error) {
+        if (m_returnEffect->isPlaying()) {
+            m_returnEffect->stop();
+        }
+        m_returnEffect->play();
+    } else {
+        // Fall back to key click if return sample missing.
+        playKey();
     }
 #endif
 }
