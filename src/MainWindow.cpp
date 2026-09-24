@@ -27,6 +27,13 @@
 #include <QFontComboBox>
 #include <QFontInfo>
 #include <QIcon>
+#include <QPushButton>
+#include "Theme.hpp"
+#include <QTextListFormat>
+#include <QTextList>
+#include <QGuiApplication>
+#include <QComboBox>
+#include <QClipboard>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
@@ -85,9 +92,11 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("zwriter"));
-    resize(900, 700);
     loadWindowIcon();
     loadSettings();
+    if (!restoreGeometry(QSettings().value(QStringLiteral("window/geometry")).toByteArray())) {
+        resize(1040, 760);
+    }
 
     m_meta.ensureDefaults();
 
@@ -169,17 +178,14 @@ MainWindow::MainWindow(QWidget *parent)
             &MainWindow::onUpdateCheckFailed);
 
     m_statsLabel = new QLabel(this);
-    m_keysLabel = new QLabel(this);
-    m_keysLabel->setCursor(Qt::PointingHandCursor);
-    m_keysLabel->setToolTip(QStringLiteral(
-        "Click or press Ctrl+Shift+K to toggle typewriter key sounds (default off)"));
-    statusBar()->addWidget(m_keysLabel);
     statusBar()->addPermanentWidget(m_statsLabel);
     statusBar()->setSizeGripEnabled(false);
 
+    createFormatActions();
     buildFileMenu();
+    buildEditMenu();
+    buildFormatMenu();
     buildViewMenu();
-    buildInsertMenu();
     buildHelpMenu();
     buildFormatToolbar();
 
@@ -202,27 +208,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_findBar, &FindReplaceBar::replaceAll, this, &MainWindow::replaceAll);
     connect(m_findBar, &FindReplaceBar::closeRequested, this, &MainWindow::hideFindBar);
 
-    auto *findAct = new QAction(QStringLiteral("Find…"), this);
-    findAct->setShortcut(QKeySequence::Find);
-    connect(findAct, &QAction::triggered, this, &MainWindow::showFind);
-    addAction(findAct);
-
-    auto *replaceAct = new QAction(QStringLiteral("Replace…"), this);
-    replaceAct->setShortcut(QKeySequence::Replace);
-    connect(replaceAct, &QAction::triggered, this, &MainWindow::showReplace);
-    addAction(replaceAct);
-
-    auto *findNextAct = new QAction(this);
-    findNextAct->setShortcut(QKeySequence::FindNext);
-    connect(findNextAct, &QAction::triggered, this, &MainWindow::findNext);
-    addAction(findNextAct);
-
-    auto *findPrevAct = new QAction(this);
-    findPrevAct->setShortcut(QKeySequence::FindPrevious);
-    connect(findPrevAct, &QAction::triggered, this, &MainWindow::findPrev);
-    addAction(findPrevAct);
-
-    m_keysLabel->installEventFilter(this);
     m_editor->installEventFilter(this);
     m_editor->viewport()->setMouseTracking(true);
     m_editor->viewport()->installEventFilter(this);
@@ -241,7 +226,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_dirty = false;
     syncViewActions();
     updateStats();
-    updateKeySoundsLabel();
     syncFormatActions();
     updateWindowTitle();
     updateFocusHighlight();
@@ -274,6 +258,7 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("view/focusSentence"), m_focusSentence);
     s.setValue(QStringLiteral("view/smartQuotes"), m_smartQuotes);
     s.setValue(QStringLiteral("view/chromePinned"), m_hideAwayPinned);
+    s.setValue(QStringLiteral("window/geometry"), saveGeometry());
     if (m_keySounds) {
         s.setValue(QStringLiteral("view/keySounds"), m_keySounds->isEnabled());
     }
@@ -346,9 +331,18 @@ void MainWindow::buildFileMenu()
 {
     m_fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
 
+    auto *newAct = m_fileMenu->addAction(QStringLiteral("&New"));
+    newAct->setShortcut(QKeySequence::New);
+    connect(newAct, &QAction::triggered, this, &MainWindow::fileNew);
+
     auto *openAct = m_fileMenu->addAction(QStringLiteral("&Open…"));
     openAct->setShortcut(QKeySequence::Open);
     connect(openAct, &QAction::triggered, this, &MainWindow::fileOpen);
+
+    m_recentMenu = m_fileMenu->addMenu(QStringLiteral("Open &Recent"));
+    rebuildRecentMenu();
+
+    m_fileMenu->addSeparator();
 
     auto *saveAct = m_fileMenu->addAction(QStringLiteral("&Save"));
     saveAct->setShortcut(QKeySequence::Save);
@@ -359,16 +353,10 @@ void MainWindow::buildFileMenu()
     connect(saveAsAct, &QAction::triggered, this, &MainWindow::fileSaveAs);
 
     m_fileMenu->addSeparator();
-    m_recentMenu = m_fileMenu->addMenu(QStringLiteral("Open &Recent"));
-    rebuildRecentMenu();
 
-    m_fileMenu->addSeparator();
-
-    auto *exportAct = m_fileMenu->addAction(QStringLiteral("&Export PDF…"));
+    auto *exportAct = m_fileMenu->addAction(QStringLiteral("&Export as PDF…"));
     exportAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
     connect(exportAct, &QAction::triggered, this, &MainWindow::exportPdf);
-
-    m_fileMenu->addSeparator();
 
     auto *printAct = m_fileMenu->addAction(QStringLiteral("&Print…"));
     printAct->setShortcut(QKeySequence::Print);
@@ -385,36 +373,256 @@ void MainWindow::buildFileMenu()
     auto *propsAct = m_fileMenu->addAction(QStringLiteral("Propert&ies…"));
     connect(propsAct, &QAction::triggered, this, &MainWindow::fileProperties);
 
-    m_pageGuidesAction = m_fileMenu->addAction(QStringLiteral("Page &Guides"));
-    m_pageGuidesAction->setCheckable(true);
-    m_pageGuidesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_G));
-    m_pageGuidesAction->setToolTip(QStringLiteral("Toggle page margin guides (Ctrl+G)"));
-    connect(m_pageGuidesAction, &QAction::triggered, this, &MainWindow::togglePageGuides);
-
     m_fileMenu->addSeparator();
-
-    auto *closeAct = m_fileMenu->addAction(QStringLiteral("&Close"));
-    closeAct->setShortcut(QKeySequence::Close);
-    connect(closeAct, &QAction::triggered, this, &QWidget::close);
 
     auto *quitAct = m_fileMenu->addAction(QStringLiteral("&Quit"));
     quitAct->setShortcut(QKeySequence::Quit);
     connect(quitAct, &QAction::triggered, this, &QWidget::close);
 
-    addAction(openAct);
-    addAction(saveAct);
-    addAction(saveAsAct);
-    addAction(exportAct);
-    addAction(printAct);
-    addAction(propsAct);
-    addAction(m_pageGuidesAction);
-    addAction(closeAct);
-    addAction(quitAct);
+    for (QAction *a : {newAct, openAct, saveAct, saveAsAct, exportAct, printAct, propsAct,
+                       quitAct}) {
+        addAction(a);
+    }
+}
+
+void MainWindow::buildEditMenu()
+{
+    m_editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
+
+    m_undoAction = m_editMenu->addAction(QStringLiteral("&Undo"));
+    m_undoAction->setShortcut(QKeySequence::Undo);
+    connect(m_undoAction, &QAction::triggered, m_editor, &QTextEdit::undo);
+
+    m_redoAction = m_editMenu->addAction(QStringLiteral("&Redo"));
+    m_redoAction->setShortcut(QKeySequence::Redo);
+    connect(m_redoAction, &QAction::triggered, m_editor, &QTextEdit::redo);
+
+    m_editMenu->addSeparator();
+
+    m_cutAction = m_editMenu->addAction(QStringLiteral("Cu&t"));
+    m_cutAction->setShortcut(QKeySequence::Cut);
+    connect(m_cutAction, &QAction::triggered, m_editor, &QTextEdit::cut);
+
+    m_copyAction = m_editMenu->addAction(QStringLiteral("&Copy"));
+    m_copyAction->setShortcut(QKeySequence::Copy);
+    connect(m_copyAction, &QAction::triggered, m_editor, &QTextEdit::copy);
+
+    auto *pasteAct = m_editMenu->addAction(QStringLiteral("&Paste"));
+    pasteAct->setShortcut(QKeySequence::Paste);
+    connect(pasteAct, &QAction::triggered, m_editor, &QTextEdit::paste);
+
+    auto *pastePlainAct = m_editMenu->addAction(QStringLiteral("Paste as Plain &Text"));
+    pastePlainAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+    connect(pastePlainAct, &QAction::triggered, this, &MainWindow::editPastePlain);
+
+    m_editMenu->addSeparator();
+
+    auto *selectAllAct = m_editMenu->addAction(QStringLiteral("Select &All"));
+    selectAllAct->setShortcut(QKeySequence::SelectAll);
+    connect(selectAllAct, &QAction::triggered, m_editor, &QTextEdit::selectAll);
+
+    m_editMenu->addSeparator();
+
+    auto *findAct = m_editMenu->addAction(QStringLiteral("&Find…"));
+    findAct->setShortcut(QKeySequence::Find);
+    connect(findAct, &QAction::triggered, this, &MainWindow::showFind);
+
+    auto *findNextAct = m_editMenu->addAction(QStringLiteral("Find &Next"));
+    findNextAct->setShortcut(QKeySequence::FindNext);
+    connect(findNextAct, &QAction::triggered, this, &MainWindow::findNext);
+
+    auto *findPrevAct = m_editMenu->addAction(QStringLiteral("Find Pre&vious"));
+    findPrevAct->setShortcut(QKeySequence::FindPrevious);
+    connect(findPrevAct, &QAction::triggered, this, &MainWindow::findPrev);
+
+    auto *replaceAct = m_editMenu->addAction(QStringLiteral("R&eplace…"));
+    replaceAct->setShortcut(QKeySequence::Replace);
+    connect(replaceAct, &QAction::triggered, this, &MainWindow::showReplace);
+
+    // Undo/redo/cut/copy availability follows the editor.
+    m_undoAction->setEnabled(false);
+    m_redoAction->setEnabled(false);
+    m_cutAction->setEnabled(false);
+    m_copyAction->setEnabled(false);
+    connect(m_editor, &QTextEdit::undoAvailable, m_undoAction, &QAction::setEnabled);
+    connect(m_editor, &QTextEdit::redoAvailable, m_redoAction, &QAction::setEnabled);
+    connect(m_editor, &QTextEdit::copyAvailable, m_cutAction, &QAction::setEnabled);
+    connect(m_editor, &QTextEdit::copyAvailable, m_copyAction, &QAction::setEnabled);
+
+    // The editor consumes its own standard shortcuts (ShortcutOverride); the
+    // window only needs the Find/Replace and paste-plain ones.
+    for (QAction *a : {findAct, findNextAct, findPrevAct, replaceAct, pastePlainAct}) {
+        addAction(a);
+    }
+}
+
+void MainWindow::createFormatActions()
+{
+    auto make = [this](const QString &text, const QKeySequence &keys, const QString &tip,
+                       bool checkable = false) {
+        auto *a = new QAction(text, this);
+        if (!keys.isEmpty()) {
+            a->setShortcut(keys);
+        }
+        a->setToolTip(tip);
+        a->setCheckable(checkable);
+        return a;
+    };
+
+    m_boldAction = make(QStringLiteral("&Bold"), QKeySequence::Bold,
+                        QStringLiteral("Bold (Ctrl+B)"), true);
+    m_italicAction = make(QStringLiteral("&Italic"), QKeySequence::Italic,
+                          QStringLiteral("Italic (Ctrl+I)"), true);
+    m_underlineAction = make(QStringLiteral("&Underline"), QKeySequence::Underline,
+                             QStringLiteral("Underline (Ctrl+U)"), true);
+    connect(m_boldAction, &QAction::triggered, this, &MainWindow::toggleBold);
+    connect(m_italicAction, &QAction::triggered, this, &MainWindow::toggleItalic);
+    connect(m_underlineAction, &QAction::triggered, this, &MainWindow::toggleUnderline);
+
+    // Paragraph styles (exclusive).
+    auto *styleGroup = new QActionGroup(this);
+    styleGroup->setExclusive(true);
+    struct Style { QAction **slot; const char *text; int level; int key; };
+    const Style styles[] = {
+        {&m_paragraphAction, "&Body Text", 0, Qt::Key_0},
+        {&m_h1Action, "Heading &1", 1, Qt::Key_1},
+        {&m_h2Action, "Heading &2", 2, Qt::Key_2},
+        {&m_h3Action, "Heading &3", 3, Qt::Key_3},
+    };
+    for (const Style &s : styles) {
+        QAction *a = make(QString::fromLatin1(s.text),
+                          QKeySequence(Qt::CTRL | Qt::ALT | static_cast<Qt::Key>(s.key)),
+                          QString::fromLatin1(s.text).remove(QLatin1Char('&')), true);
+        a->setData(s.level);
+        styleGroup->addAction(a);
+        *s.slot = a;
+    }
+    connect(styleGroup, &QActionGroup::triggered, this, [this](QAction *) { applyHeading(); });
+
+    // Alignment (exclusive).
+    auto *alignGroup = new QActionGroup(this);
+    alignGroup->setExclusive(true);
+    struct Align { QAction **slot; const char *text; const char *tip; int key; Qt::Alignment al; };
+    const Align aligns[] = {
+        {&m_alignLeftAction, "Align &Left", "Align left (Ctrl+L)", Qt::Key_L,
+         Qt::AlignLeft | Qt::AlignAbsolute},
+        {&m_alignCenterAction, "&Center", "Center (Ctrl+E)", Qt::Key_E, Qt::AlignHCenter},
+        {&m_alignRightAction, "Align &Right", "Align right (Ctrl+R)", Qt::Key_R,
+         Qt::AlignRight | Qt::AlignAbsolute},
+        {&m_alignJustifyAction, "&Justify", "Justify (Ctrl+J)", Qt::Key_J, Qt::AlignJustify},
+    };
+    for (const Align &al : aligns) {
+        QAction *a = make(QString::fromLatin1(al.text), QKeySequence(Qt::CTRL | al.key),
+                          QString::fromLatin1(al.tip), true);
+        a->setData(int(al.al));
+        alignGroup->addAction(a);
+        *al.slot = a;
+    }
+    connect(alignGroup, &QActionGroup::triggered, this, [this](QAction *a) {
+        m_editor->setAlignment(Qt::Alignment(a->data().toInt()));
+        m_editor->setFocus();
+    });
+
+    // Lists.
+    m_bulletListAction = make(QStringLiteral("&Bulleted List"),
+                              QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_B),
+                              QStringLiteral("Bulleted list (Ctrl+Shift+B)"), true);
+    m_numberListAction = make(QStringLiteral("&Numbered List"),
+                              QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N),
+                              QStringLiteral("Numbered list (Ctrl+Shift+N)"), true);
+    connect(m_bulletListAction, &QAction::triggered, this, [this](bool on) {
+        applyList(QTextListFormat::ListDisc, on);
+    });
+    connect(m_numberListAction, &QAction::triggered, this, [this](bool on) {
+        applyList(QTextListFormat::ListDecimal, on);
+    });
+
+    m_clearFormatAction = make(QStringLiteral("&Clear Formatting"),
+                               QKeySequence(Qt::CTRL | Qt::Key_Backslash),
+                               QStringLiteral("Clear formatting (Ctrl+\\)"));
+    connect(m_clearFormatAction, &QAction::triggered, this, &MainWindow::clearFormatting);
+
+    // Table structure (enabled only inside a table; see updateTableActions()).
+    m_tableInsertRowAction = new QAction(QStringLiteral("Insert &Row"), this);
+    connect(m_tableInsertRowAction, &QAction::triggered, this, &MainWindow::tableInsertRow);
+    m_tableInsertColAction = new QAction(QStringLiteral("Insert &Column"), this);
+    connect(m_tableInsertColAction, &QAction::triggered, this, &MainWindow::tableInsertColumn);
+    m_tableRemoveRowAction = new QAction(QStringLiteral("Remove Ro&w"), this);
+    connect(m_tableRemoveRowAction, &QAction::triggered, this, &MainWindow::tableRemoveRow);
+    m_tableRemoveColAction = new QAction(QStringLiteral("Remove Colu&mn"), this);
+    connect(m_tableRemoveColAction, &QAction::triggered, this, &MainWindow::tableRemoveColumn);
+}
+
+void MainWindow::buildFormatMenu()
+{
+    m_formatMenu = menuBar()->addMenu(QStringLiteral("F&ormat"));
+
+    m_formatMenu->addAction(m_boldAction);
+    m_formatMenu->addAction(m_italicAction);
+    m_formatMenu->addAction(m_underlineAction);
+    m_formatMenu->addSeparator();
+
+    auto *styleMenu = m_formatMenu->addMenu(QStringLiteral("Paragraph &Style"));
+    for (QAction *a : {m_paragraphAction, m_h1Action, m_h2Action, m_h3Action}) {
+        styleMenu->addAction(a);
+    }
+    auto *alignMenu = m_formatMenu->addMenu(QStringLiteral("&Align"));
+    for (QAction *a : {m_alignLeftAction, m_alignCenterAction, m_alignRightAction,
+                       m_alignJustifyAction}) {
+        alignMenu->addAction(a);
+    }
+    m_formatMenu->addAction(m_bulletListAction);
+    m_formatMenu->addAction(m_numberListAction);
+    m_formatMenu->addSeparator();
+
+    auto *tableAct = m_formatMenu->addAction(QStringLiteral("Insert Ta&ble…"));
+    tableAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
+    tableAct->setToolTip(QStringLiteral("Insert a table (Ctrl+Shift+I)"));
+    connect(tableAct, &QAction::triggered, this, &MainWindow::insertTable);
+    auto *tableMenu = m_formatMenu->addMenu(QStringLiteral("&Table"));
+    tableMenu->addAction(m_tableInsertRowAction);
+    tableMenu->addAction(m_tableInsertColAction);
+    tableMenu->addSeparator();
+    tableMenu->addAction(m_tableRemoveRowAction);
+    tableMenu->addAction(m_tableRemoveColAction);
+
+    auto *hfAct = m_formatMenu->addAction(QStringLiteral("&Header && Footer…"));
+    hfAct->setToolTip(QStringLiteral("Edit page header and footer (page numbers via {page} / {pages})"));
+    connect(hfAct, &QAction::triggered, this, &MainWindow::editHeaderFooter);
+    m_formatMenu->addSeparator();
+
+    m_formatMenu->addAction(m_clearFormatAction);
+
+    // Shortcuts must work with the menu closed and while a toolbar widget has focus.
+    for (QAction *a : {m_boldAction, m_italicAction, m_underlineAction,
+                       m_paragraphAction, m_h1Action, m_h2Action, m_h3Action,
+                       m_alignLeftAction, m_alignCenterAction, m_alignRightAction,
+                       m_alignJustifyAction, m_bulletListAction, m_numberListAction,
+                       m_clearFormatAction, tableAct, hfAct}) {
+        addAction(a);
+    }
+    updateTableActions();
 }
 
 void MainWindow::buildViewMenu()
 {
     m_viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
+
+    m_fullPageViewAction = m_viewMenu->addAction(QStringLiteral("Full &Page"));
+    m_fullPageViewAction->setCheckable(true);
+    m_fullPageViewAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
+    m_fullPageViewAction->setToolTip(
+        QStringLiteral("Show a centered paper page on the desk (Ctrl+Shift+P); off = continuous strip"));
+    connect(m_fullPageViewAction, &QAction::triggered, this, &MainWindow::toggleFullPageView);
+
+    m_pageGuidesAction = m_viewMenu->addAction(QStringLiteral("Page &Guides"));
+    m_pageGuidesAction->setCheckable(true);
+    // Ctrl+G is Find Next on Linux; keep guides on their own chord.
+    m_pageGuidesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G));
+    m_pageGuidesAction->setToolTip(QStringLiteral("Toggle page margin guides (Ctrl+Alt+G)"));
+    connect(m_pageGuidesAction, &QAction::triggered, this, &MainWindow::togglePageGuides);
+
+    m_viewMenu->addSeparator();
 
     m_typewriterScrollAction = m_viewMenu->addAction(QStringLiteral("&Typewriter Scroll"));
     m_typewriterScrollAction->setCheckable(true);
@@ -445,12 +653,26 @@ void MainWindow::buildViewMenu()
     connect(m_focusSentenceAction, &QAction::triggered, this,
             &MainWindow::setFocusScopeSentence);
 
-    m_fullPageViewAction = m_viewMenu->addAction(QStringLiteral("Full &Page"));
-    m_fullPageViewAction->setCheckable(true);
-    m_fullPageViewAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
-    m_fullPageViewAction->setToolTip(
-        QStringLiteral("Show a centered paper page on the desk (Ctrl+Shift+P); off = continuous strip"));
-    connect(m_fullPageViewAction, &QAction::triggered, this, &MainWindow::toggleFullPageView);
+    m_keySoundsAction = m_viewMenu->addAction(QStringLiteral("Typewriter Key S&ounds"));
+    m_keySoundsAction->setCheckable(true);
+    m_keySoundsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K));
+    m_keySoundsAction->setToolTip(
+        QStringLiteral("Play typewriter key clicks while typing (Ctrl+Shift+K, default off)"));
+    connect(m_keySoundsAction, &QAction::triggered, this, &MainWindow::toggleKeySounds);
+
+    m_viewMenu->addSeparator();
+
+    m_spellCheckAction = m_viewMenu->addAction(QStringLiteral("S&pell Check"));
+    m_spellCheckAction->setCheckable(true);
+    m_spellCheckAction->setToolTip(
+        QStringLiteral("Underline misspellings (Hunspell en_US); right-click for suggestions"));
+    connect(m_spellCheckAction, &QAction::triggered, this, &MainWindow::toggleSpellCheck);
+
+    m_smartQuotesAction = m_viewMenu->addAction(QStringLiteral("Smart &Quotes && Dashes"));
+    m_smartQuotesAction->setCheckable(true);
+    m_smartQuotesAction->setToolTip(
+        QStringLiteral("Curly quotes and em/en dashes from ASCII while typing (default off)"));
+    connect(m_smartQuotesAction, &QAction::triggered, this, &MainWindow::toggleSmartQuotes);
 
     m_viewMenu->addSeparator();
 
@@ -459,10 +681,10 @@ void MainWindow::buildViewMenu()
     themeGroup->setExclusive(true);
     m_themePaperAction = themeMenu->addAction(QStringLiteral("&Paper (default)"));
     m_themePaperAction->setCheckable(true);
-    m_themePaperAction->setToolTip(QStringLiteral("Near-white page, dark text — default writing surface"));
+    m_themePaperAction->setToolTip(QStringLiteral("Warm paper page and light chrome"));
     m_themeDarkAction = themeMenu->addAction(QStringLiteral("&Dark room"));
     m_themeDarkAction->setCheckable(true);
-    m_themeDarkAction->setToolTip(QStringLiteral("Dark canvas page (legacy)"));
+    m_themeDarkAction->setToolTip(QStringLiteral("Charcoal page and dark chrome"));
     themeGroup->addAction(m_themePaperAction);
     themeGroup->addAction(m_themeDarkAction);
     connect(m_themePaperAction, &QAction::triggered, this, &MainWindow::setThemePaper);
@@ -470,68 +692,20 @@ void MainWindow::buildViewMenu()
 
     m_viewMenu->addSeparator();
 
-    m_smartQuotesAction = m_viewMenu->addAction(QStringLiteral("&Smart Quotes / Dashes"));
-    m_smartQuotesAction->setCheckable(true);
-    m_smartQuotesAction->setToolTip(
-        QStringLiteral("Curly quotes and em/en dashes from ASCII while typing (default off)"));
-    connect(m_smartQuotesAction, &QAction::triggered, this, &MainWindow::toggleSmartQuotes);
-
-    m_spellCheckAction = m_viewMenu->addAction(QStringLiteral("S&pell Check"));
-    m_spellCheckAction->setCheckable(true);
-    m_spellCheckAction->setToolTip(
-        QStringLiteral("Underline misspellings (Hunspell en_US); right-click for suggestions"));
-    connect(m_spellCheckAction, &QAction::triggered, this, &MainWindow::toggleSpellCheck);
-
-    m_viewMenu->addSeparator();
-
-    m_alwaysShowChromeAction = m_viewMenu->addAction(QStringLiteral("Always Show &Toolbar"));
+    m_alwaysShowChromeAction = m_viewMenu->addAction(QStringLiteral("Always Show Tool&bar"));
     m_alwaysShowChromeAction->setCheckable(true);
     m_alwaysShowChromeAction->setToolTip(
         QStringLiteral("Keep the toolbar, menus and status bar visible (Esc); off = hide-away"));
     connect(m_alwaysShowChromeAction, &QAction::triggered, this, &MainWindow::setChromePinned);
 
-    m_keySoundsAction = m_viewMenu->addAction(QStringLiteral("Typewriter Key S&ounds"));
-    m_keySoundsAction->setCheckable(true);
-    m_keySoundsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K));
-    m_keySoundsAction->setToolTip(
-        QStringLiteral("Play typewriter key clicks while typing (Ctrl+Shift+K, default off)"));
-    connect(m_keySoundsAction, &QAction::triggered, this, &MainWindow::toggleKeySounds);
+    auto *fullscreenAct = m_viewMenu->addAction(QStringLiteral("Full &Screen"));
+    fullscreenAct->setShortcut(QKeySequence(Qt::Key_F11));
+    connect(fullscreenAct, &QAction::triggered, this, &MainWindow::toggleFullscreen);
 
-    addAction(m_typewriterScrollAction);
-    addAction(m_keySoundsAction);
-    addAction(m_focusModeAction);
-    addAction(m_fullPageViewAction);
-}
-
-
-
-void MainWindow::buildInsertMenu()
-{
-    m_insertMenu = menuBar()->addMenu(QStringLiteral("&Insert"));
-
-    auto *tableAct = m_insertMenu->addAction(QStringLiteral("&Table…"));
-    tableAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
-    tableAct->setToolTip(QStringLiteral("Insert a table (Ctrl+Shift+I)"));
-    connect(tableAct, &QAction::triggered, this, &MainWindow::insertTable);
-    addAction(tableAct);
-
-    auto *hfAct = m_insertMenu->addAction(QStringLiteral("&Header & Footer…"));
-    hfAct->setToolTip(QStringLiteral("Edit page header and footer (page numbers via {page} / {pages})"));
-    connect(hfAct, &QAction::triggered, this, &MainWindow::editHeaderFooter);
-    addAction(hfAct);
-
-    m_insertMenu->addSeparator();
-
-    m_tableInsertRowAction = m_insertMenu->addAction(QStringLiteral("Insert &Row"));
-    connect(m_tableInsertRowAction, &QAction::triggered, this, &MainWindow::tableInsertRow);
-    m_tableInsertColAction = m_insertMenu->addAction(QStringLiteral("Insert &Column"));
-    connect(m_tableInsertColAction, &QAction::triggered, this, &MainWindow::tableInsertColumn);
-    m_tableRemoveRowAction = m_insertMenu->addAction(QStringLiteral("Remove Ro&w"));
-    connect(m_tableRemoveRowAction, &QAction::triggered, this, &MainWindow::tableRemoveRow);
-    m_tableRemoveColAction = m_insertMenu->addAction(QStringLiteral("Remove Colu&mn"));
-    connect(m_tableRemoveColAction, &QAction::triggered, this, &MainWindow::tableRemoveColumn);
-
-    updateTableActions();
+    for (QAction *a : {m_typewriterScrollAction, m_focusModeAction, m_fullPageViewAction,
+                       m_pageGuidesAction, m_keySoundsAction, fullscreenAct}) {
+        addAction(a);
+    }
 }
 
 QTextTable *MainWindow::currentTable() const
@@ -797,7 +971,6 @@ void MainWindow::buildFormatToolbar()
     m_formatBar->setObjectName(QStringLiteral("formatBar"));
     m_formatBar->setMovable(false);
     m_formatBar->setFloatable(false);
-    m_formatBar->setIconSize(QSize(16, 16));
     m_formatBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
 
     m_fontCombo = new QFontComboBox(m_formatBar);
@@ -822,63 +995,40 @@ void MainWindow::buildFormatToolbar()
 
     m_formatBar->addSeparator();
 
-    m_boldAction = m_formatBar->addAction(QStringLiteral("Bold"));
-    m_boldAction->setCheckable(true);
-    m_boldAction->setShortcut(QKeySequence::Bold);
-    m_boldAction->setToolTip(QStringLiteral("Bold (Ctrl+B)"));
-    connect(m_boldAction, &QAction::triggered, this, &MainWindow::toggleBold);
-
-    m_italicAction = m_formatBar->addAction(QStringLiteral("Italic"));
-    m_italicAction->setCheckable(true);
-    m_italicAction->setShortcut(QKeySequence::Italic);
-    m_italicAction->setToolTip(QStringLiteral("Italic (Ctrl+I)"));
-    connect(m_italicAction, &QAction::triggered, this, &MainWindow::toggleItalic);
+    // B / I / U as typographic glyphs (the actions live in the Format menu too).
+    struct Glyph { QAction *action; const char *text; bool bold, italic, underline; };
+    const Glyph glyphs[] = {
+        {m_boldAction, "B", true, false, false},
+        {m_italicAction, "I", false, true, false},
+        {m_underlineAction, "U", false, false, true},
+    };
+    for (const Glyph &g : glyphs) {
+        g.action->setIconText(QString::fromLatin1(g.text));
+        m_formatBar->addAction(g.action);
+        if (QWidget *w = m_formatBar->widgetForAction(g.action)) {
+            QFont f = w->font();
+            f.setBold(g.bold);
+            f.setItalic(g.italic);
+            f.setUnderline(g.underline);
+            w->setFont(f);
+        }
+    }
 
     m_formatBar->addSeparator();
 
-    auto *headingGroup = new QActionGroup(this);
-    headingGroup->setExclusive(true);
-
-    m_paragraphAction = m_formatBar->addAction(QStringLiteral("P"));
-    m_paragraphAction->setCheckable(true);
-    m_paragraphAction->setToolTip(QStringLiteral("Paragraph"));
-    m_paragraphAction->setData(0);
-    headingGroup->addAction(m_paragraphAction);
-
-    m_h1Action = m_formatBar->addAction(QStringLiteral("H1"));
-    m_h1Action->setCheckable(true);
-    m_h1Action->setToolTip(QStringLiteral("Heading 1"));
-    m_h1Action->setData(1);
-    headingGroup->addAction(m_h1Action);
-
-    m_h2Action = m_formatBar->addAction(QStringLiteral("H2"));
-    m_h2Action->setCheckable(true);
-    m_h2Action->setToolTip(QStringLiteral("Heading 2"));
-    m_h2Action->setData(2);
-    headingGroup->addAction(m_h2Action);
-
-    m_h3Action = m_formatBar->addAction(QStringLiteral("H3"));
-    m_h3Action->setCheckable(true);
-    m_h3Action->setToolTip(QStringLiteral("Heading 3"));
-    m_h3Action->setData(3);
-    headingGroup->addAction(m_h3Action);
-
-    connect(headingGroup, &QActionGroup::triggered, this, [this](QAction *) {
-        applyHeading();
+    m_styleCombo = new QComboBox(m_formatBar);
+    m_styleCombo->setObjectName(QStringLiteral("styleCombo"));
+    m_styleCombo->setToolTip(QStringLiteral("Paragraph style"));
+    m_styleCombo->addItems({QStringLiteral("Body Text"), QStringLiteral("Heading 1"),
+                            QStringLiteral("Heading 2"), QStringLiteral("Heading 3")});
+    m_styleCombo->setFixedWidth(118);
+    m_formatBar->addWidget(m_styleCombo);
+    connect(m_styleCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
+        QAction *targets[] = {m_paragraphAction, m_h1Action, m_h2Action, m_h3Action};
+        if (index >= 0 && index < 4) {
+            targets[index]->trigger();
+        }
     });
-
-    m_formatBar->addSeparator();
-
-    auto *tableAction = m_formatBar->addAction(QStringLiteral("Table…"));
-    tableAction->setToolTip(QStringLiteral("Insert table (Ctrl+Shift+I)"));
-    connect(tableAction, &QAction::triggered, this, &MainWindow::insertTable);
-
-    auto *exportAction = m_formatBar->addAction(QStringLiteral("Export PDF…"));
-    exportAction->setToolTip(QStringLiteral("Export as PDF (Ctrl+Shift+E)"));
-    connect(exportAction, &QAction::triggered, this, &MainWindow::exportPdf);
-
-    addAction(m_boldAction);
-    addAction(m_italicAction);
 }
 
 void MainWindow::loadWindowIcon()
@@ -924,8 +1074,7 @@ void MainWindow::applyDocumentDefaults()
     m_editor->document()->setDefaultFont(font);
     QTextCharFormat fmt;
     fmt.setFont(font);
-    fmt.setForeground(isPaperTheme() ? QColor(QStringLiteral("#1a1a1a"))
-                                      : QColor(QStringLiteral("#d4d4d4")));
+    fmt.setForeground(Theme::colors(isPaperTheme()).pageFg);
     m_editor->setCurrentCharFormat(fmt);
     if (m_fontCombo) {
         const QSignalBlocker b(m_fontCombo);
@@ -969,142 +1118,24 @@ void MainWindow::setThemeDark()
 
 void MainWindow::applyTheme()
 {
-    const bool paper = isPaperTheme();
-    const QString pageBg = paper ? QStringLiteral("#f7f4ef") : QStringLiteral("#1e1e1e");
-    const QString pageFg = paper ? QStringLiteral("#1a1a1a") : QStringLiteral("#d4d4d4");
-    const QString selBg = paper ? QStringLiteral("#c5d8f0") : QStringLiteral("#264f78");
-    const QString selFg = paper ? QStringLiteral("#000000") : QStringLiteral("#ffffff");
-    // Desk behind the paper page (full page view). Continuous mode paints desk = page.
-    const QString deskBg = paper ? QStringLiteral("#6b6560") : QStringLiteral("#121212");
+    const ThemeColors c = Theme::colors(isPaperTheme());
+    setStyleSheet(Theme::styleSheet(c, m_fullPageView, kDefaultBodyPointSize));
 
-    const QString editorPad = m_fullPageView ? QStringLiteral("0px")
-                                             : QStringLiteral("48px 20%");
-    const QString deskColor = m_fullPageView ? deskBg : pageBg;
+    // Links in dialogs (About) use the accent colour, not default blue.
+    QPalette pal = QApplication::palette();
+    pal.setColor(QPalette::Link, c.accent);
+    pal.setColor(QPalette::LinkVisited, c.accent);
+    QApplication::setPalette(pal);
 
-    const QString style = QStringLiteral(
-        "QMainWindow { background-color: #1e1e1e; }"
-        "#desk { background-color: %5; }"
-        "#pageFrame {"
-        "  background-color: %1;"
-        "  border: 1px solid %6;"
-        "}"
-        "QTextEdit {"
-        "  background-color: %1;"
-        "  color: %2;"
-        "  selection-background-color: %3;"
-        "  selection-color: %4;"
-        "  font-family: 'Courier New', 'Courier', 'Courier Prime', 'Nimbus Mono PS', 'Liberation Mono', 'Noto Sans Mono', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace;"
-        "  font-size: %8pt;"
-        "  padding: %7;"
-        "}"
-        "QMenuBar {"
-        "  background-color: #252526;"
-        "  color: #d4d4d4;"
-        "  border-bottom: 1px solid #3c3c3c;"
-        "  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;"
-        "  font-size: 11pt;"
-        "}"
-        "QMenuBar::item:selected { background-color: #3c3c3c; }"
-        "QMenu {"
-        "  background-color: #2d2d2d;"
-        "  color: #d4d4d4;"
-        "  border: 1px solid #3c3c3c;"
-        "}"
-        "QMenu::item:selected { background-color: #264f78; }"
-        "QStatusBar {"
-        "  background-color: #252526;"
-        "  color: #a0a0a0;"
-        "  border-top: 1px solid #3c3c3c;"
-        "  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;"
-        "  font-size: 11pt;"
-        "}"
-        "QStatusBar QLabel { color: #a0a0a0; padding: 0 8px; }"
-        "QToolBar {"
-        "  background-color: #252526;"
-        "  border-bottom: 1px solid #3c3c3c;"
-        "  spacing: 4px;"
-        "  padding: 2px 6px;"
-        "}"
-        "QToolBar QToolButton {"
-        "  color: #d4d4d4;"
-        "  background: transparent;"
-        "  border: 1px solid transparent;"
-        "  border-radius: 3px;"
-        "  padding: 4px 8px;"
-        "  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;"
-        "  font-size: 11pt;"
-        "}"
-        "QToolBar QToolButton:hover {"
-        "  background-color: #3c3c3c;"
-        "  border-color: #505050;"
-        "}"
-        "QToolBar QToolButton:checked {"
-        "  background-color: #264f78;"
-        "  color: #ffffff;"
-        "}"
-        "QToolBar::separator {"
-        "  background-color: #3c3c3c;"
-        "  width: 1px;"
-        "  margin: 4px 6px;"
-        "}"
-        "QToolBar QFontComboBox, QToolBar QSpinBox {"
-        "  background-color: #1e1e1e;"
-        "  color: #d4d4d4;"
-        "  border: 1px solid #3c3c3c;"
-        "  border-radius: 3px;"
-        "  padding: 2px 4px;"
-        "  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;"
-        "  font-size: 11pt;"
-        "  min-height: 22px;"
-        "}"
-        "QToolBar QFontComboBox:hover, QToolBar QSpinBox:hover {"
-        "  border-color: #505050;"
-        "}"
-        "QToolBar QFontComboBox QAbstractItemView {"
-        "  background-color: #2d2d2d;"
-        "  color: #d4d4d4;"
-        "  selection-background-color: #264f78;"
-        "}"
-        "QToolBar QSpinBox::up-button, QToolBar QSpinBox::down-button {"
-        "  background-color: #3c3c3c;"
-        "  border: none;"
-        "  width: 14px;"
-        "}"
-        "#findReplaceBar {"
-        "  background-color: #252526;"
-        "  border-bottom: 1px solid #3c3c3c;"
-        "}"
-        "#findReplaceBar QLabel { color: #d4d4d4; }"
-        "#findReplaceBar QLineEdit {"
-        "  background-color: #1e1e1e;"
-        "  color: #d4d4d4;"
-        "  border: 1px solid #3c3c3c;"
-        "  border-radius: 3px;"
-        "  padding: 3px 6px;"
-        "  selection-background-color: #264f78;"
-        "}"
-        "#findReplaceBar QPushButton, #findReplaceBar QCheckBox {"
-        "  color: #d4d4d4;"
-        "  background-color: #3c3c3c;"
-        "  border: 1px solid #505050;"
-        "  border-radius: 3px;"
-        "  padding: 3px 8px;"
-        "}"
-        "#findReplaceBar QCheckBox { background: transparent; border: none; }"
-        "#findReplaceBar QPushButton:hover { background-color: #505050; }"
-    ).arg(pageBg, pageFg, selBg, selFg, deskColor,
-          paper ? QStringLiteral("#d4cfc7") : QStringLiteral("#3c3c3c"),
-          editorPad,
-          QString::number(kDefaultBodyPointSize));
-    setStyleSheet(style);
+    // The page's inner scroll area is transparent so the desk shows around the page.
     if (m_pageScroll) {
         m_pageScroll->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; border: none; }"));
     }
 
-    // Keep default char format colors aligned with the page theme for new typing.
+    // Keep the typing colour aligned with the page theme for new text.
     if (m_editor) {
         QTextCharFormat cur = m_editor->currentCharFormat();
-        cur.setForeground(QColor(pageFg));
+        cur.setForeground(c.pageFg);
         m_editor->mergeCurrentCharFormat(cur);
     }
 }
@@ -1190,12 +1221,6 @@ void MainWindow::updateStats()
             .arg(minutes));
 }
 
-void MainWindow::updateKeySoundsLabel()
-{
-    const bool on = m_keySounds && m_keySounds->isEnabled();
-    m_keysLabel->setText(on ? QStringLiteral("Keys: on") : QStringLiteral("Keys: off"));
-}
-
 void MainWindow::markDirty()
 {
     if (!m_dirty) {
@@ -1277,7 +1302,6 @@ void MainWindow::toggleKeySounds()
         return;
     }
     m_keySounds->setEnabled(!m_keySounds->isEnabled());
-    updateKeySoundsLabel();
     syncViewActions();
     saveSettings();
 }
@@ -1732,6 +1756,83 @@ void MainWindow::onFontSizeChosen(int pointSize)
     m_editor->setFocus();
 }
 
+void MainWindow::toggleUnderline()
+{
+    QTextCharFormat fmt;
+    fmt.setFontUnderline(m_underlineAction->isChecked());
+    m_editor->mergeCurrentCharFormat(fmt);
+    m_editor->setFocus();
+}
+
+void MainWindow::editPastePlain()
+{
+    m_editor->insertPlainText(QGuiApplication::clipboard()->text());
+    m_editor->setFocus();
+}
+
+void MainWindow::clearFormatting()
+{
+    QTextCharFormat plain;
+    plain.setFontFamilies(defaultDocumentFont().families());
+    plain.setFontPointSize(kDefaultBodyPointSize);
+    plain.setFontWeight(QFont::Normal);
+    plain.setFontItalic(false);
+    plain.setFontUnderline(false);
+    plain.setFontStrikeOut(false);
+    plain.setForeground(Theme::colors(isPaperTheme()).pageFg);
+    QTextCursor cursor = m_editor->textCursor();
+    if (cursor.hasSelection()) {
+        cursor.setCharFormat(plain);
+        m_editor->setTextCursor(cursor);
+    } else {
+        m_editor->setCurrentCharFormat(plain);
+    }
+    m_editor->setFocus();
+}
+
+void MainWindow::applyList(int style, bool on)
+{
+    QTextCursor cursor = m_editor->textCursor();
+    cursor.beginEditBlock();
+    if (on) {
+        QTextBlockFormat blockFmt = cursor.blockFormat();
+        QTextListFormat listFmt;
+        if (cursor.currentList()) {
+            listFmt = cursor.currentList()->format();
+        } else {
+            listFmt.setIndent(blockFmt.indent() + 1);
+            blockFmt.setIndent(0);
+            cursor.setBlockFormat(blockFmt);
+        }
+        listFmt.setStyle(static_cast<QTextListFormat::Style>(style));
+        cursor.createList(listFmt);
+    } else {
+        QTextBlockFormat plain;
+        plain.setObjectIndex(-1);
+        cursor.mergeBlockFormat(plain);
+    }
+    cursor.endEditBlock();
+    syncFormatActions();
+    m_editor->setFocus();
+}
+
+void MainWindow::fileNew()
+{
+    if (!maybeSave()) {
+        return;
+    }
+    m_editor->clear();
+    m_meta = DocumentMeta{};
+    m_meta.ensureDefaults();
+    applyDocumentDefaults();
+    setCurrentFile(QString(), DocumentIo::Format::Odt);
+    m_editor->document()->setModified(false);
+    updateStats();
+    syncFormatActions();
+    updateFocusHighlight();
+    m_editor->setFocus();
+}
+
 void MainWindow::toggleBold()
 {
     QTextCharFormat fmt;
@@ -1760,12 +1861,6 @@ void MainWindow::applyHeading()
     }
 
     const int level = act->data().toInt();
-    QTextCursor cursor = m_editor->textCursor();
-    cursor.beginEditBlock();
-
-    QTextBlockFormat blockFmt = cursor.blockFormat();
-    blockFmt.setHeadingLevel(level);
-    cursor.mergeBlockFormat(blockFmt);
 
     QTextCharFormat charFmt;
     if (level == 0) {
@@ -1781,10 +1876,34 @@ void MainWindow::applyHeading()
         charFmt.setFontPointSize(14);
         charFmt.setFontWeight(QFont::DemiBold);
     }
-    cursor.mergeBlockCharFormat(charFmt);
+
+    // Apply to every block the selection touches. The style has to reach the
+    // text runs themselves: typed text carries an explicit font, which would
+    // otherwise override a block-level format.
+    QTextCursor cursor = m_editor->textCursor();
+    const int first = cursor.selectionStart();
+    const int last = cursor.selectionEnd();
+    cursor.beginEditBlock();
+    QTextCursor walk(m_editor->document());
+    walk.setPosition(first);
+    while (true) {
+        QTextBlockFormat blockFmt = walk.blockFormat();
+        blockFmt.setHeadingLevel(level);
+        walk.setBlockFormat(blockFmt);
+        walk.mergeBlockCharFormat(charFmt);
+        QTextCursor text(walk.block());
+        text.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+        text.mergeCharFormat(charFmt);
+        if (walk.block().next().isValid() && walk.block().next().position() <= last) {
+            walk.setPosition(walk.block().next().position());
+        } else {
+            break;
+        }
+    }
     cursor.endEditBlock();
 
-    m_editor->setTextCursor(cursor);
+    // Keep typing in the new style.
+    m_editor->mergeCurrentCharFormat(charFmt);
     m_editor->setFocus();
 }
 
@@ -1805,6 +1924,41 @@ void MainWindow::syncFormatActions()
     if (m_italicAction) {
         const QSignalBlocker b(m_italicAction);
         m_italicAction->setChecked(italic);
+    }
+    if (m_underlineAction) {
+        const QSignalBlocker b(m_underlineAction);
+        m_underlineAction->setChecked(fmt.fontUnderline());
+    }
+
+    const Qt::Alignment al = m_editor->alignment();
+    QAction *alignAct = m_alignLeftAction;
+    if (al & Qt::AlignHCenter) {
+        alignAct = m_alignCenterAction;
+    } else if (al & Qt::AlignRight) {
+        alignAct = m_alignRightAction;
+    } else if (al & Qt::AlignJustify) {
+        alignAct = m_alignJustifyAction;
+    }
+    for (QAction *a : {m_alignLeftAction, m_alignCenterAction, m_alignRightAction,
+                       m_alignJustifyAction}) {
+        if (a) {
+            const QSignalBlocker b(a);
+            a->setChecked(a == alignAct);
+        }
+    }
+
+    const QTextList *list = m_editor->textCursor().currentList();
+    const auto listStyle = list ? list->format().style() : QTextListFormat::ListStyleUndefined;
+    const bool bullets = listStyle == QTextListFormat::ListDisc
+        || listStyle == QTextListFormat::ListCircle || listStyle == QTextListFormat::ListSquare;
+    const bool numbers = list && !bullets && listStyle != QTextListFormat::ListStyleUndefined;
+    if (m_bulletListAction) {
+        const QSignalBlocker b(m_bulletListAction);
+        m_bulletListAction->setChecked(bullets);
+    }
+    if (m_numberListAction) {
+        const QSignalBlocker b(m_numberListAction);
+        m_numberListAction->setChecked(numbers);
     }
 
     if (m_fontCombo) {
@@ -1843,6 +1997,10 @@ void MainWindow::syncFormatActions()
         const QSignalBlocker b(a);
         a->setChecked(a == checked);
     }
+    if (m_styleCombo) {
+        const QSignalBlocker b(m_styleCombo);
+        m_styleCombo->setCurrentIndex(qBound(0, level, 3));
+    }
 }
 
 bool MainWindow::maybeSave()
@@ -1850,17 +2008,22 @@ bool MainWindow::maybeSave()
     if (!m_dirty) {
         return true;
     }
-    const auto ret = QMessageBox::question(
-        this,
-        QStringLiteral("zwriter"),
-        QStringLiteral("Save changes before continuing?"),
-        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-        QMessageBox::Save);
-    if (ret == QMessageBox::Cancel) {
-        return false;
-    }
-    if (ret == QMessageBox::Discard) {
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::NoIcon);
+    box.setWindowTitle(QStringLiteral("zwriter"));
+    box.setText(QStringLiteral("Save changes before continuing?"));
+    box.setInformativeText(QStringLiteral("Your changes will be lost if you don’t save them."));
+    QPushButton *save = box.addButton(QStringLiteral("&Save"), QMessageBox::AcceptRole);
+    QPushButton *discard = box.addButton(QStringLiteral("Do&n’t Save"), QMessageBox::DestructiveRole);
+    QPushButton *cancel = box.addButton(QStringLiteral("Cancel"), QMessageBox::RejectRole);
+    box.setDefaultButton(save);
+    box.setEscapeButton(cancel);
+    box.exec();
+    if (box.clickedButton() == discard) {
         return true;
+    }
+    if (box.clickedButton() != save) {
+        return false;
     }
     fileSave();
     return !m_dirty;
@@ -2908,21 +3071,11 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
         event->accept();
         return;
     }
-    if (event->key() == Qt::Key_F11) {
-        toggleFullscreen();
-        event->accept();
-        return;
-    }
     QMainWindow::keyPressEvent(event);
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_keysLabel && event->type() == QEvent::MouseButtonRelease) {
-        toggleKeySounds();
-        return true;
-    }
-
     if (watched == m_desk && event->type() == QEvent::Resize && m_fullPageView && !m_centering) {
         // Defer so we don't re-enter layout mid-resize.
         QTimer::singleShot(0, this, [this]() {

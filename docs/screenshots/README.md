@@ -4,7 +4,7 @@ Captured via `./build/zwriter --capture-screenshots docs/screenshots` (xvfb-run 
 
 | File | Shows |
 |---|---|
-| `editor-chrome.png` | Hide-away File/View/Help menus, format toolbar, status bar (words · chars · ~min, Keys: off) |
+| `editor-chrome.png` | File / Edit / Format / View / Help menus, formatting toolbar, status bar (words · chars · ~min) |
 | `editor-focus.png` | Focus mode — current paragraph bright, others dimmed |
 | `find-bar.png` | Find bar (Ctrl+F) with match highlight + focus mode |
 | `about.png` | Help → About zwriter (version from PROJECT_VERSION) |

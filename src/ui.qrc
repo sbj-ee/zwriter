@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file>ui/arrow-down-paper.png</file>
+        <file>ui/arrow-up-paper.png</file>
+        <file>ui/arrow-down-dark.png</file>
+        <file>ui/arrow-up-dark.png</file>
+    </qresource>
+</RCC>

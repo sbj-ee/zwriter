@@ -24,16 +24,16 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 
 ### Implemented now
 
-- **Hide-away formatting toolbar** (FocusWriter-style — not a permanent ribbon): **font family** (system `QFontComboBox`) + **font size** (pt spin), bold, italic, paragraph / H1 / H2 / H3; reveal on mouse near top/bottom edge or Esc; hides again when the pointer leaves / after a short idle; toolbar follows the caret’s current face/size
-- **Paper-white page** (default theme) — near-white writing surface + dark typewriter text; dark hide-away chrome; View → Theme → Paper / Dark room (persisted in QSettings)
+- **Quiet formatting toolbar** (auto-hide optional; shown by default): font family + size, **B / I / U**, and a paragraph-style dropdown (Body / Heading 1–3). Everything else — alignment, lists, tables, clear formatting — is in the Format menu
+- **Paper and ink** (default) or **Dark room** theme — the whole window follows the theme (warm light chrome with a paper page, or calm charcoal); View → Theme (persisted in QSettings). Slim scrollbars, roomy menus, window size and position remembered
 - **Full Page view** (default **on**) — centered paper page on a desk background at **true physical size** (mm → DIPs via logical DPI; scroll if the window is smaller); shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF use the same page metrics; View → Full Page (Ctrl+Shift+P); off = continuous strip
 - **Default body face: typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Courier` → `Courier Prime` → `Nimbus Mono PS` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
-- **Hide-away File + View menus**: Open / Save / Save As / Recent / Export PDF / Print / Print Preview / Page Setup / Properties / Page Guides; View toggles for **Full Page**, typewriter scroll, focus mode, smart quotes, **Theme (Paper / Dark room)**
+- **Five menus, nothing extra**: **File** (New / Open / Recent / Save / Export PDF / Print / Page Setup / Properties / Quit), **Edit** (Undo–Redo, Cut/Copy/Paste, Paste as Plain Text, Find / Replace), **Format** (B/I/U, Paragraph Style, Align, Lists, Insert Table, Table rows/columns, Header & Footer, Clear Formatting), **View** (Full Page, Page Guides, Typewriter Scroll, Focus Mode, Key Sounds, Spell Check, Smart Quotes, Theme, Always Show Toolbar, Full Screen), **Help**
 - **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
 - **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1)
 - **Export PDF…** (export-only — not a native edit/save format) via `QPrinter` PdfFormat
 - **Print options** (lean): native OS print dialog, page setup (paper / orientation / margins; default **A4**), print preview; paper size persisted in QSettings
-- **Page guides** toggle (Ctrl+G) — simple column margin guides, not a Word ruler
+- **Page guides** toggle (Ctrl+Alt+G) — simple column margin guides, not a Word ruler
 - **Bottom status bar** with live **word count**, **character count**, and **reading time** (~N min at 225 WPM)
 - **Document Properties** (Author, Created, Last edit); in-memory always; **ODT meta.xml** round-trip best-effort
 - **Typewriter scrolling** (default **on**) — caret stays vertically centered while typing/navigating
@@ -44,8 +44,8 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - Esc chrome pin/unpin, F11 fullscreen
 - Optional typewriter key-sound toggle (**default off**) — old-manual-typewriter `key-1..6.wav` strikes (random variant per key), `space.wav` for Space/Backspace, and `return.wav` carriage slide and bell; typing/Return only (not arrow navigation)
 - Typewriter icon branding
-- **Tables** (QTextTable): Insert → Table… / toolbar; Tab between cells; add/remove row or column; ODT + PDF/print
-- **Header & Footer** (Insert → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; default footer center `{page}`
+- **Tables** (QTextTable): Format → Insert Table…; Tab between cells; add/remove row or column; ODT + PDF/print
+- **Header & Footer** (Format → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; default footer center `{page}`
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
 - **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
 - CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg`)
@@ -63,7 +63,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 ## v1 IN
 
 - Fullscreen / hide-away chrome
-- **Hide-away formatting toolbar** (font family / size / bold / italic / headings)
+- Quiet formatting toolbar (font family / size / B I U / paragraph style)
 - **Paper-white page** default theme (dark chrome); Dark room optional
 - **Full Page view** (default on) — A4 at true screen DIP size on desk (Page Setup can change size); continuous strip when off
 - **Courier default body font at 12 pt** (Courier-class monospace fallbacks); user-selectable
@@ -191,8 +191,14 @@ cd build && cpack -G DragNDrop
 | `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` | Open / Save / Save As (default filter ODT) |
 | `Ctrl+F` / `Ctrl+H` | Find / Replace |
 | `F3` / `Shift+F3` | Find next / previous |
-| `Ctrl+B` / `Ctrl+I` | Bold / italic |
-| `Ctrl+G` | Toggle page guides |
+| `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Bold / italic / underline |
+| `Ctrl+Alt+0` … `3` | Body text / Heading 1–3 |
+| `Ctrl+L` / `Ctrl+E` / `Ctrl+R` / `Ctrl+J` | Align left / center / right / justify |
+| `Ctrl+Shift+B` / `Ctrl+Shift+N` | Bulleted / numbered list |
+| `Ctrl+\` | Clear formatting |
+| `Ctrl+N` | New document |
+| `Ctrl+Shift+V` | Paste as plain text |
+| `Ctrl+Alt+G` | Toggle page guides |
 | `Ctrl+Shift+P` | Toggle Full Page view (default on) |
 | `Ctrl+Shift+E` | Export PDF… |
 | `Ctrl+P` | Print… |

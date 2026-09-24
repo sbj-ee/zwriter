@@ -45,7 +45,9 @@ int main(int argc, char *argv[])
     }
 
     MainWindow window;
-    window.resize(960, 700);
+    if (!captureDir.isEmpty()) {
+        window.resize(960, 700); // fixed size for reproducible screenshots
+    }
     window.show();
 
     if (!captureDir.isEmpty()) {
