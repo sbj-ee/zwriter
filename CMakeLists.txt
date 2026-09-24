@@ -57,6 +57,10 @@ add_executable(zwriter
   src/InsertTableDialog.hpp
   src/HeaderFooterDialog.cpp
   src/HeaderFooterDialog.hpp
+  src/SpellChecker.cpp
+  src/SpellChecker.hpp
+  src/SpellHighlighter.cpp
+  src/SpellHighlighter.hpp
 )
 
 target_link_libraries(zwriter PRIVATE Qt6::Widgets Qt6::PrintSupport Qt6::Network)
@@ -77,6 +81,29 @@ if(TARGET Qt6::Multimedia)
   message(STATUS "zwriter: Qt6 Multimedia found — typewriter key sounds enabled")
 else()
   message(STATUS "zwriter: Qt6 Multimedia not found — key-sound toggle stubs as no-op")
+endif()
+
+# Optional Hunspell spell-check (en_US system dictionary).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+  pkg_check_modules(HUNSPELL IMPORTED_TARGET hunspell)
+endif()
+if(TARGET PkgConfig::HUNSPELL)
+  target_link_libraries(zwriter PRIVATE PkgConfig::HUNSPELL)
+  target_compile_definitions(zwriter PRIVATE ZWRITER_HAS_HUNSPELL=1)
+  message(STATUS "zwriter: Hunspell found — spell check enabled")
+else()
+  # Fallback: try brew / manual paths without pkg-config.
+  find_path(HUNSPELL_INCLUDE_DIR hunspell/hunspell.hxx)
+  find_library(HUNSPELL_LIBRARY NAMES hunspell-1.7 hunspell)
+  if(HUNSPELL_INCLUDE_DIR AND HUNSPELL_LIBRARY)
+    target_include_directories(zwriter PRIVATE ${HUNSPELL_INCLUDE_DIR})
+    target_link_libraries(zwriter PRIVATE ${HUNSPELL_LIBRARY})
+    target_compile_definitions(zwriter PRIVATE ZWRITER_HAS_HUNSPELL=1)
+    message(STATUS "zwriter: Hunspell found (manual) — spell check enabled")
+  else()
+    message(STATUS "zwriter: Hunspell not found — spell check stubs as no-op")
+  endif()
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.

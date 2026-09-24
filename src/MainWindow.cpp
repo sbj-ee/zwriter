@@ -3,6 +3,8 @@
 #include "DocumentMeta.hpp"
 #include "FindReplaceBar.hpp"
 #include "HeaderFooterDialog.hpp"
+#include "SpellChecker.hpp"
+#include "SpellHighlighter.hpp"
 #include "InsertTableDialog.hpp"
 #include "PropertiesDialog.hpp"
 #include "TypewriterSounds.hpp"
@@ -14,6 +16,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
+#include <QContextMenuEvent>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
@@ -148,6 +151,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_keySounds = new TypewriterSounds(this);
     m_updateChecker = new UpdateChecker(this);
+    m_spellChecker = new SpellChecker(this);
+    m_spellChecker->setEnabled(m_spellCheck);
+    m_spellHighlighter = new SpellHighlighter(m_editor->document(), m_spellChecker);
+    m_editor->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_editor, &QWidget::customContextMenuRequested,
+            this, &MainWindow::showEditorContextMenu);
     connect(m_updateChecker, &UpdateChecker::updateAvailable, this,
             &MainWindow::onUpdateAvailable);
     connect(m_updateChecker, &UpdateChecker::upToDate, this,
@@ -241,6 +250,7 @@ void MainWindow::loadSettings()
     m_focusMode = s.value(QStringLiteral("view/focusMode"), false).toBool();
     m_focusSentence = s.value(QStringLiteral("view/focusSentence"), false).toBool();
     m_smartQuotes = s.value(QStringLiteral("view/smartQuotes"), false).toBool();
+    m_spellCheck = s.value(QStringLiteral("view/spellCheck"), true).toBool();
     m_fullPageView = s.value(QStringLiteral("view/fullPageView"), true).toBool();
     m_themeId = s.value(QStringLiteral("theme/id"), QStringLiteral("paper")).toString();
     if (m_themeId != QLatin1String("dark")) {
@@ -258,6 +268,7 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("view/focusMode"), m_focusMode);
     s.setValue(QStringLiteral("view/focusSentence"), m_focusSentence);
     s.setValue(QStringLiteral("view/smartQuotes"), m_smartQuotes);
+    s.setValue(QStringLiteral("view/spellCheck"), m_spellCheck);
     s.setValue(QStringLiteral("view/fullPageView"), m_fullPageView);
     s.setValue(QStringLiteral("theme/id"), m_themeId);
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
@@ -443,6 +454,12 @@ void MainWindow::buildViewMenu()
     m_smartQuotesAction->setToolTip(
         QStringLiteral("Curly quotes and em/en dashes from ASCII while typing (default off)"));
     connect(m_smartQuotesAction, &QAction::triggered, this, &MainWindow::toggleSmartQuotes);
+
+    m_spellCheckAction = m_viewMenu->addAction(QStringLiteral("S&pell Check"));
+    m_spellCheckAction->setCheckable(true);
+    m_spellCheckAction->setToolTip(
+        QStringLiteral("Underline misspellings (Hunspell en_US); right-click for suggestions"));
+    connect(m_spellCheckAction, &QAction::triggered, this, &MainWindow::toggleSpellCheck);
 
     addAction(m_typewriterScrollAction);
     addAction(m_focusModeAction);
@@ -693,6 +710,16 @@ void MainWindow::syncViewActions()
     if (m_smartQuotesAction) {
         const QSignalBlocker b(m_smartQuotesAction);
         m_smartQuotesAction->setChecked(m_smartQuotes);
+    }
+    if (m_spellCheckAction) {
+        const QSignalBlocker b(m_spellCheckAction);
+        m_spellCheckAction->setChecked(m_spellCheck);
+        const bool avail = m_spellChecker && m_spellChecker->isAvailable();
+        m_spellCheckAction->setEnabled(avail);
+        if (!avail) {
+            m_spellCheckAction->setToolTip(
+                QStringLiteral("Spell check unavailable (install Hunspell + en_US dictionary)"));
+        }
     }
     if (m_fullPageViewAction) {
         const QSignalBlocker b(m_fullPageViewAction);
@@ -1240,6 +1267,100 @@ void MainWindow::toggleSmartQuotes()
 {
     m_smartQuotes = m_smartQuotesAction && m_smartQuotesAction->isChecked();
     saveSettings();
+}
+
+void MainWindow::toggleSpellCheck()
+{
+    m_spellCheck = m_spellCheckAction && m_spellCheckAction->isChecked();
+    if (m_spellChecker) {
+        m_spellChecker->setEnabled(m_spellCheck);
+    }
+    if (m_spellHighlighter) {
+        m_spellHighlighter->refreshAll();
+    }
+    saveSettings();
+}
+
+void MainWindow::showEditorContextMenu(const QPoint &pos)
+{
+    if (!m_editor) {
+        return;
+    }
+
+    QMenu *menu = m_editor->createStandardContextMenu(pos);
+    if (!menu) {
+        menu = new QMenu(m_editor);
+    }
+
+    if (m_spellChecker && m_spellChecker->isEnabled() && m_spellChecker->isAvailable()) {
+        QTextCursor cursor = m_editor->cursorForPosition(pos);
+        cursor.select(QTextCursor::WordUnderCursor);
+        const QString word = cursor.selectedText().trimmed();
+        bool hasLetter = false;
+        for (const QChar &ch : word) {
+            if (ch.isLetter()) {
+                hasLetter = true;
+                break;
+            }
+        }
+        if (hasLetter && !m_spellChecker->isCorrect(word)) {
+            QAction *anchor = menu->actions().isEmpty() ? nullptr : menu->actions().constFirst();
+            auto insertBefore = [&](QAction *action) {
+                if (anchor) {
+                    menu->insertAction(anchor, action);
+                } else {
+                    menu->addAction(action);
+                }
+            };
+
+            QList<QAction *> toInsert;
+            const QStringList tips = m_spellChecker->suggestions(word);
+            for (const QString &s : tips) {
+                QAction *act = new QAction(s, menu);
+                QObject::connect(act, &QAction::triggered, m_editor, [this, cursor, s]() mutable {
+                    QTextCursor c(cursor);
+                    c.insertText(s);
+                    if (m_spellHighlighter) {
+                        m_spellHighlighter->refreshAll();
+                    }
+                });
+                toInsert.append(act);
+            }
+            if (!tips.isEmpty()) {
+                toInsert.append(new QAction(menu)); // separator marker
+                toInsert.back()->setSeparator(true);
+            }
+            QAction *ignoreAct = new QAction(QStringLiteral("Ignore \"%1\"").arg(word), menu);
+            QObject::connect(ignoreAct, &QAction::triggered, this, [this, word]() {
+                if (m_spellChecker) {
+                    m_spellChecker->ignoreWord(word);
+                }
+                if (m_spellHighlighter) {
+                    m_spellHighlighter->refreshAll();
+                }
+            });
+            toInsert.append(ignoreAct);
+            QAction *addAct = new QAction(QStringLiteral("Add \"%1\" to dictionary").arg(word), menu);
+            QObject::connect(addAct, &QAction::triggered, this, [this, word]() {
+                if (m_spellChecker) {
+                    m_spellChecker->addToUserDictionary(word);
+                }
+                if (m_spellHighlighter) {
+                    m_spellHighlighter->refreshAll();
+                }
+            });
+            toInsert.append(addAct);
+            toInsert.append(new QAction(menu));
+            toInsert.back()->setSeparator(true);
+
+            for (int i = toInsert.size() - 1; i >= 0; --i) {
+                insertBefore(toInsert.at(i));
+            }
+        }
+    }
+
+    menu->exec(m_editor->viewport()->mapToGlobal(pos));
+    delete menu;
 }
 
 void MainWindow::onCursorMoved()
@@ -2458,6 +2579,14 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     m_fullPageView = true;
     applyDocumentDefaults();
     m_meta.ensureDefaults();
+    // Keep Lorem / chrome shots clean; dedicated spell-check.png enables underlines.
+    m_spellCheck = false;
+    if (m_spellChecker) {
+        m_spellChecker->setEnabled(false);
+    }
+    if (m_spellHighlighter) {
+        m_spellHighlighter->refreshAll();
+    }
     applyTheme();
     applyFullPageView();
     syncViewActions();
@@ -2618,6 +2747,51 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         if (m_pageGuidesAction) {
             const QSignalBlocker b(m_pageGuidesAction);
             m_pageGuidesAction->setChecked(false);
+        }
+    }
+
+    // Spell check: English body with intentional misspellings + live underlines.
+    {
+        m_focusMode = false;
+        updateFocusHighlight();
+        hideFindBar();
+        m_fullPageView = true;
+        m_pageGuides = false;
+        m_spellCheck = true;
+        if (m_spellChecker) {
+            m_spellChecker->setEnabled(true);
+        }
+        if (m_spellCheckAction) {
+            const QSignalBlocker b(m_spellCheckAction);
+            m_spellCheckAction->setChecked(true);
+        }
+        m_hideAwayPinned = true;
+        setChromeVisible(true);
+        m_editor->setPlainText(
+            QStringLiteral(
+                "She opened the notebook and wrote the first true sentence of the day.\n\n"
+                "Everything else could wait — except this mispeled word and teh extra typo "
+                "sitting right there on the page. The typewriter clicked once, then again.\n\n"
+                "Spell check underlines misspellings; right-click for suggestions, ignore, "
+                "or add to the user dictionary."));
+        m_editor->moveCursor(QTextCursor::Start);
+        applyTheme();
+        applyFullPageView();
+        syncViewActions();
+        if (m_spellHighlighter) {
+            m_spellHighlighter->refreshAll();
+        }
+        updateStats();
+        QApplication::processEvents();
+        updateFullPageGeometry();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/spell-check.png"), "PNG");
+        m_spellCheck = false;
+        if (m_spellChecker) {
+            m_spellChecker->setEnabled(false);
+        }
+        if (m_spellHighlighter) {
+            m_spellHighlighter->refreshAll();
         }
     }
 

@@ -12,3 +12,4 @@ Captured via `./build/zwriter --capture-screenshots docs/screenshots` (xvfb-run 
 | `save-document.png` | Polished Save Document dialog — ODT default, sidebar, **New Folder**, type filter |
 | `fonts-toolbar.png` | Paper-white page + font family/size controls; sample text in typewriter + other faces |
 | `full-page.png` | Full Page view — A4 · 12 pt density · Lorem body · header/footer page # (page guides) |
+| `spell-check.png` | Spell check on — red underlines on intentional misspellings (Hunspell en_US) |

@@ -46,13 +46,14 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - Typewriter icon branding
 - **Tables** (QTextTable): Insert → Table… / toolbar; Tab between cells; add/remove row or column; ODT + PDF/print
 - **Header & Footer** (Insert → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; default footer center `{page}`
+- **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
 - **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
 - CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg`)
 
 ### Still roadmap / known limits
 
 - Richer themes pack (beyond Paper / Dark room), autosave + restore cursor, multi-document / sessions
-- Daily word / time goal, spell-check, scene / chapter navigation
+- Daily word / time goal, scene / chapter navigation
 - Richer ODT/RTF style round-trip; RTF is plain-text-oriented best-effort
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it
 - macOS `.dmg` ships the binary (not a full `.app` + macdeployqt bundle yet)
@@ -82,11 +83,11 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - **Help → About** + **Check for Updates** (GitHub latest release)
 - **Tables** (insert, edit cells, add/remove row/column; ODT round-trip)
 - **Header & Footer** + page numbers (`{page}` / `{pages}`)
+- **Spell check** (Hunspell en_US; toggle; context suggestions)
 - Themes (Paper default + Dark room; fuller packs later)
 - Autosave + restore cursor
 - Multi-document / sessions
 - Daily word / time goal
-- Spell-check
 - Scene / chapter navigation
 
 ## v1 OUT
@@ -139,7 +140,8 @@ Intel Mac.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y qt6-base-dev cmake ninja-build g++ unzip zip
+sudo apt-get install -y qt6-base-dev cmake ninja-build g++ unzip zip \
+  libhunspell-dev hunspell-en-us
 # optional, for live key sounds:
 # sudo apt-get install -y qt6-multimedia-dev
 
@@ -156,7 +158,7 @@ cd build && cpack -G DEB
 ### macOS (Apple Silicon)
 
 ```bash
-brew install qt cmake ninja
+brew install qt cmake ninja hunspell
 cmake -B build -G Ninja -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 cmake --build build
 ./build/zwriter
@@ -166,7 +168,8 @@ cd build && cpack -G DragNDrop
 ```
 
 `CMakeLists.txt` forces `CMAKE_OSX_ARCHITECTURES=arm64` on Darwin before
-`project()` (same pattern as zedit). Multimedia remains optional.
+`project()` (same pattern as zedit). Multimedia and Hunspell remain optional
+(spell check enables when Hunspell + en_US dict are present).
 
 ### Shortcuts
 

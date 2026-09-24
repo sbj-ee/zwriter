@@ -25,7 +25,7 @@ if(UNIX AND NOT APPLE)
   set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
   set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
   # Fallback depends if shlibdeps unavailable on a runner.
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6widgets6 | libqt6widgets6t64")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6widgets6 | libqt6widgets6t64, libhunspell-1.7-0, hunspell-en-us")
 
   install(TARGETS zwriter RUNTIME DESTINATION bin COMPONENT zwriter)
   install(FILES ${CMAKE_SOURCE_DIR}/assets/linux/zwriter.desktop

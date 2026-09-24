@@ -24,7 +24,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             qt6-base-dev qt6-multimedia-dev cmake ninja-build g++ \
-            unzip zip dpkg-dev
+            unzip zip dpkg-dev \
+            libhunspell-dev hunspell-en-us
 
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -52,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Qt + build tools (brew)
-        run: brew install qt cmake ninja
+        run: brew install qt cmake ninja hunspell
 
       - name: Configure arm64
         run: |

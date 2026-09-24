@@ -26,6 +26,8 @@ class FindReplaceBar;
 class QTextTable;
 class QFileDialog;
 class UpdateChecker;
+class SpellChecker;
+class SpellHighlighter;
 
 class MainWindow : public QMainWindow
 {
@@ -61,6 +63,7 @@ private slots:
     void setFocusScopeSentence();
     void setFocusScopeParagraph();
     void toggleSmartQuotes();
+    void toggleSpellCheck();
     void showFind();
     void showReplace();
     void findNext();
@@ -80,6 +83,7 @@ private slots:
     void clearRecentFiles();
     void insertTable();
     void editHeaderFooter();
+    void showEditorContextMenu(const QPoint &pos);
     void tableInsertRow();
     void tableInsertColumn();
     void tableRemoveRow();
@@ -183,8 +187,11 @@ private:
     QAction *m_focusSentenceAction = nullptr;
     QAction *m_focusParagraphAction = nullptr;
     QAction *m_smartQuotesAction = nullptr;
+    QAction *m_spellCheckAction = nullptr;
     TypewriterSounds *m_keySounds = nullptr;
     UpdateChecker *m_updateChecker = nullptr;
+    SpellChecker *m_spellChecker = nullptr;
+    SpellHighlighter *m_spellHighlighter = nullptr;
     QAction *m_checkUpdatesAction = nullptr;
     QMenu *m_helpMenu = nullptr;
     QMenu *m_insertMenu = nullptr;
@@ -209,6 +216,7 @@ private:
     bool m_focusMode = false;         // default OFF
     bool m_focusSentence = false;     // false = paragraph scope
     bool m_smartQuotes = false;       // default OFF
+    bool m_spellCheck = true;         // default ON
     bool m_centering = false;         // re-entrancy guard for scroll
     QString m_themeId = QStringLiteral("paper"); // paper (default) | dark
 };
