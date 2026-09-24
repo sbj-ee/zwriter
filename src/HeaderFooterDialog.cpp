@@ -55,7 +55,7 @@ HeaderFooterDialog::HeaderFooterDialog(const DocumentMeta &meta, QWidget *parent
     auto *hint = new QLabel(
         QStringLiteral("Tokens: <code>{page}</code> = page number, "
                        "<code>{pages}</code> = page count. "
-                       "Default footer center is <code>{page}</code>."),
+                       "Page numbers are off by default; Format → Page Numbers adds a footer number."),
         this);
     hint->setTextFormat(Qt::RichText);
     hint->setWordWrap(true);
