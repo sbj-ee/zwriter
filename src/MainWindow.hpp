@@ -41,6 +41,11 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
 
+    // Open a file handed to us by the OS (file manager, command line, macOS open
+    // event). Asks about unsaved changes first; unrecognised extensions open as
+    // plain text and are saved back as plain text.
+    void openExternalFile(const QString &path);
+
     // Docs/CI helper: write a few PNGs then quit the app.
     void captureDemoScreenshots(const QString &dir);
 

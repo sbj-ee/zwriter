@@ -3,8 +3,12 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QFileInfo>
+#include <QFileOpenEvent>
 #include <QIcon>
+#include <QProcess>
 #include <QTimer>
+#include <QUrl>
 
 namespace {
 
@@ -18,6 +22,27 @@ QIcon appIcon()
     }
     return icon;
 }
+
+// Files the OS asks a running app to open (macOS Finder / `open -a`).
+class FileOpenFilter : public QObject
+{
+public:
+    explicit FileOpenFilter(MainWindow *window) : QObject(window), m_window(window) {}
+
+protected:
+    bool eventFilter(QObject *, QEvent *event) override
+    {
+        if (event->type() == QEvent::FileOpen) {
+            const auto *open = static_cast<QFileOpenEvent *>(event);
+            m_window->openExternalFile(open->file());
+            return true;
+        }
+        return false;
+    }
+
+private:
+    MainWindow *m_window;
+};
 
 } // namespace
 
@@ -35,12 +60,19 @@ int main(int argc, char *argv[])
     QGuiApplication::setDesktopFileName(QStringLiteral("zwriter"));
     QApplication::setWindowIcon(appIcon());
 
+    // Command line: `zwriter [--capture-screenshots DIR] [FILE...]`. The desktop
+    // entry runs `zwriter %F`, so this is how a file manager hands us documents.
     QString captureDir;
+    QStringList files;
     const QStringList args = app.arguments();
     for (int i = 1; i < args.size(); ++i) {
-        if (args.at(i) == QLatin1String("--capture-screenshots") && i + 1 < args.size()) {
-            captureDir = args.at(i + 1);
-            break;
+        const QString &arg = args.at(i);
+        if (arg == QLatin1String("--capture-screenshots") && i + 1 < args.size()) {
+            captureDir = args.at(++i);
+        } else if (arg.startsWith(QLatin1String("file:"))) {
+            files << QUrl(arg).toLocalFile();
+        } else if (!arg.startsWith(QLatin1Char('-'))) {
+            files << arg;
         }
     }
 
@@ -49,6 +81,19 @@ int main(int argc, char *argv[])
         window.resize(960, 700); // fixed size for reproducible screenshots
     }
     window.show();
+    app.installEventFilter(new FileOpenFilter(&window));
+
+    if (captureDir.isEmpty() && !files.isEmpty()) {
+        // First file opens in this window (after the event loop starts, so any
+        // error box has a visible parent); each further file gets its own window.
+        QTimer::singleShot(0, &window, [&window, files]() {
+            window.openExternalFile(files.first());
+            for (int i = 1; i < files.size(); ++i) {
+                QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                        {QFileInfo(files.at(i)).absoluteFilePath()});
+            }
+        });
+    }
 
     if (!captureDir.isEmpty()) {
         QDir().mkpath(captureDir);

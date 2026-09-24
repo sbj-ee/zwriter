@@ -2166,7 +2166,12 @@ bool MainWindow::openPath(const QString &path)
         QMessageBox::warning(this, QStringLiteral("Open failed"), error);
         return false;
     }
-    const auto fmt = DocumentIo::formatFromPath(path);
+    auto fmt = DocumentIo::formatFromPath(path);
+    if (fmt == DocumentIo::Format::Unknown) {
+        // e.g. notes.md, app.conf: it was read as plain text, so it must be saved
+        // back as plain text — never silently rewritten as an ODT zip.
+        fmt = DocumentIo::Format::Txt;
+    }
     m_meta = DocumentMeta{};
     m_meta.ensureDefaults();
     if (fmt == DocumentIo::Format::Odt) {
@@ -2183,6 +2188,12 @@ bool MainWindow::openPath(const QString &path)
         // put the page layout back.
         applyFullPageView();
     }
+    // Show the top of the document, caret at the start (loading leaves it at the end).
+    m_editor->moveCursor(QTextCursor::Start);
+    m_editor->verticalScrollBar()->setValue(0);
+    if (m_pageScroll) {
+        m_pageScroll->verticalScrollBar()->setValue(0);
+    }
     m_editor->document()->clearUndoRedoStacks(); // Ctrl+Z right after open: nothing
     m_editor->document()->setModified(false);
     setCurrentFile(path, fmt); // clean: no '*', no save prompt
@@ -2194,6 +2205,24 @@ bool MainWindow::openPath(const QString &path)
     return true;
 }
 
+
+void MainWindow::openExternalFile(const QString &path)
+{
+    const QFileInfo info(path);
+    if (!info.isFile() || !info.isReadable()) {
+        QMessageBox::warning(this, QStringLiteral("Open failed"),
+                             QStringLiteral("Could not open “%1”: it is not a readable file.")
+                                 .arg(info.absoluteFilePath()));
+        return;
+    }
+    if (!maybeSave()) {
+        return;
+    }
+    if (openPath(info.absoluteFilePath())) {
+        raise();
+        activateWindow();
+    }
+}
 
 QString MainWindow::documentsStartDir() const
 {
