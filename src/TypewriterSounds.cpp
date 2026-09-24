@@ -35,6 +35,15 @@ TypewriterSounds::TypewriterSounds(QObject *parent)
 
 TypewriterSounds::~TypewriterSounds() = default;
 
+bool TypewriterSounds::isAvailable() const
+{
+#ifdef ZWRITER_HAS_MULTIMEDIA
+    return !m_keyPath.isEmpty();
+#else
+    return false;
+#endif
+}
+
 void TypewriterSounds::setEnabled(bool enabled)
 {
     m_enabled = enabled;

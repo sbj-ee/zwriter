@@ -104,6 +104,7 @@ private:
     void applyDocumentDefaults();
     QFont defaultDocumentFont() const;
     void setChromeVisible(bool visible);
+    void setChromePinned(bool pinned);
     void loadWindowIcon();
     void updateKeySoundsLabel();
     void buildFormatToolbar();
@@ -188,6 +189,8 @@ private:
     QAction *m_focusParagraphAction = nullptr;
     QAction *m_smartQuotesAction = nullptr;
     QAction *m_spellCheckAction = nullptr;
+    QAction *m_alwaysShowChromeAction = nullptr;
+    QAction *m_keySoundsAction = nullptr;
     TypewriterSounds *m_keySounds = nullptr;
     UpdateChecker *m_updateChecker = nullptr;
     SpellChecker *m_spellChecker = nullptr;
@@ -209,7 +212,7 @@ private:
     QString m_lastSaveFilter;
     bool m_dirty = false;
     bool m_chromeVisible = false;
-    bool m_hideAwayPinned = false;
+    bool m_hideAwayPinned = true;      // default: toolbar/menus/status stay visible
     bool m_pageGuides = false;
     bool m_fullPageView = true;        // default ON — paper page frame
     bool m_typewriterScroll = true;   // default ON — distraction-free

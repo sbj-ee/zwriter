@@ -150,6 +150,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_desk->installEventFilter(this);
 
     m_keySounds = new TypewriterSounds(this);
+    m_keySounds->setEnabled(
+        QSettings().value(QStringLiteral("view/keySounds"), false).toBool());
     m_updateChecker = new UpdateChecker(this);
     m_spellChecker = new SpellChecker(this);
     m_spellChecker->setEnabled(m_spellCheck);
@@ -233,7 +235,7 @@ MainWindow::MainWindow(QWidget *parent)
     applyDocumentDefaults();
     applyTheme();
     applyFullPageView();
-    setChromeVisible(false);
+    setChromeVisible(m_hideAwayPinned);
     m_dirty = false;
     syncViewActions();
     updateStats();
@@ -250,6 +252,7 @@ void MainWindow::loadSettings()
     m_focusMode = s.value(QStringLiteral("view/focusMode"), false).toBool();
     m_focusSentence = s.value(QStringLiteral("view/focusSentence"), false).toBool();
     m_smartQuotes = s.value(QStringLiteral("view/smartQuotes"), false).toBool();
+    m_hideAwayPinned = s.value(QStringLiteral("view/chromePinned"), true).toBool();
     m_spellCheck = s.value(QStringLiteral("view/spellCheck"), true).toBool();
     m_fullPageView = s.value(QStringLiteral("view/fullPageView"), true).toBool();
     m_themeId = s.value(QStringLiteral("theme/id"), QStringLiteral("paper")).toString();
@@ -268,6 +271,10 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("view/focusMode"), m_focusMode);
     s.setValue(QStringLiteral("view/focusSentence"), m_focusSentence);
     s.setValue(QStringLiteral("view/smartQuotes"), m_smartQuotes);
+    s.setValue(QStringLiteral("view/chromePinned"), m_hideAwayPinned);
+    if (m_keySounds) {
+        s.setValue(QStringLiteral("view/keySounds"), m_keySounds->isEnabled());
+    }
     s.setValue(QStringLiteral("view/spellCheck"), m_spellCheck);
     s.setValue(QStringLiteral("view/fullPageView"), m_fullPageView);
     s.setValue(QStringLiteral("theme/id"), m_themeId);
@@ -461,7 +468,23 @@ void MainWindow::buildViewMenu()
         QStringLiteral("Underline misspellings (Hunspell en_US); right-click for suggestions"));
     connect(m_spellCheckAction, &QAction::triggered, this, &MainWindow::toggleSpellCheck);
 
+    m_viewMenu->addSeparator();
+
+    m_alwaysShowChromeAction = m_viewMenu->addAction(QStringLiteral("Always Show &Toolbar"));
+    m_alwaysShowChromeAction->setCheckable(true);
+    m_alwaysShowChromeAction->setToolTip(
+        QStringLiteral("Keep the toolbar, menus and status bar visible (Esc); off = hide-away"));
+    connect(m_alwaysShowChromeAction, &QAction::triggered, this, &MainWindow::setChromePinned);
+
+    m_keySoundsAction = m_viewMenu->addAction(QStringLiteral("Typewriter Key S&ounds"));
+    m_keySoundsAction->setCheckable(true);
+    m_keySoundsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K));
+    m_keySoundsAction->setToolTip(
+        QStringLiteral("Play typewriter key clicks while typing (Ctrl+Shift+K, default off)"));
+    connect(m_keySoundsAction, &QAction::triggered, this, &MainWindow::toggleKeySounds);
+
     addAction(m_typewriterScrollAction);
+    addAction(m_keySoundsAction);
     addAction(m_focusModeAction);
     addAction(m_fullPageViewAction);
 }
@@ -719,6 +742,20 @@ void MainWindow::syncViewActions()
         if (!avail) {
             m_spellCheckAction->setToolTip(
                 QStringLiteral("Spell check unavailable (install Hunspell + en_US dictionary)"));
+        }
+    }
+    if (m_alwaysShowChromeAction) {
+        const QSignalBlocker b(m_alwaysShowChromeAction);
+        m_alwaysShowChromeAction->setChecked(m_hideAwayPinned);
+    }
+    if (m_keySoundsAction) {
+        const QSignalBlocker b(m_keySoundsAction);
+        m_keySoundsAction->setChecked(m_keySounds && m_keySounds->isEnabled());
+        const bool avail = m_keySounds && m_keySounds->isAvailable();
+        m_keySoundsAction->setEnabled(avail);
+        if (!avail) {
+            m_keySoundsAction->setToolTip(QStringLiteral(
+                "Key sounds unavailable (needs Qt6 Multimedia and assets/sounds/key.wav)"));
         }
     }
     if (m_fullPageViewAction) {
@@ -1208,9 +1245,16 @@ QString MainWindow::defaultBaseName() const
 
 void MainWindow::toggleChrome()
 {
-    m_hideAwayPinned = !m_hideAwayPinned;
+    setChromePinned(!m_hideAwayPinned);
+}
+
+void MainWindow::setChromePinned(bool pinned)
+{
+    m_hideAwayPinned = pinned;
     m_hideTimer->stop();
-    setChromeVisible(m_hideAwayPinned);
+    setChromeVisible(pinned);
+    syncViewActions();
+    saveSettings();
 }
 
 void MainWindow::toggleFullscreen()
@@ -1229,6 +1273,8 @@ void MainWindow::toggleKeySounds()
     }
     m_keySounds->setEnabled(!m_keySounds->isEnabled());
     updateKeySoundsLabel();
+    syncViewActions();
+    saveSettings();
 }
 
 void MainWindow::toggleTypewriterScroll()
@@ -2859,12 +2905,6 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
     }
     if (event->key() == Qt::Key_F11) {
         toggleFullscreen();
-        event->accept();
-        return;
-    }
-    if (event->key() == Qt::Key_K
-        && event->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
-        toggleKeySounds();
         event->accept();
         return;
     }

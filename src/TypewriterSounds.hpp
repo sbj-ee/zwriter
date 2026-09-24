@@ -19,6 +19,8 @@ public:
     ~TypewriterSounds() override;
 
     bool isEnabled() const { return m_enabled; }
+    // True when Multimedia is built in and at least the key sample was found.
+    bool isAvailable() const;
 
 public slots:
     void setEnabled(bool enabled);

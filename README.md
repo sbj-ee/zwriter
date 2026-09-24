@@ -175,8 +175,8 @@ cd build && cpack -G DragNDrop
 
 | Key | Action |
 |---|---|
-| `Esc` | Close find bar if open; else pin / unpin hide-away chrome |
-| Mouse near top / bottom | Temporarily reveal hide-away chrome |
+| `Esc` | Close find bar if open; else toggle always-show / hide-away chrome (default: always shown; also View → Always Show Toolbar) |
+| Mouse near top / bottom | Temporarily reveal chrome when hide-away is on |
 | `F11` | Fullscreen |
 | `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` | Open / Save / Save As (default filter ODT) |
 | `Ctrl+F` / `Ctrl+H` | Find / Replace |
@@ -188,7 +188,7 @@ cd build && cpack -G DragNDrop
 | `Ctrl+P` | Print… |
 | `Ctrl+Shift+T` | Toggle typewriter scroll (default on) |
 | `Ctrl+Shift+F` | Toggle focus mode |
-| `Ctrl+Shift+K` | Toggle typewriter key sounds (default off) |
+| `Ctrl+Shift+K` | Toggle typewriter key sounds (default off; also View → Typewriter Key Sounds) |
 | `Ctrl+Shift+I` | Insert table… |
 | `Tab` / `Shift+Tab` | Next / previous table cell |
 
