@@ -6,6 +6,8 @@
 #include <QUrl>
 
 #ifdef ZWRITER_HAS_MULTIMEDIA
+#  include <QAudioDevice>
+#  include <QMediaDevices>
 #  include <QSoundEffect>
 #endif
 
@@ -57,11 +59,15 @@ void TypewriterSounds::ensureEffects()
 #ifdef ZWRITER_HAS_MULTIMEDIA
     if (!m_keyEffect && !m_keyPath.isEmpty()) {
         m_keyEffect = new QSoundEffect(this);
+        // Qt's implicit device can land on a non-default sink (e.g. an HDMI
+        // monitor); pin to the system default output explicitly.
+        m_keyEffect->setAudioDevice(QMediaDevices::defaultAudioOutput());
         m_keyEffect->setSource(QUrl::fromLocalFile(m_keyPath));
         m_keyEffect->setVolume(0.40f);
     }
     if (!m_returnEffect && !m_returnPath.isEmpty()) {
         m_returnEffect = new QSoundEffect(this);
+        m_returnEffect->setAudioDevice(QMediaDevices::defaultAudioOutput());
         m_returnEffect->setSource(QUrl::fromLocalFile(m_returnPath));
         m_returnEffect->setVolume(0.45f);
     }

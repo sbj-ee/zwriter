@@ -389,6 +389,16 @@ void MainWindow::buildFileMenu()
     m_pageGuidesAction->setToolTip(QStringLiteral("Toggle page margin guides (Ctrl+G)"));
     connect(m_pageGuidesAction, &QAction::triggered, this, &MainWindow::togglePageGuides);
 
+    m_fileMenu->addSeparator();
+
+    auto *closeAct = m_fileMenu->addAction(QStringLiteral("&Close"));
+    closeAct->setShortcut(QKeySequence::Close);
+    connect(closeAct, &QAction::triggered, this, &QWidget::close);
+
+    auto *quitAct = m_fileMenu->addAction(QStringLiteral("&Quit"));
+    quitAct->setShortcut(QKeySequence::Quit);
+    connect(quitAct, &QAction::triggered, this, &QWidget::close);
+
     addAction(openAct);
     addAction(saveAct);
     addAction(saveAsAct);
@@ -396,6 +406,8 @@ void MainWindow::buildFileMenu()
     addAction(printAct);
     addAction(propsAct);
     addAction(m_pageGuidesAction);
+    addAction(closeAct);
+    addAction(quitAct);
 }
 
 void MainWindow::buildViewMenu()
