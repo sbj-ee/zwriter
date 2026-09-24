@@ -67,7 +67,7 @@ QDateTime fromOdfDate(const QString &s)
     if (!dt.isValid()) {
         dt = QDateTime::fromString(s, QStringLiteral("yyyy-MM-ddTHH:mm:ss"));
         if (dt.isValid()) {
-            dt = QDateTime(dt.date(), dt.time(), QTimeZone::UTC);
+            dt = QDateTime(dt.date(), dt.time(), QTimeZone::utc());
         }
     }
     return dt.toUTC();
