@@ -7,6 +7,7 @@
 #include "UpdateChecker.hpp"
 #include "version.hpp"
 
+#include <QApplication>
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
@@ -29,6 +30,7 @@
 #include <QPageSize>
 #include <QPainter>
 #include <QPen>
+#include <QPixmap>
 #include <QColor>
 #include <QPrintDialog>
 #include <QPrintPreviewDialog>
@@ -36,6 +38,7 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QTextBlock>
 #include <QTextBlockFormat>
@@ -179,6 +182,8 @@ void MainWindow::loadSettings()
     m_focusSentence = s.value(QStringLiteral("view/focusSentence"), false).toBool();
     m_smartQuotes = s.value(QStringLiteral("view/smartQuotes"), false).toBool();
     m_recentFiles = s.value(QStringLiteral("files/recent")).toStringList();
+    m_lastDocDir = s.value(QStringLiteral("files/lastDir")).toString();
+    m_lastSaveFilter = s.value(QStringLiteral("files/lastSaveFilter")).toString();
 }
 
 void MainWindow::saveSettings() const
@@ -189,6 +194,8 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("view/focusSentence"), m_focusSentence);
     s.setValue(QStringLiteral("view/smartQuotes"), m_smartQuotes);
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
+    s.setValue(QStringLiteral("files/lastDir"), m_lastDocDir);
+    s.setValue(QStringLiteral("files/lastSaveFilter"), m_lastSaveFilter);
 }
 
 void MainWindow::buildFileMenu()
@@ -1233,16 +1240,216 @@ bool MainWindow::openPath(const QString &path)
     return true;
 }
 
+
+QString MainWindow::documentsStartDir() const
+{
+    if (!m_lastDocDir.isEmpty() && QDir(m_lastDocDir).exists()) {
+        return m_lastDocDir;
+    }
+    const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (!docs.isEmpty() && QDir(docs).exists()) {
+        return docs;
+    }
+    return QDir::homePath();
+}
+
+void MainWindow::rememberDocDir(const QString &path)
+{
+    if (path.isEmpty()) {
+        return;
+    }
+    m_lastDocDir = QFileInfo(path).absolutePath();
+    saveSettings();
+}
+
+void MainWindow::setupNativeFileDialog(QFileDialog &dlg) const
+{
+    // Native OS panel so Create Directory / New Folder stays available.
+    // DontUseNativeDialog must stay OFF — non-native Qt dialogs are only used
+    // for xvfb screenshot capture, never for normal Save/Open/Export.
+    dlg.setOption(QFileDialog::DontUseNativeDialog, false);
+    // Prefer OS overwrite confirm (do NOT set DontConfirmOverwrite).
+    dlg.setOption(QFileDialog::DontConfirmOverwrite, false);
+    // Must NOT set ShowDirsOnly (would hide files and break Save/Open).
+    // Must NOT set ReadOnly (would strip New Folder on some platforms).
+    dlg.setOption(QFileDialog::ShowDirsOnly, false);
+    dlg.setOption(QFileDialog::ReadOnly, false);
+    dlg.setViewMode(QFileDialog::Detail);
+    dlg.setOption(QFileDialog::HideNameFilterDetails, false);
+
+    QList<QUrl> sidebar;
+    const QString home = QDir::homePath();
+    const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString desk = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    if (!home.isEmpty()) {
+        sidebar << QUrl::fromLocalFile(home);
+    }
+    if (!docs.isEmpty()) {
+        sidebar << QUrl::fromLocalFile(docs);
+    }
+    if (!desk.isEmpty()) {
+        sidebar << QUrl::fromLocalFile(desk);
+    }
+    if (!m_lastDocDir.isEmpty() && QDir(m_lastDocDir).exists()) {
+        sidebar << QUrl::fromLocalFile(m_lastDocDir);
+    }
+    dlg.setSidebarUrls(sidebar);
+}
+
+QString MainWindow::suffixForFilter(const QString &filter)
+{
+    const DocumentIo::Format fmt = DocumentIo::formatFromFilter(filter, QString());
+    if (fmt != DocumentIo::Format::Unknown) {
+        return DocumentIo::formatName(fmt);
+    }
+    if (filter.contains(QLatin1String("*.pdf"), Qt::CaseInsensitive)) {
+        return QStringLiteral("pdf");
+    }
+    return QStringLiteral("odt");
+}
+
+void MainWindow::syncSaveNameToFilter(QFileDialog &dlg, const QString &filter)
+{
+    const QString suffix = suffixForFilter(filter);
+    dlg.setDefaultSuffix(suffix);
+
+    QStringList selected = dlg.selectedFiles();
+    if (selected.isEmpty()) {
+        return;
+    }
+    QFileInfo info(selected.constFirst());
+    QString base = info.completeBaseName();
+    if (base.isEmpty()) {
+        base = info.fileName(); // bare name with no dot yet
+    }
+    if (base.isEmpty()) {
+        return;
+    }
+    // Keep directory; rewrite extension to match the active filter.
+    const QString dir = dlg.directory().absolutePath();
+    dlg.selectFile(dir + QLatin1Char('/') + base + QLatin1Char('.') + suffix);
+}
+
+QString MainWindow::runSaveDocumentDialog(DocumentIo::Format *outFormat)
+{
+    QFileDialog dlg(this, QStringLiteral("Save Document"));
+    setupNativeFileDialog(dlg);
+    dlg.setAcceptMode(QFileDialog::AcceptSave);
+    dlg.setFileMode(QFileDialog::AnyFile);
+    dlg.setNameFilters(DocumentIo::saveFilter().split(QStringLiteral(";;")));
+    dlg.setDirectory(documentsStartDir());
+
+    QString filter = m_lastSaveFilter;
+    if (filter.isEmpty() || !dlg.nameFilters().contains(filter)) {
+        filter = QStringLiteral("OpenDocument Text (*.odt)");
+    }
+    // Prefer current document format when saving an existing file.
+    if (!m_currentPath.isEmpty()) {
+        const DocumentIo::Format cur = m_currentFormat;
+        if (cur == DocumentIo::Format::Txt) {
+            filter = QStringLiteral("Plain Text (*.txt)");
+        } else if (cur == DocumentIo::Format::Rtf) {
+            filter = QStringLiteral("Rich Text Format (*.rtf)");
+        } else {
+            filter = QStringLiteral("OpenDocument Text (*.odt)");
+        }
+    }
+    dlg.selectNameFilter(filter);
+    dlg.setDefaultSuffix(suffixForFilter(filter));
+
+    const QString suggestedName = defaultBaseName() + QLatin1Char('.') + suffixForFilter(filter);
+    dlg.selectFile(dlg.directory().filePath(suggestedName));
+
+    QObject::connect(&dlg, &QFileDialog::filterSelected, &dlg, [&dlg](const QString &f) {
+        MainWindow::syncSaveNameToFilter(dlg, f);
+    });
+
+    if (dlg.exec() != QDialog::Accepted) {
+        return {};
+    }
+    QStringList files = dlg.selectedFiles();
+    if (files.isEmpty()) {
+        return {};
+    }
+    QString path = files.constFirst();
+    const QString selectedFilter = dlg.selectedNameFilter();
+    DocumentIo::Format format = DocumentIo::formatFromFilter(selectedFilter, path);
+
+    // Extension always follows the chosen type — never leave a bare filename.
+    const QString wantExt = DocumentIo::formatName(format);
+    const QFileInfo fi(path);
+    if (fi.suffix().compare(wantExt, Qt::CaseInsensitive) != 0) {
+        if (fi.suffix().isEmpty()) {
+            path += QLatin1Char('.') + wantExt;
+        } else {
+            path = fi.absolutePath() + QLatin1Char('/') + fi.completeBaseName()
+                + QLatin1Char('.') + wantExt;
+        }
+    }
+
+    m_lastSaveFilter = selectedFilter;
+    rememberDocDir(path);
+    if (outFormat) {
+        *outFormat = format;
+    }
+    return path;
+}
+
+QString MainWindow::runOpenDocumentDialog()
+{
+    QFileDialog dlg(this, QStringLiteral("Open Document"));
+    setupNativeFileDialog(dlg);
+    dlg.setAcceptMode(QFileDialog::AcceptOpen);
+    dlg.setFileMode(QFileDialog::ExistingFile);
+    dlg.setNameFilters(DocumentIo::openFilter().split(QStringLiteral(";;")));
+    dlg.selectNameFilter(QStringLiteral("OpenDocument Text (*.odt)"));
+    dlg.setDirectory(documentsStartDir());
+
+    if (dlg.exec() != QDialog::Accepted) {
+        return {};
+    }
+    const QStringList files = dlg.selectedFiles();
+    if (files.isEmpty()) {
+        return {};
+    }
+    rememberDocDir(files.constFirst());
+    return files.constFirst();
+}
+
+QString MainWindow::runExportPdfDialog()
+{
+    QFileDialog dlg(this, QStringLiteral("Export PDF"));
+    setupNativeFileDialog(dlg);
+    dlg.setAcceptMode(QFileDialog::AcceptSave);
+    dlg.setFileMode(QFileDialog::AnyFile);
+    dlg.setNameFilters({QStringLiteral("PDF (*.pdf)")});
+    dlg.selectNameFilter(QStringLiteral("PDF (*.pdf)"));
+    dlg.setDefaultSuffix(QStringLiteral("pdf"));
+    dlg.setDirectory(documentsStartDir());
+    dlg.selectFile(dlg.directory().filePath(defaultBaseName() + QStringLiteral(".pdf")));
+
+    if (dlg.exec() != QDialog::Accepted) {
+        return {};
+    }
+    QStringList files = dlg.selectedFiles();
+    if (files.isEmpty()) {
+        return {};
+    }
+    QString path = files.constFirst();
+    if (!path.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+        path += QStringLiteral(".pdf");
+    }
+    rememberDocDir(path);
+    return path;
+}
+
+
 void MainWindow::fileOpen()
 {
     if (!maybeSave()) {
         return;
     }
-    const QString path = QFileDialog::getOpenFileName(
-        this,
-        QStringLiteral("Open"),
-        QDir::homePath(),
-        DocumentIo::openFilter());
+    const QString path = runOpenDocumentDialog();
     if (path.isEmpty()) {
         return;
     }
@@ -1260,55 +1467,30 @@ void MainWindow::fileSave()
 
 void MainWindow::fileSaveAs()
 {
-    QString selectedFilter = QStringLiteral("OpenDocument Text (*.odt)");
-    const QString suggested = QDir::home().filePath(
-        defaultBaseName() + QStringLiteral(".odt"));
-    QString path = QFileDialog::getSaveFileName(
-        this,
-        QStringLiteral("Save As"),
-        suggested,
-        DocumentIo::saveFilter(),
-        &selectedFilter);
+    DocumentIo::Format format = DocumentIo::Format::Odt;
+    const QString path = runSaveDocumentDialog(&format);
     if (path.isEmpty()) {
         return;
     }
-
-    DocumentIo::Format format = DocumentIo::formatFromFilter(selectedFilter, path);
-    const DocumentIo::Format pathFmt = DocumentIo::formatFromPath(path);
-    if (pathFmt != DocumentIo::Format::Unknown) {
-        format = pathFmt;
-    } else {
-        path += QLatin1Char('.') + DocumentIo::formatName(format);
-    }
-
     saveToPath(path, format);
 }
 
 void MainWindow::exportPdf()
 {
-    const QString suggested = QDir::home().filePath(defaultBaseName() + QStringLiteral(".pdf"));
-    const QString path = QFileDialog::getSaveFileName(
-        this,
-        QStringLiteral("Export PDF"),
-        suggested,
-        QStringLiteral("PDF files (*.pdf)"));
+    const QString path = runExportPdfDialog();
     if (path.isEmpty()) {
         return;
     }
 
-    QString out = path;
-    if (!out.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
-        out += QStringLiteral(".pdf");
-    }
-
     QPrinter pdf(QPrinter::HighResolution);
     pdf.setOutputFormat(QPrinter::PdfFormat);
-    pdf.setOutputFileName(out);
+    pdf.setOutputFileName(path);
     pdf.setPageSize(m_printer->pageLayout().pageSize());
     pdf.setPageOrientation(m_printer->pageLayout().orientation());
     pdf.setPageMargins(m_printer->pageLayout().margins(), QPageLayout::Millimeter);
 
     m_editor->document()->print(&pdf);
+    statusBar()->showMessage(QStringLiteral("Exported PDF: %1").arg(QFileInfo(path).fileName()), 4000);
 }
 
 void MainWindow::doPrint(QPrinter *printer)
@@ -1444,6 +1626,88 @@ void MainWindow::onUpdateCheckFailed()
         m_checkUpdatesAction->setText(QStringLiteral("Check for &Updates…"));
     }
     // Soft fail — no scary dialog (no network / no releases yet).
+}
+
+
+void MainWindow::captureDemoScreenshots(const QString &dir)
+{
+    m_editor->setPlainText(
+        QStringLiteral(
+            "The rain settled over the harbor like a soft curtain.\n\n"
+            "She opened the notebook and wrote the first true sentence of the day. "
+            "Everything else could wait. The typewriter clicked once, then again.\n\n"
+            "Across the water, lights blinked on one by one. Focus returned."));
+    m_editor->moveCursor(QTextCursor::Start);
+    for (int i = 0; i < 2; ++i) {
+        m_editor->moveCursor(QTextCursor::Down);
+    }
+    m_editor->moveCursor(QTextCursor::EndOfWord);
+
+    // 1) Editor with hide-away chrome revealed (toolbar + status + reading time).
+    m_hideAwayPinned = true;
+    setChromeVisible(true);
+    m_typewriterScroll = true;
+    if (m_typewriterScrollAction) {
+        const QSignalBlocker b(m_typewriterScrollAction);
+        m_typewriterScrollAction->setChecked(true);
+    }
+    updateStats();
+    centerCaret();
+    QApplication::processEvents();
+    grab().save(dir + QStringLiteral("/editor-chrome.png"), "PNG");
+
+    // 2) Focus mode (paragraph) — dim surrounding text.
+    m_focusMode = true;
+    m_focusSentence = false;
+    syncViewActions();
+    updateFocusHighlight();
+    QApplication::processEvents();
+    grab().save(dir + QStringLiteral("/editor-focus.png"), "PNG");
+
+    // 3) Find bar open.
+    m_findBar->setFindText(QStringLiteral("typewriter"));
+    m_findBar->showFind();
+    findNext();
+    QApplication::processEvents();
+    grab().save(dir + QStringLiteral("/find-bar.png"), "PNG");
+    hideFindBar();
+
+    // 4) About dialog grab.
+    QMessageBox about(this);
+    about.setWindowTitle(QStringLiteral("About zwriter"));
+    about.setTextFormat(Qt::RichText);
+    about.setText(
+        QStringLiteral(
+            "<h3>zwriter %1</h3>"
+            "<p>Distraction-free writing for Linux amd64 and Apple Silicon.</p>"
+            "<p>Sibling to zedit — not a fork. Kinship to FocusWriter.</p>"
+            "<p>MIT License — Copyright © 2026 Stephen B. Johnson</p>")
+            .arg(QString::fromUtf8(zwriter::kVersionString)));
+    about.setStandardButtons(QMessageBox::Ok);
+    about.show();
+    QApplication::processEvents();
+    about.grab().save(dir + QStringLiteral("/about.png"), "PNG");
+    about.close();
+
+    // 5) Save Document dialog (non-native under xvfb so grab works).
+    {
+        QFileDialog dlg(this, QStringLiteral("Save Document"));
+        dlg.setOption(QFileDialog::DontUseNativeDialog, true);
+        dlg.setAcceptMode(QFileDialog::AcceptSave);
+        dlg.setFileMode(QFileDialog::AnyFile);
+        dlg.setNameFilters(DocumentIo::saveFilter().split(QStringLiteral(";;")));
+        dlg.selectNameFilter(QStringLiteral("OpenDocument Text (*.odt)"));
+        dlg.setDefaultSuffix(QStringLiteral("odt"));
+        dlg.setDirectory(documentsStartDir());
+        dlg.selectFile(dlg.directory().filePath(defaultBaseName() + QStringLiteral(".odt")));
+        dlg.resize(780, 520);
+        dlg.show();
+        QApplication::processEvents();
+        dlg.grab().save(dir + QStringLiteral("/save-document.png"), "PNG");
+        dlg.close();
+    }
+
+    QCoreApplication::quit();
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

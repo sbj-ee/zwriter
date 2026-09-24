@@ -26,6 +26,7 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 
 - **Hide-away formatting toolbar** (FocusWriter-style — not a permanent ribbon): bold, italic, paragraph / H1 / H2 / H3; reveal on mouse near top/bottom edge or Esc; hides again when the pointer leaves / after a short idle
 - **Hide-away File + View menus**: Open / Save / Save As / Recent / Export PDF / Print / Print Preview / Page Setup / Properties / Page Guides; View toggles for typewriter scroll, focus mode, smart quotes
+- **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
 - **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1)
 - **Export PDF…** (export-only — not a native edit/save format) via `QPrinter` PdfFormat
 - **Print options** (lean): native OS print dialog, page setup (paper / orientation / margins), print preview

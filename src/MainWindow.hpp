@@ -17,6 +17,7 @@ class QMenu;
 class QPrinter;
 class TypewriterSounds;
 class FindReplaceBar;
+class QFileDialog;
 class UpdateChecker;
 
 class MainWindow : public QMainWindow
@@ -25,6 +26,9 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+
+    // Docs/CI helper: write a few PNGs then quit the app.
+    void captureDemoScreenshots(const QString &dir);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -95,6 +99,14 @@ private:
     bool saveToPath(const QString &path, DocumentIo::Format format);
     void setCurrentFile(const QString &path, DocumentIo::Format format);
     bool openPath(const QString &path);
+    QString documentsStartDir() const;
+    void rememberDocDir(const QString &path);
+    void setupNativeFileDialog(QFileDialog &dlg) const;
+    QString runSaveDocumentDialog(DocumentIo::Format *outFormat);
+    QString runOpenDocumentDialog();
+    QString runExportPdfDialog();
+    static QString suffixForFilter(const QString &filter);
+    static void syncSaveNameToFilter(QFileDialog &dlg, const QString &filter);
     void doPrint(QPrinter *printer);
     void paintPageGuides();
     void centerCaret();
@@ -135,6 +147,8 @@ private:
     DocumentIo::Format m_currentFormat = DocumentIo::Format::Odt;
     DocumentMeta m_meta;
     QStringList m_recentFiles;
+    QString m_lastDocDir;
+    QString m_lastSaveFilter;
     bool m_dirty = false;
     bool m_chromeVisible = false;
     bool m_hideAwayPinned = false;
