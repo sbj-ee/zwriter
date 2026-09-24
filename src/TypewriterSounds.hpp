@@ -1,13 +1,16 @@
 #pragma once
 
 #include <QObject>
+#include <QList>
 #include <QString>
+#include <QStringList>
 
 class QSoundEffect;
 
 // Optional FocusWriter-style key sounds. Default OFF.
-// Bundled samples under assets/sounds/: key.wav (per-char click) and
-// return.wav (carriage return). Prefer QSoundEffect for low latency.
+// Bundled samples under assets/sounds/: key-1..4.wav (type-bar strikes,
+// rotated so fast typing doesn't cut a sample off or sound machine-gunned)
+// and return.wav (carriage slide + bell). Uses QSoundEffect for low latency.
 // No-op when disabled, when samples are absent, or when built without
 // Qt6 Multimedia (ZWRITER_HAS_MULTIMEDIA).
 class TypewriterSounds : public QObject
@@ -32,10 +35,11 @@ private:
     static QString findSample(const QString &fileName);
 
     bool m_enabled = false; // default OFF
-    QString m_keyPath;
+    QStringList m_keyPaths;
     QString m_returnPath;
 #ifdef ZWRITER_HAS_MULTIMEDIA
-    QSoundEffect *m_keyEffect = nullptr;
+    QList<QSoundEffect *> m_keyEffects;
+    int m_nextKey = 0;
     QSoundEffect *m_returnEffect = nullptr;
 #endif
 };

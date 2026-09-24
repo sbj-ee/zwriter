@@ -31,7 +31,12 @@ QString TypewriterSounds::findSample(const QString &fileName)
 TypewriterSounds::TypewriterSounds(QObject *parent)
     : QObject(parent)
 {
-    m_keyPath = findSample(QStringLiteral("key.wav"));
+    for (int i = 1; i <= 4; ++i) {
+        const QString path = findSample(QStringLiteral("key-%1.wav").arg(i));
+        if (!path.isEmpty()) {
+            m_keyPaths.append(path);
+        }
+    }
     m_returnPath = findSample(QStringLiteral("return.wav"));
 }
 
@@ -40,7 +45,7 @@ TypewriterSounds::~TypewriterSounds() = default;
 bool TypewriterSounds::isAvailable() const
 {
 #ifdef ZWRITER_HAS_MULTIMEDIA
-    return !m_keyPath.isEmpty();
+    return !m_keyPaths.isEmpty();
 #else
     return false;
 #endif
@@ -57,22 +62,25 @@ void TypewriterSounds::setEnabled(bool enabled)
 void TypewriterSounds::ensureEffects()
 {
 #ifdef ZWRITER_HAS_MULTIMEDIA
-    if (!m_keyEffect && !m_keyPath.isEmpty()) {
-        m_keyEffect = new QSoundEffect(this);
-        // Qt's implicit device can land on a non-default sink (e.g. an HDMI
-        // monitor); pin to the system default output explicitly.
-        m_keyEffect->setAudioDevice(QMediaDevices::defaultAudioOutput());
-        m_keyEffect->setSource(QUrl::fromLocalFile(m_keyPath));
-        m_keyEffect->setVolume(0.40f);
+    // Qt's implicit device can land on a non-default sink (e.g. an HDMI
+    // monitor); pin every effect to the system default output explicitly.
+    if (m_keyEffects.isEmpty()) {
+        for (const QString &path : std::as_const(m_keyPaths)) {
+            auto *effect = new QSoundEffect(this);
+            effect->setAudioDevice(QMediaDevices::defaultAudioOutput());
+            effect->setSource(QUrl::fromLocalFile(path));
+            effect->setVolume(0.80f);
+            m_keyEffects.append(effect);
+        }
     }
     if (!m_returnEffect && !m_returnPath.isEmpty()) {
         m_returnEffect = new QSoundEffect(this);
         m_returnEffect->setAudioDevice(QMediaDevices::defaultAudioOutput());
         m_returnEffect->setSource(QUrl::fromLocalFile(m_returnPath));
-        m_returnEffect->setVolume(0.45f);
+        m_returnEffect->setVolume(0.80f);
     }
 #else
-    Q_UNUSED(m_keyPath);
+    Q_UNUSED(m_keyPaths);
     Q_UNUSED(m_returnPath);
 #endif
 }
@@ -84,13 +92,15 @@ void TypewriterSounds::playKey()
     }
 #ifdef ZWRITER_HAS_MULTIMEDIA
     ensureEffects();
-    if (m_keyEffect && m_keyEffect->status() != QSoundEffect::Error) {
-        // Restart quickly for rapid typing; QSoundEffect handles overlap poorly
-        // on some backends, so stop-then-play keeps latency low.
-        if (m_keyEffect->isPlaying()) {
-            m_keyEffect->stop();
+    // Round-robin through the variants; each is only reused every Nth key,
+    // so a strike is never cut off by the next keystroke.
+    for (int tries = 0; tries < m_keyEffects.size(); ++tries) {
+        QSoundEffect *effect = m_keyEffects.at(m_nextKey);
+        m_nextKey = (m_nextKey + 1) % m_keyEffects.size();
+        if (effect->status() != QSoundEffect::Error && !effect->isPlaying()) {
+            effect->play();
+            return;
         }
-        m_keyEffect->play();
     }
 #endif
 }
@@ -103,9 +113,6 @@ void TypewriterSounds::playReturn()
 #ifdef ZWRITER_HAS_MULTIMEDIA
     ensureEffects();
     if (m_returnEffect && m_returnEffect->status() != QSoundEffect::Error) {
-        if (m_returnEffect->isPlaying()) {
-            m_returnEffect->stop();
-        }
         m_returnEffect->play();
     } else {
         // Fall back to key click if return sample missing.

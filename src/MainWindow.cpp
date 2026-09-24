@@ -767,7 +767,7 @@ void MainWindow::syncViewActions()
         m_keySoundsAction->setEnabled(avail);
         if (!avail) {
             m_keySoundsAction->setToolTip(QStringLiteral(
-                "Key sounds unavailable (needs Qt6 Multimedia and assets/sounds/key.wav)"));
+                "Key sounds unavailable (needs Qt6 Multimedia and assets/sounds/key-1.wav)"));
         }
     }
     if (m_fullPageViewAction) {
