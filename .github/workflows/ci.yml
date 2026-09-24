@@ -1,13 +1,5 @@
-# zwriter CI — Linux amd64 + Apple Silicon
-#
-# REAL today:
-#   - Install Qt6 / cmake / ninja
-#   - Configure + build the zwriter binary
-#
-# TODO stubs (echo only; must not fail the job):
-#   - Linux .deb via CPack (cmake/Packaging.cmake not wired yet)
-#   - macOS arm64 .dmg via CPack + macdeployqt (same)
-
+# zwriter CI — Linux amd64 + Apple Silicon only (no Windows / no Intel Mac).
+# Version from CMake project() → PROJECT_VERSION; artifacts named like zedit.
 name: ci
 
 on:
@@ -16,33 +8,45 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux:
-    name: Linux amd64 (build real, .deb TODO)
+    name: Linux amd64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Qt6 + build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y -qq qt6-base-dev cmake ninja-build g++ unzip zip
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            qt6-base-dev cmake ninja-build g++ \
+            unzip zip dpkg-dev
 
-      - name: Configure (REAL)
+      - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build (REAL)
+      - name: Build
         run: cmake --build build
 
-      - name: Package .deb (TODO stub)
+      - name: Package .deb
         run: |
-          echo "TODO: wire CPack DEB in cmake/Packaging.cmake"
-          echo "TODO: missing — CPACK_GENERATOR=DEB, maintainer, depends=libqt6widgets6"
-          echo "TODO: cpack -G DEB from build/ once Packaging.cmake is complete"
-          # Intentionally not failing: packaging is not required for CI green.
+          cd build
+          cpack -G DEB
+          ls -la *.deb
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zwriter-linux-amd64-deb
+          path: build/*.deb
+          if-no-files-found: error
 
   macos:
-    name: macOS arm64 (build real, .dmg TODO)
+    name: macOS arm64
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -50,17 +54,26 @@ jobs:
       - name: Install Qt + build tools (brew)
         run: brew install qt cmake ninja
 
-      - name: Configure arm64 (REAL)
+      - name: Configure arm64
         run: |
-          # CMAKE_OSX_ARCHITECTURES=arm64 is forced in CMakeLists.txt before project()
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          # CMAKE_OSX_ARCHITECTURES=arm64 is also forced in CMakeLists before project()
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 
-      - name: Build (REAL)
+      - name: Build
         run: cmake --build build
 
-      - name: Package .dmg (TODO stub)
+      - name: Package .dmg
         run: |
-          echo "TODO: wire CPack DragNDrop in cmake/Packaging.cmake"
-          echo "TODO: missing — macdeployqt bundle of Qt frameworks, CPACK_GENERATOR=DragNDrop"
-          echo "TODO: produce arm64-only .dmg (no Intel Mac / universal binary)"
-          # Intentionally not failing: packaging is not required for CI green.
+          cd build
+          cpack -G DragNDrop
+          ls -la *.dmg
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zwriter-macos-arm64-dmg
+          path: build/*.dmg
+          if-no-files-found: error

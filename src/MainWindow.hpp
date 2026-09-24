@@ -5,6 +5,8 @@
 
 #include <QMainWindow>
 #include <QString>
+#include <QPair>
+#include <QStringList>
 
 class QTextEdit;
 class QLabel;
@@ -14,6 +16,8 @@ class QTimer;
 class QMenu;
 class QPrinter;
 class TypewriterSounds;
+class FindReplaceBar;
+class UpdateChecker;
 
 class MainWindow : public QMainWindow
 {
@@ -36,6 +40,18 @@ private slots:
     void toggleItalic();
     void applyHeading();
     void togglePageGuides();
+    void toggleTypewriterScroll();
+    void toggleFocusMode();
+    void setFocusScopeSentence();
+    void setFocusScopeParagraph();
+    void toggleSmartQuotes();
+    void showFind();
+    void showReplace();
+    void findNext();
+    void findPrev();
+    void replaceOne();
+    void replaceAll();
+    void hideFindBar();
     void fileOpen();
     void fileSave();
     void fileSaveAs();
@@ -44,10 +60,18 @@ private slots:
     void filePageSetup();
     void filePrintPreview();
     void fileProperties();
+    void openRecentFile();
+    void clearRecentFiles();
+    void helpAbout();
+    void helpCheckUpdates();
+    void onUpdateAvailable(const QString &tag, const QString &url);
+    void onUpToDate();
+    void onUpdateCheckFailed();
     void printPreview(QPrinter *printer);
     void hideAwayIdle();
     void syncFormatActions();
     void markDirty();
+    void onCursorMoved();
 
 private:
     void applyDarkTheme();
@@ -56,6 +80,12 @@ private:
     void updateKeySoundsLabel();
     void buildFormatToolbar();
     void buildFileMenu();
+    void buildViewMenu();
+    void buildHelpMenu();
+    void rebuildRecentMenu();
+    void addToRecentFiles(const QString &path);
+    void loadSettings();
+    void saveSettings() const;
     void revealHideAway();
     void scheduleHideAway();
     void considerMouseHideAway(const QPoint &globalPos);
@@ -64,14 +94,24 @@ private:
     bool maybeSave();
     bool saveToPath(const QString &path, DocumentIo::Format format);
     void setCurrentFile(const QString &path, DocumentIo::Format format);
+    bool openPath(const QString &path);
     void doPrint(QPrinter *printer);
     void paintPageGuides();
+    void centerCaret();
+    void updateFocusHighlight();
+    QPair<int, int> focusRange() const; // start, end positions in document
+    bool trySmartTypography(QKeyEvent *event);
+    bool findInDoc(bool forward);
+    void syncViewActions();
 
     QTextEdit *m_editor = nullptr;
+    FindReplaceBar *m_findBar = nullptr;
     QLabel *m_statsLabel = nullptr;
     QLabel *m_keysLabel = nullptr;
     QToolBar *m_formatBar = nullptr;
     QMenu *m_fileMenu = nullptr;
+    QMenu *m_viewMenu = nullptr;
+    QMenu *m_recentMenu = nullptr;
     QTimer *m_hideTimer = nullptr;
     QAction *m_boldAction = nullptr;
     QAction *m_italicAction = nullptr;
@@ -80,14 +120,28 @@ private:
     QAction *m_h3Action = nullptr;
     QAction *m_paragraphAction = nullptr;
     QAction *m_pageGuidesAction = nullptr;
+    QAction *m_typewriterScrollAction = nullptr;
+    QAction *m_focusModeAction = nullptr;
+    QAction *m_focusSentenceAction = nullptr;
+    QAction *m_focusParagraphAction = nullptr;
+    QAction *m_smartQuotesAction = nullptr;
     TypewriterSounds *m_keySounds = nullptr;
+    UpdateChecker *m_updateChecker = nullptr;
+    QAction *m_checkUpdatesAction = nullptr;
+    QMenu *m_helpMenu = nullptr;
     QPrinter *m_printer = nullptr;
 
     QString m_currentPath;
     DocumentIo::Format m_currentFormat = DocumentIo::Format::Odt;
     DocumentMeta m_meta;
+    QStringList m_recentFiles;
     bool m_dirty = false;
     bool m_chromeVisible = false;
     bool m_hideAwayPinned = false;
     bool m_pageGuides = false;
+    bool m_typewriterScroll = true;   // default ON — distraction-free
+    bool m_focusMode = false;         // default OFF
+    bool m_focusSentence = false;     // false = paragraph scope
+    bool m_smartQuotes = false;       // default OFF
+    bool m_centering = false;         // re-entrancy guard for scroll
 };

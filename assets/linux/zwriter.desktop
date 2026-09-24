@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=zwriter
+Comment=Distraction-free writing for Linux and Apple Silicon
+Exec=zwriter %F
+Icon=zwriter
+Terminal=false
+Categories=Office;WordProcessor;
+StartupWMClass=zwriter
+MimeType=application/vnd.oasis.opendocument.text;text/plain;application/rtf;text/rtf;
