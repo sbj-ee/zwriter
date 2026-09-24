@@ -84,26 +84,80 @@ else()
 endif()
 
 # Optional Hunspell spell-check (en_US system dictionary).
+# Source uses #include <hunspell/hunspell.hxx>, so the include root must be the
+# parent of the hunspell/ subdirectory (e.g. /usr/include, brew .../include).
+# Upstream hunspell.pc sets Cflags: -I${includedir}/hunspell (for
+# #include <hunspell.hxx>), which breaks our include style on Homebrew —
+# do not wire PkgConfig::HUNSPELL's include dirs blindly.
+set(_zwriter_hunspell_hints)
+if(DEFINED ENV{HOMEBREW_PREFIX})
+  list(APPEND _zwriter_hunspell_hints "$ENV{HOMEBREW_PREFIX}")
+endif()
+find_program(_ZWRITER_BREW_EXECUTABLE brew)
+if(_ZWRITER_BREW_EXECUTABLE)
+  execute_process(
+    COMMAND "${_ZWRITER_BREW_EXECUTABLE}" --prefix hunspell
+    OUTPUT_VARIABLE _zwriter_brew_hunspell
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(_zwriter_brew_hunspell)
+    list(APPEND _zwriter_hunspell_hints "${_zwriter_brew_hunspell}")
+  endif()
+endif()
+list(APPEND _zwriter_hunspell_hints /opt/homebrew /usr/local /usr)
+
+find_path(HUNSPELL_INCLUDE_DIR
+  NAMES hunspell/hunspell.hxx
+  HINTS ${_zwriter_hunspell_hints}
+  PATH_SUFFIXES include
+)
+find_library(HUNSPELL_LIBRARY
+  NAMES hunspell-1.7 hunspell
+  HINTS ${_zwriter_hunspell_hints}
+  PATH_SUFFIXES lib
+)
+
+# pkg-config: use for library discovery / path normalization only.
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-  pkg_check_modules(HUNSPELL IMPORTED_TARGET hunspell)
-endif()
-if(TARGET PkgConfig::HUNSPELL)
-  target_link_libraries(zwriter PRIVATE PkgConfig::HUNSPELL)
-  target_compile_definitions(zwriter PRIVATE ZWRITER_HAS_HUNSPELL=1)
-  message(STATUS "zwriter: Hunspell found — spell check enabled")
-else()
-  # Fallback: try brew / manual paths without pkg-config.
-  find_path(HUNSPELL_INCLUDE_DIR hunspell/hunspell.hxx)
-  find_library(HUNSPELL_LIBRARY NAMES hunspell-1.7 hunspell)
-  if(HUNSPELL_INCLUDE_DIR AND HUNSPELL_LIBRARY)
-    target_include_directories(zwriter PRIVATE ${HUNSPELL_INCLUDE_DIR})
-    target_link_libraries(zwriter PRIVATE ${HUNSPELL_LIBRARY})
-    target_compile_definitions(zwriter PRIVATE ZWRITER_HAS_HUNSPELL=1)
-    message(STATUS "zwriter: Hunspell found (manual) — spell check enabled")
-  else()
-    message(STATUS "zwriter: Hunspell not found — spell check stubs as no-op")
+  pkg_check_modules(HUNSPELL_PC QUIET hunspell)
+  if(HUNSPELL_PC_FOUND)
+    if(NOT HUNSPELL_LIBRARY)
+      if(HUNSPELL_PC_LINK_LIBRARIES)
+        set(HUNSPELL_LIBRARY ${HUNSPELL_PC_LINK_LIBRARIES})
+      else()
+        set(HUNSPELL_LIBRARY ${HUNSPELL_PC_LIBRARIES})
+      endif()
+    endif()
+    if(NOT HUNSPELL_INCLUDE_DIR AND HUNSPELL_PC_INCLUDE_DIRS)
+      foreach(_inc IN LISTS HUNSPELL_PC_INCLUDE_DIRS)
+        get_filename_component(_tail "${_inc}" NAME)
+        if(_tail STREQUAL "hunspell")
+          get_filename_component(_parent "${_inc}" DIRECTORY)
+          if(EXISTS "${_parent}/hunspell/hunspell.hxx")
+            set(HUNSPELL_INCLUDE_DIR "${_parent}")
+            break()
+          endif()
+        elseif(EXISTS "${_inc}/hunspell/hunspell.hxx")
+          set(HUNSPELL_INCLUDE_DIR "${_inc}")
+          break()
+        endif()
+      endforeach()
+    endif()
   endif()
+endif()
+
+if(HUNSPELL_INCLUDE_DIR AND HUNSPELL_LIBRARY)
+  target_include_directories(zwriter PRIVATE ${HUNSPELL_INCLUDE_DIR})
+  target_link_libraries(zwriter PRIVATE ${HUNSPELL_LIBRARY})
+  if(HUNSPELL_PC_LIBRARY_DIRS)
+    target_link_directories(zwriter PRIVATE ${HUNSPELL_PC_LIBRARY_DIRS})
+  endif()
+  target_compile_definitions(zwriter PRIVATE ZWRITER_HAS_HUNSPELL=1)
+  message(STATUS "zwriter: Hunspell found — spell check enabled (${HUNSPELL_INCLUDE_DIR})")
+else()
+  message(STATUS "zwriter: Hunspell not found — spell check stubs as no-op")
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.
