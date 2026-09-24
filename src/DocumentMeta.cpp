@@ -46,10 +46,9 @@ void DocumentMeta::ensureDefaults()
     if (!lastEdited.isValid()) {
         lastEdited = created;
     }
-    if (!headerFooterSeeded) {
-        footerCenter = QStringLiteral("{page}");
-        headerFooterSeeded = true;
-    }
+    // New documents start with no header/footer; page numbers are opt-in
+    // (Format -> Page Numbers).
+    headerFooterSeeded = true;
 }
 
 bool DocumentMeta::hasHeaderFooter() const

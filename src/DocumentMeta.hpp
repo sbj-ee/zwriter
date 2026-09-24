@@ -14,7 +14,7 @@ struct DocumentMeta {
     QString headerCenter;
     QString headerRight;
     QString footerLeft;
-    QString footerCenter; // shipping default: "{page}"
+    QString footerCenter; // empty by default; Format -> Page Numbers sets "{page}"
     QString footerRight;
 
     static QString defaultAuthor();

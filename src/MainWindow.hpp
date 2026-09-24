@@ -9,6 +9,8 @@
 #include <QStringList>
 
 class QTextEdit;
+class PageTextEdit;
+class PageCanvas;
 class QLabel;
 class QToolBar;
 class QAction;
@@ -144,7 +146,13 @@ private:
     static QString suffixForFilter(const QString &filter);
     static void syncSaveNameToFilter(QFileDialog &dlg, const QString &filter);
     void doPrint(QPrinter *printer);
-    void paintPageGuides();
+    void paintPageOverlays();
+    void paintPageGuides(QPainter &painter, int pages, qreal pageH);
+    void syncPageFrameHeight();
+    void updatePageLabel();
+    void togglePageNumbers();
+    void insertPageBreak();
+    bool pageNumbersOn() const;
     void paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
                            int pageNumber, int pageCount) const;
     QString expandHeaderFooterTokens(const QString &pattern, int pageNumber,
@@ -166,11 +174,15 @@ private:
     void updateTableActions();
     bool isPaperTheme() const;
 
-    QTextEdit *m_editor = nullptr;
+    PageTextEdit *m_editor = nullptr;
+    PageCanvas *m_pageCanvas = nullptr;
+    QLabel *m_pageLabel = nullptr;
+    QAction *m_pageNumbersAction = nullptr;
+    bool m_pageSyncQueued = false;
+    bool m_mouseActive = false;       // pointer button held in the editor
     QWidget *m_desk = nullptr;
     QScrollArea *m_pageScroll = nullptr;
     QFrame *m_pageFrame = nullptr;
-    QGraphicsDropShadowEffect *m_pageShadow = nullptr;
     FindReplaceBar *m_findBar = nullptr;
     QLabel *m_statsLabel = nullptr;
     QToolBar *m_formatBar = nullptr;

@@ -10,6 +10,13 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextDocumentWriter>
+#include <QList>
+#include <QTextBlock>
+#include <QStringList>
+#include <QColor>
+#include <QTextTableFormat>
+#include <QTextTable>
+#include <QTextFrame>
 #include <QXmlStreamReader>
 
 namespace DocumentIo {
@@ -153,18 +160,49 @@ QString odtXmlToHtml(const QByteArray &xml)
         QString fontSize; // e.g. "12pt"
         bool bold = false;
         bool italic = false;
+        bool underline = false;
+        QString align;          // CSS text-align value, empty = default
+        bool breakBefore = false; // manual page break before the paragraph
+    };
+
+    struct ListInfo {
+        bool ordered = false;
+        QString type; // HTML list type: disc/circle/square or 1/a/A/i/I
     };
 
     QHash<QString, StyleInfo> styles;
+    QHash<QString, ListInfo> listStyles;
     {
         QXmlStreamReader pass1(xml);
         QString currentStyle;
+        QString currentListStyle;
         while (!pass1.atEnd()) {
             const auto token = pass1.readNext();
             if (token == QXmlStreamReader::StartElement) {
                 const QStringView name = pass1.name();
                 if (name == QLatin1String("style")) {
                     currentStyle = pass1.attributes().value(QStringLiteral("style:name")).toString();
+                } else if (name == QLatin1String("list-style")) {
+                    currentListStyle = pass1.attributes().value(QStringLiteral("style:name")).toString();
+                } else if ((name == QLatin1String("list-level-style-bullet")
+                            || name == QLatin1String("list-level-style-number"))
+                           && !currentListStyle.isEmpty() && !listStyles.contains(currentListStyle)) {
+                    // First (outermost) level decides the list's look.
+                    ListInfo info;
+                    const auto attrs = pass1.attributes();
+                    if (name == QLatin1String("list-level-style-number")) {
+                        info.ordered = true;
+                        const QString fmt = attrs.value(QStringLiteral("style:num-format")).toString();
+                        info.type = (fmt == QLatin1String("a") || fmt == QLatin1String("A")
+                                     || fmt == QLatin1String("i") || fmt == QLatin1String("I"))
+                            ? fmt : QStringLiteral("1");
+                    } else {
+                        const QString bullet = attrs.value(QStringLiteral("text:bullet-char")).toString();
+                        info.type = (bullet == QStringLiteral("○")) ? QStringLiteral("circle")
+                            : (bullet == QStringLiteral("■") || bullet == QStringLiteral("▪"))
+                                ? QStringLiteral("square") : QStringLiteral("disc");
+                    }
+                    listStyles.insert(currentListStyle, info);
                 } else if (name == QLatin1String("text-properties") && !currentStyle.isEmpty()) {
                     StyleInfo info = styles.value(currentStyle);
                     const auto attrs = pass1.attributes();
@@ -189,11 +227,32 @@ QString odtXmlToHtml(const QByteArray &xml)
                     if (fstyle == QLatin1String("italic") || fstyle == QLatin1String("oblique")) {
                         info.italic = true;
                     }
+                    const QString underline =
+                        attrs.value(QStringLiteral("style:text-underline-style")).toString().toLower();
+                    if (!underline.isEmpty() && underline != QLatin1String("none")) {
+                        info.underline = true;
+                    }
+                    styles.insert(currentStyle, info);
+                } else if (name == QLatin1String("paragraph-properties") && !currentStyle.isEmpty()) {
+                    StyleInfo info = styles.value(currentStyle);
+                    const auto attrs = pass1.attributes();
+                    const QString align = attrs.value(QStringLiteral("fo:text-align")).toString().toLower();
+                    if (align == QLatin1String("center") || align == QLatin1String("justify")) {
+                        info.align = align;
+                    } else if (align == QLatin1String("end") || align == QLatin1String("right")) {
+                        info.align = QStringLiteral("right");
+                    }
+                    if (attrs.value(QStringLiteral("fo:break-before")).toString().toLower()
+                        == QLatin1String("page")) {
+                        info.breakBefore = true;
+                    }
                     styles.insert(currentStyle, info);
                 }
             } else if (token == QXmlStreamReader::EndElement) {
                 if (pass1.name() == QLatin1String("style")) {
                     currentStyle.clear();
+                } else if (pass1.name() == QLatin1String("list-style")) {
+                    currentListStyle.clear();
                 }
             }
         }
@@ -204,13 +263,20 @@ QString odtXmlToHtml(const QByteArray &xml)
         "<html><body style=\"font-family: 'Courier New', 'Liberation Mono', 'Noto Sans Mono', "
         "Courier, Menlo, Monaco, 'DejaVu Sans Mono', monospace; font-size: 12pt; color: #1a1a1a;\">");
 
+    QStringList listClosers; // closing tags for the currently open lists
     int headingLevel = 0;
     bool inBold = false;
     bool inItalic = false;
+    bool inUnderline = false;
     bool inP = false;
+    bool pHasContent = false; // Qt's HTML import drops paragraphs with no content
     bool inStyleSpan = false;
 
     auto closeInline = [&]() {
+        if (inUnderline) {
+            html += QStringLiteral("</u>");
+            inUnderline = false;
+        }
         if (inItalic) {
             html += QStringLiteral("</i>");
             inItalic = false;
@@ -236,6 +302,18 @@ QString odtXmlToHtml(const QByteArray &xml)
         return css;
     };
 
+    // Block-level properties only make sense on <p>/<h*>, not on inline spans.
+    auto blockCss = [&](const StyleInfo &info) -> QString {
+        QString css = cssFromStyle(info);
+        if (!info.align.isEmpty()) {
+            css += QStringLiteral("text-align:%1;").arg(info.align);
+        }
+        if (info.breakBefore) {
+            css += QStringLiteral("page-break-before:always;");
+        }
+        return css;
+    };
+
     auto openParagraph = [&](int level, const QString &styleName) {
         if (inP) {
             closeInline();
@@ -245,8 +323,9 @@ QString odtXmlToHtml(const QByteArray &xml)
         }
         headingLevel = level;
         inP = true;
+        pHasContent = false;
         const StyleInfo info = styles.value(styleName);
-        const QString css = cssFromStyle(info);
+        const QString css = blockCss(info);
         const QString styleAttr = css.isEmpty()
             ? QString()
             : QStringLiteral(" style=\"%1\"").arg(css);
@@ -266,6 +345,10 @@ QString odtXmlToHtml(const QByteArray &xml)
         if (info.italic) {
             html += QStringLiteral("<i>");
             inItalic = true;
+        }
+        if (info.underline) {
+            html += QStringLiteral("<u>");
+            inUnderline = true;
         }
     };
 
@@ -313,12 +396,48 @@ QString odtXmlToHtml(const QByteArray &xml)
                     html += QStringLiteral("<i>");
                     inItalic = true;
                 }
+                if (info.underline) {
+                    html += QStringLiteral("<u>");
+                    inUnderline = true;
+                }
+            } else if (name == QLatin1String("list")) {
+                const ListInfo info = listStyles.value(
+                    reader.attributes().value(QStringLiteral("text:style-name")).toString());
+                if (info.ordered) {
+                    html += QStringLiteral("<ol type=\"%1\">").arg(info.type);
+                    listClosers.append(QStringLiteral("</ol>"));
+                } else {
+                    html += QStringLiteral("<ul type=\"%1\">")
+                                .arg(info.type.isEmpty() ? QStringLiteral("disc") : info.type);
+                    listClosers.append(QStringLiteral("</ul>"));
+                }
+            } else if (name == QLatin1String("list-item")) {
+                html += QStringLiteral("<li>");
+            } else if (name == QLatin1String("table")) {
+                html += QStringLiteral("<table>");
+            } else if (name == QLatin1String("table-row")) {
+                html += QStringLiteral("<tr>");
+            } else if (name == QLatin1String("table-cell")) {
+                const auto attrs = reader.attributes();
+                const int colspan = attrs.value(QStringLiteral("table:number-columns-spanned")).toInt();
+                const int rowspan = attrs.value(QStringLiteral("table:number-rows-spanned")).toInt();
+                html += QStringLiteral("<td");
+                if (colspan > 1) {
+                    html += QStringLiteral(" colspan=\"%1\"").arg(colspan);
+                }
+                if (rowspan > 1) {
+                    html += QStringLiteral(" rowspan=\"%1\"").arg(rowspan);
+                }
+                html += QLatin1Char('>');
             } else if (name == QLatin1String("s")) {
                 html += QLatin1Char(' ');
+                pHasContent = true;
             } else if (name == QLatin1String("tab")) {
                 html += QLatin1Char('\t');
+                pHasContent = true;
             } else if (name == QLatin1String("line-break")) {
                 html += QStringLiteral("<br/>");
+                pHasContent = true;
             } else if (name == QLatin1String("a")) {
                 // keep text only
             }
@@ -326,7 +445,22 @@ QString odtXmlToHtml(const QByteArray &xml)
             const QStringView name = reader.name();
             if (name == QLatin1String("span")) {
                 closeInline();
+            } else if (name == QLatin1String("list-item")) {
+                html += QStringLiteral("</li>");
+            } else if (name == QLatin1String("list")) {
+                if (!listClosers.isEmpty()) {
+                    html += listClosers.takeLast();
+                }
+            } else if (name == QLatin1String("table-cell")) {
+                html += QStringLiteral("</td>");
+            } else if (name == QLatin1String("table-row")) {
+                html += QStringLiteral("</tr>");
+            } else if (name == QLatin1String("table")) {
+                html += QStringLiteral("</table>");
             } else if (name == QLatin1String("p") || name == QLatin1String("h")) {
+                if (inP && !pHasContent) {
+                    html += QStringLiteral("<br/>"); // keep blank paragraphs (blank lines)
+                }
                 closeInline();
                 if (inP) {
                     html += (headingLevel > 0)
@@ -338,6 +472,7 @@ QString odtXmlToHtml(const QByteArray &xml)
             }
         } else if (token == QXmlStreamReader::Characters && !reader.isWhitespace()) {
             html += reader.text().toString().toHtmlEscaped();
+            pHasContent = true;
         }
     }
 
@@ -348,6 +483,76 @@ QString odtXmlToHtml(const QByteArray &xml)
     }
     html += QStringLiteral("</body></html>");
     return html;
+}
+
+// Give reloaded tables the same look as Insert Table (the ODT reader only
+// recovers structure, not the cell/border styling).
+void restyleTables(QTextFrame *frame)
+{
+    for (QTextFrame *child : frame->childFrames()) {
+        if (auto *table = qobject_cast<QTextTable *>(child)) {
+            QTextTableFormat fmt = table->format();
+            fmt.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+            fmt.setBorder(1.5);
+            fmt.setBorderBrush(QColor(QStringLiteral("#a0a0a0")));
+            fmt.setCellPadding(8);
+            fmt.setCellSpacing(0);
+            fmt.setWidth(QTextLength(QTextLength::PercentageLength, 100));
+            table->setFormat(fmt);
+        }
+        restyleTables(child);
+    }
+}
+
+// Qt's HTML importer quirks, normalised after import so a document survives
+// repeated save/open cycles unchanged:
+//  * an empty paragraph arrives as a block holding a lone U+2028 line separator
+//    (from the <br/> that keeps it alive) — make it truly empty;
+//  * an extra empty paragraph is inserted after every table.
+void collectTables(QTextFrame *frame, QList<QTextTable *> *out)
+{
+    for (QTextFrame *child : frame->childFrames()) {
+        if (auto *table = qobject_cast<QTextTable *>(child)) {
+            out->append(table);
+        }
+        collectTables(child, out);
+    }
+}
+
+void normaliseImportedBlocks(QTextDocument *doc)
+{
+    // 1) lone line separators -> empty blocks
+    QTextCursor c(doc);
+    c.beginEditBlock();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        if (b.text() == QString(QChar(QChar::LineSeparator))) {
+            QTextCursor sel(b);
+            sel.movePosition(QTextCursor::StartOfBlock);
+            sel.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+            sel.removeSelectedText();
+        }
+    }
+
+    // 2) drop the importer's spare empty block after each table (never the last block)
+    QList<QTextTable *> tables;
+    collectTables(doc->rootFrame(), &tables);
+    for (QTextTable *table : std::as_const(tables)) {
+        QTextCursor after = table->lastCursorPosition();
+        after.movePosition(QTextCursor::NextBlock);
+        const QTextBlock spare = after.block();
+        const QTextBlock next = spare.next();
+        if (!spare.isValid() || !spare.text().isEmpty() || !next.isValid()
+            || QTextCursor(spare).currentTable()) {
+            continue;
+        }
+        // Merge the spare block into the following one, keeping that block's format.
+        const QTextBlockFormat keep = next.blockFormat();
+        QTextCursor merge(spare);
+        merge.movePosition(QTextCursor::StartOfBlock);
+        merge.deleteChar();
+        merge.setBlockFormat(keep);
+    }
+    c.endEditBlock();
 }
 
 bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
@@ -371,6 +576,9 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
         return false;
     }
     doc->setHtml(odtXmlToHtml(xml));
+    restyleTables(doc->rootFrame());
+    normaliseImportedBlocks(doc);
+    doc->setModified(false);
     return true;
 }
 

@@ -26,11 +26,11 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 
 - **Quiet formatting toolbar** (auto-hide optional; shown by default): font family + size, **B / I / U**, and a paragraph-style dropdown (Body / Heading 1–3). Everything else — alignment, lists, tables, clear formatting — is in the Format menu
 - **Paper and ink** (default) or **Dark room** theme — the whole window follows the theme (warm light chrome with a paper page, or calm charcoal); View → Theme (persisted in QSettings). Slim scrollbars, roomy menus, window size and position remembered
-- **Full Page view** (default **on**) — centered paper page on a desk background at **true physical size** (mm → DIPs via logical DPI; scroll if the window is smaller); shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF use the same page metrics; View → Full Page (Ctrl+Shift+P); off = continuous strip
+- **Full Page view** (default **on**) — centered paper page on a desk background at **true physical size** (mm → DIPs via logical DPI); **multi-page**: the paper grows as you write, pages are stacked with a visible break and real top/bottom margins, the window follows the caret onto the next page, and the status bar shows **Page N of M** — what you see matches print and PDF; shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF use the same page metrics; View → Full Page (Ctrl+Shift+P); off = continuous strip
 - **Default body face: typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Courier` → `Courier Prime` → `Nimbus Mono PS` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
-- **Five menus, nothing extra**: **File** (New / Open / Recent / Save / Export PDF / Print / Page Setup / Properties / Quit), **Edit** (Undo–Redo, Cut/Copy/Paste, Paste as Plain Text, Find / Replace), **Format** (B/I/U, Paragraph Style, Align, Lists, Insert Table, Table rows/columns, Header & Footer, Clear Formatting), **View** (Full Page, Page Guides, Typewriter Scroll, Focus Mode, Key Sounds, Spell Check, Smart Quotes, Theme, Always Show Toolbar, Full Screen), **Help**
+- **Five menus, nothing extra**: **File** (New / Open / Recent / Save / Export PDF / Print / Page Setup / Properties / Quit), **Edit** (Undo–Redo, Cut/Copy/Paste, Paste as Plain Text, Find / Replace), **Format** (B/I/U, Paragraph Style, Align, Lists, Insert Table, Table rows/columns, Insert Page Break, Page Numbers, Header & Footer, Clear Formatting), **View** (Full Page, Page Guides, Typewriter Scroll, Focus Mode, Key Sounds, Spell Check, Smart Quotes, Theme, Always Show Toolbar, Full Screen), **Help**
 - **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
-- **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1)
+- **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1). ODT round-trips fonts/sizes, bold/italic/underline, headings, alignment, bulleted/numbered/nested lists, tables (incl. merged cells), blank paragraphs and manual page breaks — a document reopens identically across repeated save/open cycles
 - **Export PDF…** (export-only — not a native edit/save format) via `QPrinter` PdfFormat
 - **Print options** (lean): native OS print dialog, page setup (paper / orientation / margins; default **A4**), print preview; paper size persisted in QSettings
 - **Page guides** toggle (Ctrl+Alt+G) — simple column margin guides, not a Word ruler
@@ -45,7 +45,8 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 - Optional typewriter key-sound toggle (**default off**) — old-manual-typewriter `key-1..6.wav` strikes (random variant per key), `space.wav` for Space/Backspace, and `return.wav` carriage slide and bell; typing/Return only (not arrow navigation)
 - Typewriter icon branding
 - **Tables** (QTextTable): Format → Insert Table…; Tab between cells; add/remove row or column; ODT + PDF/print
-- **Header & Footer** (Format → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; default footer center `{page}`
+- **Header & Footer** (Format → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; **page numbers are optional** — Format → Page Numbers toggles a centered footer `{page}` (off by default); drawn on every page
+- **Manual page break** (Format → Insert Page Break, `Ctrl+Enter`): splits the paragraph and starts a new page; Backspace at the start of the new page removes it. Saved to ODT (`fo:break-before="page"`) and honoured in Full Page view, print and PDF
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
 - **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
 - CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg`)
@@ -54,11 +55,11 @@ Working **v1 feature core** on a dark distraction-free `QTextEdit` surface.
 
 - Richer themes pack (beyond Paper / Dark room), autosave + restore cursor, multi-document / sessions
 - Daily word / time goal, scene / chapter navigation
-- Richer ODT/RTF style round-trip; RTF is plain-text-oriented best-effort
+- Richer ODT/RTF style round-trip (colours, images, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is plain-text-oriented best-effort
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it
 - macOS `.dmg` ships the binary (not a full `.app` + macdeployqt bundle yet)
 - Status extras (pages / paragraphs) — later
-- Full Page view is one true-size page frame (scroll the desk if needed; scroll inside for overflow); not multi-page WYSIWYG with inter-page gaps
+- Mouse-drag selection does not auto-scroll past the window edge in Full Page view (scroll, then shift-click); no widow/orphan control or keep-with-next
 
 ## v1 IN
 
@@ -199,7 +200,9 @@ cd build && cpack -G DragNDrop
 | `Ctrl+N` | New document |
 | `Ctrl+Shift+V` | Paste as plain text |
 | `Ctrl+Alt+G` | Toggle page guides |
+| `Ctrl+Enter` | Insert page break |
 | `Ctrl+Shift+P` | Toggle Full Page view (default on) |
+| `PgUp` / `PgDn` | Move by one window in Full Page view (Shift extends selection) |
 | `Ctrl+Shift+E` | Export PDF… |
 | `Ctrl+P` | Print… |
 | `Ctrl+Shift+T` | Toggle typewriter scroll (default on) |

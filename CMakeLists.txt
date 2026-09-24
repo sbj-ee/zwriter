@@ -61,6 +61,8 @@ add_executable(zwriter
   src/SpellChecker.hpp
   src/SpellHighlighter.cpp
   src/SpellHighlighter.hpp
+  src/PageWidgets.cpp
+  src/PageWidgets.hpp
   src/Theme.cpp
   src/Theme.hpp
   src/icons.qrc

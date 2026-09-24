@@ -6,6 +6,7 @@
 #include "SpellChecker.hpp"
 #include "SpellHighlighter.hpp"
 #include "InsertTableDialog.hpp"
+#include "PageWidgets.hpp"
 #include "PropertiesDialog.hpp"
 #include "TypewriterSounds.hpp"
 #include "UpdateChecker.hpp"
@@ -27,6 +28,7 @@
 #include <QFontComboBox>
 #include <QFontInfo>
 #include <QIcon>
+#include <QRegularExpression>
 #include <QPushButton>
 #include "Theme.hpp"
 #include <QTextListFormat>
@@ -127,7 +129,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_pageScroll = new QScrollArea(m_desk);
     m_pageScroll->setObjectName(QStringLiteral("pageScroll"));
     m_pageScroll->setFrameShape(QFrame::NoFrame);
-    m_pageScroll->setWidgetResizable(false);
+    m_pageScroll->setWidgetResizable(true);
     m_pageScroll->setAlignment(Qt::AlignCenter);
     m_pageScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_pageScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -139,7 +141,7 @@ MainWindow::MainWindow(QWidget *parent)
     pageLayout->setContentsMargins(0, 0, 0, 0);
     pageLayout->setSpacing(0);
 
-    m_editor = new QTextEdit(m_pageFrame);
+    m_editor = new PageTextEdit(m_pageFrame);
     m_editor->setAcceptRichText(true);
     m_editor->setFrameShape(QFrame::NoFrame);
     // Clear vertical bar caret. Qt draws it by inverting the pixels under it:
@@ -147,14 +149,29 @@ MainWindow::MainWindow(QWidget *parent)
     m_editor->setCursorWidth(2);
     pageLayout->addWidget(m_editor);
 
-    m_pageScroll->setWidget(m_pageFrame);
+    m_pageCanvas = new PageCanvas(m_pageFrame);
+    m_pageScroll->setWidget(m_pageCanvas);
+    // QScrollArea auto-fills its widget; let the desk colour show through instead.
+    m_pageCanvas->setAutoFillBackground(false);
+    m_pageScroll->viewport()->setAutoFillBackground(false);
     deskLayout->addWidget(m_pageScroll, 1);
 
-    m_pageShadow = new QGraphicsDropShadowEffect(m_pageFrame);
-    m_pageShadow->setBlurRadius(32);
-    m_pageShadow->setOffset(0, 8);
-    m_pageShadow->setColor(QColor(0, 0, 0, 100));
-    m_pageFrame->setGraphicsEffect(m_pageShadow);
+    // Pages appear as the document grows: keep the paper exactly N pages tall.
+    // (pageCountChanged does not fire while typing; documentSizeChanged does.
+    // Resizing from inside a layout callback would re-enter the layout, so the
+    // work is deferred and coalesced.)
+    connect(m_editor->document()->documentLayout(),
+            &QAbstractTextDocumentLayout::documentSizeChanged, this, [this](const QSizeF &) {
+                if (m_pageSyncQueued) {
+                    return;
+                }
+                m_pageSyncQueued = true;
+                QTimer::singleShot(0, this, [this]() {
+                    m_pageSyncQueued = false;
+                    syncPageFrameHeight();
+                    updatePageLabel();
+                });
+            });
 
     layout->addWidget(m_desk, 1);
     setCentralWidget(central);
@@ -177,6 +194,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_updateChecker, &UpdateChecker::checkFailed, this,
             &MainWindow::onUpdateCheckFailed);
 
+    m_pageLabel = new QLabel(this);
+    statusBar()->addPermanentWidget(m_pageLabel);
     m_statsLabel = new QLabel(this);
     statusBar()->addPermanentWidget(m_statsLabel);
     statusBar()->setSizeGripEnabled(false);
@@ -524,10 +543,10 @@ void MainWindow::createFormatActions()
     });
 
     // Lists.
-    m_bulletListAction = make(QStringLiteral("&Bulleted List"),
+    m_bulletListAction = make(QStringLiteral("Bulleted &List"),
                               QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_B),
                               QStringLiteral("Bulleted list (Ctrl+Shift+B)"), true);
-    m_numberListAction = make(QStringLiteral("&Numbered List"),
+    m_numberListAction = make(QStringLiteral("Nu&mbered List"),
                               QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N),
                               QStringLiteral("Numbered list (Ctrl+Shift+N)"), true);
     connect(m_bulletListAction, &QAction::triggered, this, [this](bool on) {
@@ -585,6 +604,20 @@ void MainWindow::buildFormatMenu()
     tableMenu->addSeparator();
     tableMenu->addAction(m_tableRemoveRowAction);
     tableMenu->addAction(m_tableRemoveColAction);
+
+    auto *pageBreakAct = m_formatMenu->addAction(QStringLiteral("Insert Page &Break"));
+    pageBreakAct->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_Return),
+                                QKeySequence(Qt::CTRL | Qt::Key_Enter)});
+    pageBreakAct->setToolTip(QStringLiteral(
+        "Start a new page here (Ctrl+Enter). To remove a break, press Backspace at the start of the new page."));
+    connect(pageBreakAct, &QAction::triggered, this, &MainWindow::insertPageBreak);
+    addAction(pageBreakAct);
+
+    m_pageNumbersAction = m_formatMenu->addAction(QStringLiteral("Page &Numbers"));
+    m_pageNumbersAction->setCheckable(true);
+    m_pageNumbersAction->setToolTip(
+        QStringLiteral("Show page numbers in the footer (off by default; more options in Header & Footer…)"));
+    connect(m_pageNumbersAction, &QAction::triggered, this, &MainWindow::togglePageNumbers);
 
     auto *hfAct = m_formatMenu->addAction(QStringLiteral("&Header && Footer…"));
     hfAct->setToolTip(QStringLiteral("Edit page header and footer (page numbers via {page} / {pages})"));
@@ -910,6 +943,10 @@ void MainWindow::clearRecentFiles()
 
 void MainWindow::syncViewActions()
 {
+    if (m_pageNumbersAction) {
+        const QSignalBlocker b(m_pageNumbersAction);
+        m_pageNumbersAction->setChecked(pageNumbersOn());
+    }
     if (m_typewriterScrollAction) {
         const QSignalBlocker b(m_typewriterScrollAction);
         m_typewriterScrollAction->setChecked(m_typewriterScroll);
@@ -1074,7 +1111,8 @@ void MainWindow::applyDocumentDefaults()
     m_editor->document()->setDefaultFont(font);
     QTextCharFormat fmt;
     fmt.setFont(font);
-    fmt.setForeground(Theme::colors(isPaperTheme()).pageFg);
+    // No explicit foreground: text follows the theme's colour (so switching
+    // Paper <-> Dark recolours existing text) and exports/prints as plain black.
     m_editor->setCurrentCharFormat(fmt);
     if (m_fontCombo) {
         const QSignalBlocker b(m_fontCombo);
@@ -1097,7 +1135,7 @@ void MainWindow::setThemePaper()
     syncViewActions();
     updateFocusHighlight();
     if (m_pageGuides) {
-        paintPageGuides();
+        m_editor->viewport()->update();
     }
 }
 
@@ -1112,7 +1150,7 @@ void MainWindow::setThemeDark()
     syncViewActions();
     updateFocusHighlight();
     if (m_pageGuides) {
-        paintPageGuides();
+        m_editor->viewport()->update();
     }
 }
 
@@ -1132,11 +1170,11 @@ void MainWindow::applyTheme()
         m_pageScroll->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; border: none; }"));
     }
 
-    // Keep the typing colour aligned with the page theme for new text.
+    // Typed text carries no explicit colour, so it follows the theme.
     if (m_editor) {
         QTextCharFormat cur = m_editor->currentCharFormat();
-        cur.setForeground(c.pageFg);
-        m_editor->mergeCurrentCharFormat(cur);
+        cur.clearForeground();
+        m_editor->setCurrentCharFormat(cur);
     }
 }
 
@@ -1444,15 +1482,36 @@ void MainWindow::onCursorMoved()
     centerCaret();
     updateFocusHighlight();
     updateTableActions();
+    updatePageLabel();
 }
 
 void MainWindow::centerCaret()
 {
-    if (!m_typewriterScroll || m_centering || !m_editor) {
+    if (m_centering || !m_editor) {
+        return;
+    }
+    const QRect cr = m_editor->cursorRect();
+
+    if (m_fullPageView && m_pageScroll && m_pageCanvas) {
+        // Pages stack in the canvas; the outer scroll area follows the caret.
+        m_centering = true;
+        const QPoint c = m_editor->mapTo(m_pageCanvas, cr.center());
+        if (m_typewriterScroll) {
+            if (!m_mouseActive) { // don't yank the view around on a mouse click
+                QScrollBar *vs = m_pageScroll->verticalScrollBar();
+                vs->setValue(c.y() - m_pageScroll->viewport()->height() / 2);
+            }
+        } else {
+            m_pageScroll->ensureVisible(c.x(), c.y(), 20, 90);
+        }
+        m_centering = false;
+        return;
+    }
+
+    if (!m_typewriterScroll) {
         return;
     }
     m_centering = true;
-    const QRect cr = m_editor->cursorRect();
     QScrollBar *vs = m_editor->verticalScrollBar();
     const int mid = m_editor->viewport()->height() / 2;
     const int delta = cr.center().y() - mid;
@@ -1779,7 +1838,6 @@ void MainWindow::clearFormatting()
     plain.setFontItalic(false);
     plain.setFontUnderline(false);
     plain.setFontStrikeOut(false);
-    plain.setForeground(Theme::colors(isPaperTheme()).pageFg);
     QTextCursor cursor = m_editor->textCursor();
     if (cursor.hasSelection()) {
         cursor.setCharFormat(plain);
@@ -1825,7 +1883,9 @@ void MainWindow::fileNew()
     m_meta = DocumentMeta{};
     m_meta.ensureDefaults();
     applyDocumentDefaults();
+    applyFullPageView(); // clear() resets the page margins/size
     setCurrentFile(QString(), DocumentIo::Format::Odt);
+    syncViewActions();
     m_editor->document()->setModified(false);
     updateStats();
     syncFormatActions();
@@ -2081,8 +2141,12 @@ bool MainWindow::openPath(const QString &path)
         m_meta.ensureDefaults();
     }
     setCurrentFile(path, fmt);
+    syncViewActions();
     // Keep shipping default for new typing; loaded spans keep their own faces.
     m_editor->document()->setDefaultFont(defaultDocumentFont());
+    // Loading replaces the whole document, which resets its page margins/size:
+    // put the page layout back.
+    applyFullPageView();
     updateStats();
     syncFormatActions();
     updateFocusHighlight();
@@ -2466,6 +2530,7 @@ void MainWindow::applyDocumentPageMetrics(const QSize &pagePx)
     }
     QTextDocument *doc = m_editor->document();
     doc->setPageSize(QSizeF(pagePx));
+    m_editor->setFixedPageSize(QSizeF(pagePx)); // QTextEdit would reset it to unpaginated
 
     const QSizeF pageMm = m_printer->pageLayout().pageSize().size(QPageSize::Millimeter);
     const QMarginsF marginsMm = m_printer->pageLayout().margins(QPageLayout::Millimeter);
@@ -2486,6 +2551,7 @@ void MainWindow::clearDocumentPageMetrics()
     if (!m_editor) {
         return;
     }
+    m_editor->setFixedPageSize(QSizeF());
     QTextDocument *doc = m_editor->document();
     doc->setPageSize(QSizeF(0, 0)); // continuous layout
     QTextFrameFormat fmt = doc->rootFrame()->frameFormat();
@@ -2509,10 +2575,28 @@ void MainWindow::updateFullPageGeometry()
     const int pageW = qMax(1, qRound(native.width()));
     const int pageH = qMax(1, qRound(native.height()));
 
-    if (m_pageFrame->size() != QSize(pageW, pageH)) {
-        m_pageFrame->setFixedSize(pageW, pageH);
-    }
     applyDocumentPageMetrics(QSize(pageW, pageH));
+    syncPageFrameHeight();
+    m_editor->viewport()->update();
+}
+
+void MainWindow::syncPageFrameHeight()
+{
+    if (!m_fullPageView || !m_pageFrame || !m_editor) {
+        return;
+    }
+    // The paper is exactly N true-size pages tall; the outer scroll area pans
+    // it, so the text never scrolls "inside" a page.
+    const QSizeF native = printerPageSizePx();
+    const int pageW = qMax(1, qRound(native.width()));
+    const int pageH = qMax(1, qRound(native.height()));
+    const int pages = qMax(1, m_editor->document()->pageCount());
+    const QSize want(pageW, pageH * pages);
+    if (m_pageFrame->size() != want) {
+        m_pageFrame->setFixedSize(want);
+        // The caret may have just moved onto a new page: bring it into view.
+        QTimer::singleShot(0, this, [this]() { centerCaret(); });
+    }
     m_editor->viewport()->update();
 }
 
@@ -2523,27 +2607,17 @@ void MainWindow::applyFullPageView()
     }
 
     if (m_fullPageView) {
-        if (m_pageShadow) {
-            m_pageShadow->setEnabled(true);
-        }
-        if (m_pageScroll) {
-            m_pageScroll->setWidgetResizable(false);
-            m_pageScroll->setAlignment(Qt::AlignCenter);
-        }
+        m_pageCanvas->setPaperMode(true);
+        m_pageScroll->setWidgetResizable(true);
         m_pageFrame->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        // Page frame is the paper; scroll inside the editor for multi-page body,
-        // and m_pageScroll pans when the window is smaller than true A4.
+        // The paper is N true-size pages tall and the outer scroll area pans it,
+        // so the editor itself never scrolls.
         m_editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        m_editor->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        m_editor->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         updateFullPageGeometry();
     } else {
-        if (m_pageShadow) {
-            m_pageShadow->setEnabled(false);
-        }
-        if (m_pageScroll) {
-            m_pageScroll->setWidgetResizable(true);
-            m_pageScroll->setAlignment(Qt::AlignCenter);
-        }
+        m_pageCanvas->setPaperMode(false);
+        m_pageScroll->setWidgetResizable(true);
         m_pageFrame->setMinimumSize(0, 0);
         m_pageFrame->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
         m_pageFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -2552,6 +2626,7 @@ void MainWindow::applyFullPageView()
         clearDocumentPageMetrics();
         m_editor->viewport()->update();
     }
+    updatePageLabel();
 }
 
 void MainWindow::togglePageGuides()
@@ -2583,22 +2658,28 @@ int MainWindow::visiblePageNumber() const
     if (!m_editor || !m_editor->document()) {
         return 1;
     }
-    QTextDocument *doc = m_editor->document();
-    const qreal pageH = doc->pageSize().height();
+    const qreal pageH = m_editor->document()->pageSize().height();
     if (pageH <= 1.0) {
         return 1;
     }
-    // Prefer caret page; fall back to top of viewport.
-    const QTextCursor cursor = m_editor->textCursor();
-    qreal y = 0.0;
-    if (auto *layout = doc->documentLayout()) {
-        y = layout->blockBoundingRect(cursor.block()).top();
+    // The editor never scrolls internally, so viewport y == document y.
+    const qreal y = m_editor->cursorRect().center().y();
+    return qBound(1, int(y / pageH) + 1, documentPageCount());
+}
+
+void MainWindow::updatePageLabel()
+{
+    if (!m_pageLabel) {
+        return;
     }
-    if (y <= 0.0 && m_editor->verticalScrollBar()) {
-        y = m_editor->verticalScrollBar()->value();
+    if (!m_fullPageView) {
+        m_pageLabel->hide();
+        return;
     }
-    const int page = int(y / pageH) + 1;
-    return qBound(1, page, documentPageCount());
+    m_pageLabel->setText(QStringLiteral("Page %1 of %2")
+                             .arg(visiblePageNumber())
+                             .arg(documentPageCount()));
+    m_pageLabel->show();
 }
 
 void MainWindow::paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
@@ -2669,35 +2750,134 @@ void MainWindow::paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
     drawBand(footerBand, m_meta.footerLeft, m_meta.footerCenter, m_meta.footerRight);
 }
 
-void MainWindow::paintPageGuides()
+void MainWindow::paintPageOverlays()
 {
     QWidget *vp = m_editor->viewport();
     QPainter painter(vp);
+    const bool paged = m_fullPageView && m_editor->document()->pageSize().height() > 1.0;
+    const int pages = paged ? documentPageCount() : 1;
+    const qreal pageH = paged ? m_editor->document()->pageSize().height() : vp->height();
+
+    if (paged) {
+        // Page breaks: a strip of desk between sheets, drawn inside the (large)
+        // margins so it never touches text.
+        const ThemeColors c = Theme::colors(isPaperTheme());
+        for (int n = 1; n < pages; ++n) {
+            const qreal y = n * pageH;
+            const QRectF band(-2, y - 9, vp->width() + 4, 18);
+            painter.fillRect(band, c.desk);
+            painter.setPen(QPen(c.pageBorder, 1));
+            painter.drawLine(QPointF(0, band.top()), QPointF(vp->width(), band.top()));
+            painter.drawLine(QPointF(0, band.bottom()), QPointF(vp->width(), band.bottom()));
+        }
+        if (m_meta.hasHeaderFooter()) {
+            for (int i = 0; i < pages; ++i) {
+                paintHeaderFooter(&painter, QRectF(0, i * pageH, vp->width(), pageH),
+                                  i + 1, pages);
+            }
+        }
+    }
+    if (m_pageGuides) {
+        paintPageGuides(painter, pages, pageH);
+    }
+}
+
+void MainWindow::paintPageGuides(QPainter &painter, int pages, qreal pageH)
+{
+    QWidget *vp = m_editor->viewport();
     painter.setRenderHint(QPainter::Antialiasing, false);
     QPen pen(isPaperTheme() ? QColor(160, 150, 140, 180) : QColor(80, 80, 80, 160));
     pen.setStyle(Qt::DotLine);
     painter.setPen(pen);
 
     const int w = vp->width();
-    const int h = vp->height();
-    int left = qMax(24, w / 10);
-    int right = w - left;
-    int top = 0;
-    int bottom = h;
-    if (m_fullPageView && m_editor->document()) {
+    if (m_fullPageView && m_editor->document() && pageH > 1.0) {
         const QTextFrameFormat fmt = m_editor->document()->rootFrame()->frameFormat();
-        left = qRound(fmt.leftMargin());
-        right = w - qRound(fmt.rightMargin());
-        top = qRound(fmt.topMargin());
-        bottom = h - qRound(fmt.bottomMargin());
-        painter.drawLine(left, top, left, bottom);
-        painter.drawLine(right, top, right, bottom);
-        painter.drawLine(left, top, right, top);
-        painter.drawLine(left, bottom, right, bottom);
+        const int left = qRound(fmt.leftMargin());
+        const int right = w - qRound(fmt.rightMargin());
+        for (int i = 0; i < pages; ++i) {
+            const int top = qRound(i * pageH + fmt.topMargin());
+            const int bottom = qRound((i + 1) * pageH - fmt.bottomMargin());
+            painter.drawLine(left, top, left, bottom);
+            painter.drawLine(right, top, right, bottom);
+            painter.drawLine(left, top, right, top);
+            painter.drawLine(left, bottom, right, bottom);
+        }
     } else {
+        const int h = vp->height();
+        const int left = qMax(24, w / 10);
         painter.drawLine(left, 0, left, h);
-        painter.drawLine(right, 0, right, h);
+        painter.drawLine(w - left, 0, w - left, h);
     }
+}
+
+void MainWindow::insertPageBreak()
+{
+    QTextCursor cursor = m_editor->textCursor();
+    if (cursor.currentTable()) {
+        statusBar()->showMessage(QStringLiteral("A page break can’t go inside a table."), 3000);
+        return;
+    }
+    // Split the paragraph here; the second half starts a new page. (Removing the
+    // break is just Backspace at the start of that paragraph.)
+    cursor.beginEditBlock();
+    QTextBlockFormat fmt = cursor.blockFormat();
+    fmt.setPageBreakPolicy(QTextFormat::PageBreak_AlwaysBefore);
+    cursor.insertBlock(fmt);
+    cursor.endEditBlock();
+    m_editor->setTextCursor(cursor);
+    m_editor->setFocus();
+}
+
+bool MainWindow::pageNumbersOn() const
+{
+    for (const QString *band : {&m_meta.headerLeft, &m_meta.headerCenter, &m_meta.headerRight,
+                                &m_meta.footerLeft, &m_meta.footerCenter, &m_meta.footerRight}) {
+        if (band->contains(QLatin1String("{page}"))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void MainWindow::togglePageNumbers()
+{
+    const bool on = m_pageNumbersAction && m_pageNumbersAction->isChecked();
+    QString *bands[] = {&m_meta.headerLeft, &m_meta.headerCenter, &m_meta.headerRight,
+                        &m_meta.footerLeft, &m_meta.footerCenter, &m_meta.footerRight};
+    if (on) {
+        // Centre of the footer, or the first free footer slot if that is taken.
+        for (QString *band : {&m_meta.footerCenter, &m_meta.footerRight, &m_meta.footerLeft}) {
+            if (band->isEmpty()) {
+                *band = QStringLiteral("{page}");
+                break;
+            }
+            if (band == &m_meta.footerLeft) {
+                m_meta.footerCenter += QStringLiteral(" {page}");
+            }
+        }
+    } else {
+        // A band that is only a page number ("{page}", "Page {page} of {pages}")
+        // is cleared; custom text keeps its words but loses the tokens.
+        static const QRegularExpression onlyNumber(
+            QStringLiteral(R"(^[\s\-–—|/.·•]*(page\s*)?\{page\}(\s*(of|/)\s*\{pages\})?[\s\-–—|/.·•]*$)"),
+            QRegularExpression::CaseInsensitiveOption);
+        for (QString *band : bands) {
+            if (!band->contains(QLatin1String("{page}"))) {
+                continue;
+            }
+            if (onlyNumber.match(*band).hasMatch()) {
+                band->clear();
+            } else {
+                band->remove(QLatin1String("{pages}")).remove(QLatin1String("{page}"));
+                *band = band->simplified();
+            }
+        }
+    }
+    m_meta.headerFooterSeeded = true;
+    markDirty();
+    syncViewActions();
+    m_editor->viewport()->update();
 }
 
 void MainWindow::editHeaderFooter()
@@ -2711,6 +2891,7 @@ void MainWindow::editHeaderFooter()
     m_meta.headerFooterSeeded = true;
     m_dirty = true;
     updateWindowTitle();
+    syncViewActions();
     if (m_editor) {
         m_editor->viewport()->update();
     }
@@ -3099,11 +3280,46 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 
     if (watched == m_editor && event->type() == QEvent::KeyPress) {
         auto *ke = static_cast<QKeyEvent *>(event);
+        if (m_fullPageView && m_pageScroll
+            && (ke->key() == Qt::Key_PageDown || ke->key() == Qt::Key_PageUp)
+            && !(ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
+            // The editor is as tall as the whole document, so its own Page keys
+            // would jump to the end. Move by what is actually visible instead.
+            const int step = qMax(40, m_pageScroll->viewport()->height() - 60);
+            const QRect cr = m_editor->cursorRect();
+            const int dy = ke->key() == Qt::Key_PageDown ? step : -step;
+            const QTextCursor target = m_editor->cursorForPosition(
+                QPoint(cr.center().x(), cr.center().y() + dy));
+            QTextCursor tc = m_editor->textCursor();
+            tc.setPosition(target.position(),
+                           (ke->modifiers() & Qt::ShiftModifier) ? QTextCursor::KeepAnchor
+                                                                 : QTextCursor::MoveAnchor);
+            m_editor->setTextCursor(tc);
+            return true;
+        }
         if (trySmartTypography(ke)) {
             if (m_keySounds) {
                 m_keySounds->playKey();
             }
             return true;
+        }
+        // Enter right after a manual page break must not start yet another page:
+        // Qt copies the block format (including the break) to the new paragraph.
+        if ((ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter)
+            && !(ke->modifiers() & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier
+                                    | Qt::MetaModifier))) {
+            QTextCursor c = m_editor->textCursor();
+            QTextBlockFormat bf = c.blockFormat();
+            if (!c.hasSelection() && !c.currentTable()
+                && bf.pageBreakPolicy() != QTextFormat::PageBreak_Auto) {
+                if (m_keySounds && m_keySounds->isEnabled()) {
+                    m_keySounds->playReturn();
+                }
+                bf.setPageBreakPolicy(QTextFormat::PageBreak_Auto);
+                c.insertBlock(bf); // the new (second) paragraph gets no break
+                m_editor->setTextCursor(c);
+                return true;
+            }
         }
         // Mechanical typewriter clicks: printable typing + Return only.
         // Skip pure navigation, modifiers alone, and chorded shortcuts.
@@ -3125,19 +3341,20 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     }
 
     if (watched == m_editor->viewport() && event->type() == QEvent::Paint
-        && (m_pageGuides || (m_fullPageView && m_meta.hasHeaderFooter()))) {
+        && (m_pageGuides || m_fullPageView)) {
         watched->removeEventFilter(this);
         QCoreApplication::sendEvent(watched, event);
         watched->installEventFilter(this);
-        if (m_pageGuides) {
-            paintPageGuides();
-        }
-        if (m_fullPageView && m_meta.hasHeaderFooter() && m_editor) {
-            QPainter painter(m_editor->viewport());
-            const QRectF pageRect(m_editor->viewport()->rect());
-            paintHeaderFooter(&painter, pageRect, visiblePageNumber(), documentPageCount());
-        }
+        paintPageOverlays(); // page breaks, per-page header/footer, guides
         return true;
+    }
+
+    if (watched == m_editor->viewport()) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            m_mouseActive = true;
+        } else if (event->type() == QEvent::MouseButtonRelease) {
+            m_mouseActive = false;
+        }
     }
 
     if (event->type() == QEvent::MouseMove) {
