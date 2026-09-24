@@ -12,6 +12,11 @@ Python, deterministic; filtered noise + damped inharmonic partials) —
 royalty-free, not recorded from a physical machine. Re-run the script to
 regenerate, or swap in recorded WAVs with the same names; keep levels modest.
 
+The samples are embedded in the binary (`src/sounds.qrc`), so sounds work from
+any install location; WAVs found on disk under `assets/sounds/` next to the
+binary or in the working directory take precedence. Re-run the generator and
+rebuild to update the embedded copies.
+
 Playback uses `QSoundEffect` when Qt6 Multimedia is available at build time
 (`ZWRITER_HAS_MULTIMEDIA`). Without Multimedia the Keys toggle remains a
 preference stub with no audio.

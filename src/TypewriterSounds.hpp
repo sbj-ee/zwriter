@@ -3,7 +3,7 @@
 #include <QObject>
 #include <QList>
 #include <QString>
-#include <QStringList>
+#include <QUrl>
 
 class QSoundEffect;
 
@@ -32,11 +32,11 @@ public slots:
 
 private:
     void ensureEffects();
-    static QString findSample(const QString &fileName);
+    static QUrl findSample(const QString &fileName);
 
     bool m_enabled = false; // default OFF
-    QStringList m_keyPaths;
-    QString m_returnPath;
+    QList<QUrl> m_keyUrls;
+    QUrl m_returnUrl;
 #ifdef ZWRITER_HAS_MULTIMEDIA
     QList<QSoundEffect *> m_keyEffects;
     int m_nextKey = 0;

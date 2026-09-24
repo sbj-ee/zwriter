@@ -78,6 +78,14 @@ endif()
 if(TARGET Qt6::Multimedia)
   target_link_libraries(zwriter PRIVATE Qt6::Multimedia)
   target_compile_definitions(zwriter PRIVATE ZWRITER_HAS_MULTIMEDIA=1)
+  # Embed the key samples so sounds work from any install location.
+  target_sources(zwriter PRIVATE src/sounds.qrc)
+  set_property(SOURCE src/sounds.qrc APPEND PROPERTY OBJECT_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-1.wav
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-2.wav
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-3.wav
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/key-4.wav
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/return.wav)
   message(STATUS "zwriter: Qt6 Multimedia found — typewriter key sounds enabled")
 else()
   message(STATUS "zwriter: Qt6 Multimedia not found — key-sound toggle stubs as no-op")

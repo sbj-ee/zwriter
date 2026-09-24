@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/sounds">
+        <file alias="key-1.wav">../assets/sounds/key-1.wav</file>
+        <file alias="key-2.wav">../assets/sounds/key-2.wav</file>
+        <file alias="key-3.wav">../assets/sounds/key-3.wav</file>
+        <file alias="key-4.wav">../assets/sounds/key-4.wav</file>
+        <file alias="return.wav">../assets/sounds/return.wav</file>
+    </qresource>
+</RCC>
