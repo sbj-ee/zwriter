@@ -1,4 +1,5 @@
 #include "DocumentIo.hpp"
+#include "Alignment.hpp"
 
 #include <QStringView>
 
@@ -88,6 +89,7 @@ QString rtfToHtml(const QByteArray &rtf)
         bool underline = false;
         int halfPoints = 24;
         int uc = 1; // chars to skip after \uN
+        char align = 'l'; // paragraph alignment: \ql \qc \qr \qj (reset by \pard)
     };
     struct Inline {
         bool bold = false;
@@ -163,6 +165,22 @@ QString rtfToHtml(const QByteArray &rtf)
     auto wrapParagraph = [&]() -> QString {
         closeSpan();
         QString css = QStringLiteral("margin:0px;white-space:pre-wrap;");
+        // The align attribute, not CSS text-align: Qt's HTML importer ignores
+        // "text-align:justify".
+        QString alignAttr;
+        switch (stack.last().align) {
+        case 'c':
+            alignAttr = QStringLiteral(" align=\"center\"");
+            break;
+        case 'r':
+            alignAttr = QStringLiteral(" align=\"right\"");
+            break;
+        case 'j':
+            alignAttr = QStringLiteral(" align=\"justify\"");
+            break;
+        default:
+            break;
+        }
         if (pendingBreak) {
             css += QStringLiteral("page-break-before:always;");
             pendingBreak = false;
@@ -170,7 +188,7 @@ QString rtfToHtml(const QByteArray &rtf)
         const QString body = paraHasText ? para : QString(QChar(kRtfBlankParagraphMark));
         para.clear();
         paraHasText = false;
-        return QStringLiteral("<p style=\"%1\">%2</p>").arg(css, body);
+        return QStringLiteral("<p style=\"%1\"%2>%3</p>").arg(css, alignAttr, body);
     };
     auto closeTable = [&]() {
         if (tableOpen) {
@@ -366,6 +384,11 @@ QString rtfToHtml(const QByteArray &rtf)
             st.uc = qMax(0, param);
         } else if (word == "pard") {
             inTable = false;
+            st.align = 'l';
+        } else if (word == "ql" || word == "qc" || word == "qr" || word == "qj") {
+            st.align = word.at(1);
+        } else if (word == "qd") {
+            st.align = 'j'; // distributed: closest is justified
         } else if (word == "intbl") {
             inTable = true;
         } else if (word == "cell" || word == "nestcell") {
@@ -455,13 +478,19 @@ QString documentToRtf(const QTextDocument *doc)
         if (bf.pageBreakPolicy() & QTextFormat::PageBreak_AlwaysBefore) {
             out.prepend(QStringLiteral("\\page"));
         }
-        const Qt::Alignment al = bf.alignment();
-        if (al & Qt::AlignHCenter) {
+        switch (Alignment::kindOf(bf.alignment())) {
+        case Alignment::Kind::Center:
             out += QStringLiteral("\\qc");
-        } else if (al & Qt::AlignRight) {
+            break;
+        case Alignment::Kind::Right:
             out += QStringLiteral("\\qr");
-        } else if (al & Qt::AlignJustify) {
+            break;
+        case Alignment::Kind::Justify:
             out += QStringLiteral("\\qj");
+            break;
+        case Alignment::Kind::Left:
+            out += QStringLiteral("\\ql");
+            break;
         }
         out += QStringLiteral("\\f0\\fs%1 ").arg(qRound(basePt * 2));
         if (const QTextList *list = block.textList()) {
@@ -626,6 +655,69 @@ QString cssFontFamilies(const QString &family)
     return out.join(QLatin1Char(','));
 }
 
+// Paragraph alignment of the common (named) styles in styles.xml, e.g.
+// LibreOffice's centred "Title" or a justified "Text_20_body", with each
+// style's parent so automatic styles in content.xml can inherit it.
+struct OdtAlignStyle {
+    QString align;  // "left" / "center" / "right" / "justify"; empty = inherit
+    QString parent;
+};
+
+// fo:text-align -> the CSS value zwriter uses; empty for missing/unknown.
+// start/end are taken as left/right (zwriter documents are left-to-right).
+QString odtAlignToCss(QStringView value)
+{
+    const QString v = value.toString().trimmed().toLower();
+    if (v == QLatin1String("center") || v == QLatin1String("justify")) {
+        return v;
+    }
+    if (v == QLatin1String("end") || v == QLatin1String("right")) {
+        return QStringLiteral("right");
+    }
+    if (v == QLatin1String("start") || v == QLatin1String("left")) {
+        return QStringLiteral("left");
+    }
+    return QString();
+}
+
+QHash<QString, OdtAlignStyle> odtCommonAlignStyles(const QByteArray &stylesXml)
+{
+    QHash<QString, OdtAlignStyle> out;
+    if (stylesXml.isEmpty()) {
+        return out;
+    }
+    QXmlStreamReader r(stylesXml);
+    bool inCommon = false; // office:styles only: styles.xml's automatic styles
+                           // (header/footer paragraphs) reuse names like "P1"
+    QString current;
+    while (!r.atEnd()) {
+        const auto token = r.readNext();
+        if (token == QXmlStreamReader::StartElement) {
+            if (r.name() == QLatin1String("styles") && r.prefix() == QLatin1String("office")) {
+                inCommon = true;
+            } else if (inCommon && r.name() == QLatin1String("style")) {
+                const auto attrs = r.attributes();
+                current = attrs.value(QStringLiteral("style:name")).toString();
+                OdtAlignStyle st;
+                st.parent = attrs.value(QStringLiteral("style:parent-style-name")).toString();
+                out.insert(current, st);
+            } else if (inCommon && !current.isEmpty() && r.name() == QLatin1String("paragraph-properties")) {
+                const QString css = odtAlignToCss(r.attributes().value(QStringLiteral("fo:text-align")));
+                if (!css.isEmpty()) {
+                    out[current].align = css;
+                }
+            }
+        } else if (token == QXmlStreamReader::EndElement) {
+            if (r.name() == QLatin1String("styles") && r.prefix() == QLatin1String("office")) {
+                inCommon = false;
+            } else if (r.name() == QLatin1String("style")) {
+                current.clear();
+            }
+        }
+    }
+    return out;
+}
+
 // Convert a slice of ODT content.xml into simple HTML for QTextDocument.
 // Parses automatic styles for font-family / size / weight / style so ODT
 // round-trip preserves the hide-away toolbar font choices.
@@ -634,7 +726,8 @@ QString cssFontFamilies(const QString &family)
 // text collapses to one space, leading space in a paragraph is dropped;
 // text:s / text:tab / text:line-break are explicit) and every paragraph is
 // emitted with white-space:pre-wrap so Qt keeps exactly what we produce.
-QString odtXmlToHtml(const QByteArray &xml)
+// `stylesXml` (optional) supplies the alignment of named styles.
+QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteArray())
 {
     struct StyleInfo {
         QString fontFamily;
@@ -643,7 +736,8 @@ QString odtXmlToHtml(const QByteArray &xml)
         bool bold = false;
         bool italic = false;
         bool underline = false;
-        QString align;          // CSS text-align value, empty = default
+        QString align;          // HTML align value ("left" explicit), empty = inherit
+        QString parent;         // style:parent-style-name
         bool breakBefore = false; // manual page break before the paragraph
         int headingLevel = 0;     // from a Heading_20_N (parent) style
     };
@@ -667,6 +761,7 @@ QString odtXmlToHtml(const QByteArray &xml)
                     const auto attrs = pass1.attributes();
                     currentStyle = attrs.value(QStringLiteral("style:name")).toString();
                     StyleInfo info = styles.value(currentStyle);
+                    info.parent = attrs.value(QStringLiteral("style:parent-style-name")).toString();
                     info.headingLevel = headingLevelFromStyleName(currentStyle);
                     if (info.headingLevel == 0) {
                         info.headingLevel = headingLevelFromStyleName(
@@ -739,11 +834,9 @@ QString odtXmlToHtml(const QByteArray &xml)
                 } else if (name == QLatin1String("paragraph-properties") && !currentStyle.isEmpty()) {
                     StyleInfo info = styles.value(currentStyle);
                     const auto attrs = pass1.attributes();
-                    const QString align = attrs.value(QStringLiteral("fo:text-align")).toString().toLower();
-                    if (align == QLatin1String("center") || align == QLatin1String("justify")) {
+                    const QString align = odtAlignToCss(attrs.value(QStringLiteral("fo:text-align")));
+                    if (!align.isEmpty()) {
                         info.align = align;
-                    } else if (align == QLatin1String("end") || align == QLatin1String("right")) {
-                        info.align = QStringLiteral("right");
                     }
                     if (attrs.value(QStringLiteral("fo:break-before")).toString().toLower()
                         == QLatin1String("page")) {
@@ -757,6 +850,52 @@ QString odtXmlToHtml(const QByteArray &xml)
                 } else if (pass1.name() == QLatin1String("list-style")) {
                     currentListStyle.clear();
                 }
+            }
+        }
+    }
+
+    // Alignment is inherited through style:parent-style-name: an automatic
+    // style in content.xml, then the common styles of styles.xml. A paragraph
+    // may also name a common style directly (text:style-name="Title").
+    {
+        const QHash<QString, OdtAlignStyle> common = odtCommonAlignStyles(stylesXml);
+        auto inherited = [&](QString name) -> QString {
+            for (int depth = 0; depth < 16 && !name.isEmpty(); ++depth) {
+                const auto own = styles.constFind(name);
+                if (own != styles.constEnd()) {
+                    if (!own->align.isEmpty()) {
+                        return own->align;
+                    }
+                    name = own->parent;
+                    continue;
+                }
+                const auto c = common.constFind(name);
+                if (c == common.constEnd()) {
+                    break;
+                }
+                if (!c->align.isEmpty()) {
+                    return c->align;
+                }
+                name = c->parent;
+            }
+            return QString();
+        };
+        for (auto it = common.constBegin(); it != common.constEnd(); ++it) {
+            if (!styles.contains(it.key())) {
+                StyleInfo info;
+                info.parent = it->parent;
+                info.align = it->align;
+                styles.insert(it.key(), info);
+            }
+        }
+        for (auto it = styles.begin(); it != styles.end(); ++it) {
+            if (it->align.isEmpty()) {
+                it->align = inherited(it->parent);
+            }
+        }
+        for (auto it = styles.begin(); it != styles.end(); ++it) {
+            if (it->align == QLatin1String("left")) {
+                it->align.clear(); // the default: nothing to say
             }
         }
     }
@@ -853,9 +992,6 @@ QString odtXmlToHtml(const QByteArray &xml)
                 css += QStringLiteral("font-weight:%1;").arg(QLatin1String(weights[level - 1]));
             }
         }
-        if (!info.align.isEmpty()) {
-            css += QStringLiteral("text-align:%1;").arg(info.align);
-        }
         if (info.breakBefore) {
             css += QStringLiteral("page-break-before:always;");
         }
@@ -893,7 +1029,12 @@ QString odtXmlToHtml(const QByteArray &xml)
         pHasContent = false;
         pendingSpace = false;
         atLineStart = true;
-        const QString styleAttr = QStringLiteral(" style=\"%1\"").arg(blockCss(info, level));
+        QString styleAttr = QStringLiteral(" style=\"%1\"").arg(blockCss(info, level));
+        if (!info.align.isEmpty()) {
+            // The align attribute, not CSS text-align: Qt's HTML importer
+            // ignores "text-align:justify".
+            styleAttr += QStringLiteral(" align=\"%1\"").arg(info.align);
+        }
         if (level > 0) {
             html += QStringLiteral("<h%1%2>").arg(level).arg(styleAttr);
         } else {
@@ -1215,7 +1356,18 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
         }
         return false;
     }
-    doc->setHtml(odtXmlToHtml(xml));
+    // styles.xml is optional: it only adds the alignment of named styles.
+    QByteArray stylesXml;
+    {
+        QProcess styles;
+        styles.start(QStringLiteral("unzip"),
+                     {QStringLiteral("-p"), path, QStringLiteral("styles.xml")});
+        if (styles.waitForFinished(15000) && styles.exitStatus() == QProcess::NormalExit
+            && styles.exitCode() == 0) {
+            stylesXml = styles.readAllStandardOutput();
+        }
+    }
+    doc->setHtml(odtXmlToHtml(xml, stylesXml));
     restyleTables(doc->rootFrame());
     normaliseImportedBlocks(doc);
     // The clean-up above is part of loading, not an edit: nothing to undo.

@@ -1,4 +1,5 @@
 #include "MainWindow.hpp"
+#include "AlignmentActions.hpp"
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
 #include "FindReplaceBar.hpp"
@@ -44,6 +45,7 @@
 #include <QTextDocumentFragment>
 #include <QKeyEvent>
 #include <QKeySequence>
+#include <QToolButton>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -463,11 +465,13 @@ void MainWindow::buildEditMenu()
 
     m_undoAction = m_editMenu->addAction(QStringLiteral("&Undo"));
     m_undoAction->setShortcut(QKeySequence::Undo);
-    connect(m_undoAction, &QAction::triggered, m_editor, &QTextEdit::undo);
+    connect(m_undoAction, &QAction::triggered, this,
+            [this]() { Alignment::undoRedoKeepingCaret(m_editor, false); });
 
     m_redoAction = m_editMenu->addAction(QStringLiteral("&Redo"));
     m_redoAction->setShortcut(QKeySequence::Redo);
-    connect(m_redoAction, &QAction::triggered, m_editor, &QTextEdit::redo);
+    connect(m_redoAction, &QAction::triggered, this,
+            [this]() { Alignment::undoRedoKeepingCaret(m_editor, true); });
 
     m_editMenu->addSeparator();
 
@@ -518,6 +522,12 @@ void MainWindow::buildEditMenu()
 #endif
     if (!replaceKeys.contains(replaceExtra)) {
         replaceKeys.append(replaceExtra);
+    }
+    // KDE's standard Replace key is Ctrl+R, which is Align Right here (as in
+    // LibreOffice and Word). Two actions on one key make Qt fire neither, so
+    // Replace gives it up and keeps Ctrl+H.
+    for (QAction *a : m_alignActions->actions()) {
+        replaceKeys.removeAll(a->shortcut());
     }
     replaceAct->setShortcuts(replaceKeys);
     connect(replaceAct, &QAction::triggered, this, &MainWindow::showReplace);
@@ -582,27 +592,13 @@ void MainWindow::createFormatActions()
     }
     connect(styleGroup, &QActionGroup::triggered, this, [this](QAction *) { applyHeading(); });
 
-    // Alignment (exclusive).
-    auto *alignGroup = new QActionGroup(this);
-    alignGroup->setExclusive(true);
-    struct Align { QAction **slot; const char *text; const char *tip; int key; Qt::Alignment al; };
-    const Align aligns[] = {
-        {&m_alignLeftAction, "Align &Left", "Align left (Ctrl+L)", Qt::Key_L,
-         Qt::AlignLeft | Qt::AlignAbsolute},
-        {&m_alignCenterAction, "&Center", "Center (Ctrl+E)", Qt::Key_E, Qt::AlignHCenter},
-        {&m_alignRightAction, "Align &Right", "Align right (Ctrl+R)", Qt::Key_R,
-         Qt::AlignRight | Qt::AlignAbsolute},
-        {&m_alignJustifyAction, "&Justify", "Justify (Ctrl+J)", Qt::Key_J, Qt::AlignJustify},
-    };
-    for (const Align &al : aligns) {
-        QAction *a = make(QString::fromLatin1(al.text), QKeySequence(Qt::CTRL | al.key),
-                          QString::fromLatin1(al.tip), true);
-        a->setData(int(al.al));
-        alignGroup->addAction(a);
-        *al.slot = a;
-    }
-    connect(alignGroup, &QActionGroup::triggered, this, [this](QAction *a) {
-        m_editor->setAlignment(Qt::Alignment(a->data().toInt()));
+    // Alignment (exclusive group, checked state follows the cursor).
+    m_alignActions = new Alignment::Actions(m_editor, this);
+    m_alignLeftAction = m_alignActions->action(Alignment::Kind::Left);
+    m_alignCenterAction = m_alignActions->action(Alignment::Kind::Center);
+    m_alignRightAction = m_alignActions->action(Alignment::Kind::Right);
+    m_alignJustifyAction = m_alignActions->action(Alignment::Kind::Justify);
+    connect(m_alignActions, &Alignment::Actions::applied, this, [this](Alignment::Kind, bool) {
         m_editor->setFocus();
     });
 
@@ -1199,6 +1195,20 @@ void MainWindow::buildFormatToolbar()
 
     m_formatBar->addSeparator();
 
+    // Align left / center / right / justify: drawn icons in the theme's ink
+    // (see applyTheme), one exclusive group whose checked button follows the
+    // paragraph at the cursor.
+    m_formatBar->setIconSize(QSize(16, 16));
+    for (QAction *a : m_alignActions->actions()) {
+        m_formatBar->addAction(a);
+        if (auto *b = qobject_cast<QToolButton *>(m_formatBar->widgetForAction(a))) {
+            b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            b->setObjectName(QStringLiteral("align%1Button").arg(int(a->data().toInt())));
+        }
+    }
+
+    m_formatBar->addSeparator();
+
     m_styleCombo = new QComboBox(m_formatBar);
     m_styleCombo->setObjectName(QStringLiteral("styleCombo"));
     m_styleCombo->setToolTip(QStringLiteral("Paragraph style"));
@@ -1311,6 +1321,9 @@ void MainWindow::applyTheme()
     }
     if (m_pageCanvas) {
         m_pageCanvas->setPageBorderColor(c.pageBorder);
+    }
+    if (m_alignActions) {
+        m_alignActions->setIconColors(c.fg, c.accentFg, c.muted);
     }
 
     // Typed text carries no explicit colour, so it follows the theme.
@@ -2182,21 +2195,8 @@ void MainWindow::syncFormatActions()
         m_underlineAction->setChecked(fmt.fontUnderline());
     }
 
-    const Qt::Alignment al = m_editor->alignment();
-    QAction *alignAct = m_alignLeftAction;
-    if (al & Qt::AlignHCenter) {
-        alignAct = m_alignCenterAction;
-    } else if (al & Qt::AlignRight) {
-        alignAct = m_alignRightAction;
-    } else if (al & Qt::AlignJustify) {
-        alignAct = m_alignJustifyAction;
-    }
-    for (QAction *a : {m_alignLeftAction, m_alignCenterAction, m_alignRightAction,
-                       m_alignJustifyAction}) {
-        if (a) {
-            const QSignalBlocker b(a);
-            a->setChecked(a == alignAct);
-        }
+    if (m_alignActions) {
+        m_alignActions->sync();
     }
 
     const QTextList *list = m_editor->textCursor().currentList();
@@ -3744,6 +3744,12 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             m_editor->setTextCursor(tc);
             return true;
         }
+        // The editor takes Ctrl+Z / Ctrl+Shift+Z itself (before the Edit menu
+        // actions); route them through the same caret-keeping undo.
+        if (ke->matches(QKeySequence::Undo) || ke->matches(QKeySequence::Redo)) {
+            Alignment::undoRedoKeepingCaret(m_editor, ke->matches(QKeySequence::Redo));
+            return true;
+        }
         if (trySmartTypography(ke)) {
             if (m_keySounds) {
                 m_keySounds->playKey();
@@ -3786,6 +3792,12 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                     m_keySounds->playReturn();
                 }
                 handleEnterOnPageBreak(ke);
+                return true;
+            }
+            if (Alignment::keepAlignmentOnEnter(m_editor)) {
+                if (m_keySounds && m_keySounds->isEnabled()) {
+                    m_keySounds->playReturn();
+                }
                 return true;
             }
         }

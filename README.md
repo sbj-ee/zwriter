@@ -50,13 +50,13 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 
 ### Implemented now
 
-- **Quiet formatting toolbar** (auto-hide optional; shown by default): font family + size, **B / I / U**, and a paragraph-style dropdown (Body / Heading 1–3). Everything else — alignment, lists, tables, clear formatting — is in the Format menu
+- **Quiet formatting toolbar** (auto-hide optional; shown by default): font family + size, **B / I / U**, **align left / center / right / justify** (drawn icons that follow the theme; the checked one follows the paragraph at the cursor), and a paragraph-style dropdown (Body / Heading 1–3). Everything else — lists, tables, clear formatting — is in the Format menu
 - **Paper and ink** (default), **Dark room** or **Inverse** theme — the whole window follows the theme (warm light chrome with a paper page, calm charcoal, or a true black page with white text for maximum contrast); View → Theme (persisted in QSettings). Slim scrollbars, roomy menus, window size and position remembered
 - **Full Page view** (default **on**) — centered paper page on a desk background at **true physical size** (mm → DIPs via logical DPI); **multi-page**: the paper grows as you write, pages are stacked with a visible break and real top/bottom margins, the window follows the caret onto the next page, and the status bar shows **Page N of M** — what you see matches print and PDF; shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF use the same page metrics; View → Full Page (Ctrl+Shift+P); off = continuous strip
 - **Default body face: typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Courier` → `Courier Prime` → `Nimbus Mono PS` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
 - **Five menus, nothing extra**: **File** (New / Open / Recent / Save / Export PDF / Print / Page Setup / Properties / Quit), **Edit** (Undo–Redo, Cut/Copy/Paste, Paste as Plain Text, Find / Replace), **Format** (B/I/U, Paragraph Style, Align, Lists, Insert Table, Table rows/columns, Insert Page Break, Page Numbers, Header & Footer, Clear Formatting), **View** (Full Page, Page Guides, Typewriter Scroll, Focus Mode, Key Sounds, Spell Check, Smart Quotes, Theme, Always Show Toolbar, Full Screen), **Help**
 - **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
-- **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1). **What ODT round-trips:** text including repeated spaces, tabs and line breaks; font family/size; bold/italic/underline; Heading 1–3 (saved as `text:h` with an outline level, so they reopen as headings in zwriter and LibreOffice); alignment; bulleted/numbered/nested lists (nested levels keep their own numbering/bullet style, also from LibreOffice files); tables incl. merged cells; blank paragraphs; manual page breaks; header/footer text and document properties (meta.xml; header, footer, page size and margins are also written as an ODF master page in styles.xml, so LibreOffice shows them). After one save, further save/open cycles give the same document again (checked by `tests/odt_roundtrip_test`). **What does not:** text/highlight colours (dropped, so text follows the theme), images, footnotes, links, custom paragraph spacing/indents, and per-table styling — a reopened table always gets zwriter's standard border/padding, so custom table borders are lost. Opening a file never marks it modified
+- **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1). **What ODT round-trips:** text including repeated spaces, tabs and line breaks; font family/size; bold/italic/underline; Heading 1–3 (saved as `text:h` with an outline level, so they reopen as headings in zwriter and LibreOffice); paragraph alignment (left / center / right / justify as `fo:text-align`; from LibreOffice files also `start` / `end` and alignment inherited from named styles such as Title or Text Body in styles.xml); bulleted/numbered/nested lists (nested levels keep their own numbering/bullet style, also from LibreOffice files); tables incl. merged cells; blank paragraphs; manual page breaks; header/footer text and document properties (meta.xml; header, footer, page size and margins are also written as an ODF master page in styles.xml, so LibreOffice shows them). After one save, further save/open cycles give the same document again (checked by `tests/odt_roundtrip_test`). **What does not:** text/highlight colours (dropped, so text follows the theme), images, footnotes, links, custom paragraph spacing/indents, and per-table styling — a reopened table always gets zwriter's standard border/padding, so custom table borders are lost. Opening a file never marks it modified
 - **Open from anywhere**: `zwriter FILE…` on the command line (`zwriter --version`, `zwriter --help`), or *Open With → zwriter* / double-click in a file manager (the desktop entry registers ODT, plain text and RTF). The first file opens in the running window, each further file in its own window. Files with an unrecognised extension (`.md`, `.conf`, …) open as plain text and are saved back as plain text — never rewritten as ODT
 - **Export PDF…** (export-only — not a native edit/save format) via `QPrinter` PdfFormat
 - **Print options** (lean): native OS print dialog, page setup (paper / orientation / margins; default **A4**), print preview; paper size persisted in QSettings
@@ -73,6 +73,7 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 - Typewriter icon branding
 - **Tables** (QTextTable): Format → Insert Table…; Tab between cells; add/remove row or column; ODT + PDF/print
 - **Header & Footer** (Format → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; **page numbers are opt-in and off by default** — Format → Page Numbers adds `{page}` to an empty footer band (centre first) and removes only what it added, so custom header/footer text survives an off/on cycle; drawn on every page
+- **Paragraph alignment** — Format → Align or the toolbar: Align Left (`Ctrl+L`), Center (`Ctrl+E`), Align Right (`Ctrl+R`), Justify (`Ctrl+J`); `Cmd` on macOS. Applies to the paragraph at the cursor or every paragraph a selection touches, as one undo step; choosing the alignment a paragraph already has changes nothing (no undo step, no unsaved-changes mark). Enter in an empty centered line keeps the centering. Saved to ODT (`fo:text-align`) and RTF (`\ql \qc \qr \qj`), and honoured in Full Page view, print, Print Preview and PDF; the last line of a justified paragraph stays ragged, as in other word processors
 - **Manual page break** (Format → Insert Page Break, `Ctrl+Enter`): splits the paragraph and starts a new page; Backspace at the start of the new page removes it. Saved to ODT (`fo:break-before="page"`) and honoured in Full Page view, print and PDF
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
 - **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
@@ -82,7 +83,7 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 
 - Richer themes pack (beyond Paper / Dark room / Inverse), autosave + restore cursor, multi-document / sessions
 - Daily word / time goal, scene / chapter navigation
-- Richer ODT/RTF style round-trip (colours, images, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is best-effort (bold/italic/underline, headings by size, tables, Unicode; lists are exported as literal bullet/number text)
+- Richer ODT/RTF style round-trip (colours, images, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is best-effort (bold/italic/underline, paragraph alignment, headings by size, tables, Unicode; lists are exported as literal bullet/number text)
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it. Headings are written as `text:h` the same way (a patch of `content.xml`); without `zip` they save as styled paragraphs and reopen as body text
 - macOS app is ad-hoc signed only — no Developer ID signature or notarization yet, so the first launch needs right-click → Open (see Install)
 - Status extras (pages / paragraphs) — later
@@ -91,7 +92,7 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 ## v1 IN
 
 - Fullscreen / hide-away chrome
-- Quiet formatting toolbar (font family / size / B I U / paragraph style)
+- Quiet formatting toolbar (font family / size / B I U / alignment / paragraph style)
 - **Paper-white page** default theme (dark chrome); Dark room and Inverse optional
 - **Full Page view** (default on) — A4 at true screen DIP size on desk (Page Setup can change size); continuous strip when off
 - **Courier default body font at 12 pt** (Courier-class monospace fallbacks); user-selectable
@@ -240,7 +241,7 @@ at build time.
 | `F3` / `Shift+F3` | Find next / previous (searches the last term even with the bar closed) |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Bold / italic / underline |
 | `Ctrl+Alt+0` … `3` | Body text / Heading 1–3 |
-| `Ctrl+L` / `Ctrl+E` / `Ctrl+R` / `Ctrl+J` | Align left / center / right / justify |
+| `Ctrl+L` / `Ctrl+E` / `Ctrl+R` / `Ctrl+J` | Align left / center / right / justify (on KDE, whose standard Replace key is `Ctrl+R`, Replace stays on `Ctrl+H`) |
 | `Ctrl+Shift+B` / `Ctrl+Shift+N` | Bulleted / numbered list |
 | `Ctrl+\` | Clear formatting |
 | `Ctrl+N` | New document |

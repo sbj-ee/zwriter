@@ -73,6 +73,10 @@ add_executable(zwriter
   src/PrintLayout.hpp
   src/Theme.cpp
   src/Theme.hpp
+  src/Alignment.cpp
+  src/Alignment.hpp
+  src/AlignmentActions.cpp
+  src/AlignmentActions.hpp
   src/icons.qrc
   src/ui.qrc
 )
@@ -195,6 +199,8 @@ if(ZWRITER_BUILD_TESTS)
     tests/odt_roundtrip_test.cpp
     src/DocumentIo.cpp
     src/DocumentIo.hpp
+    src/Alignment.cpp
+    src/Alignment.hpp
   )
   target_include_directories(odt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(odt_roundtrip_test PRIVATE Qt6::Gui)
@@ -206,6 +212,8 @@ if(ZWRITER_BUILD_TESTS)
     tests/regression_test.cpp
     src/DocumentIo.cpp
     src/DocumentIo.hpp
+    src/Alignment.cpp
+    src/Alignment.hpp
     src/DocumentMeta.cpp
     src/DocumentMeta.hpp
     src/PrintLayout.cpp
@@ -215,6 +223,24 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(regression_test PRIVATE Qt6::Gui)
   add_test(NAME regression COMMAND regression_test)
   set_tests_properties(regression PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+  # Paragraph alignment: ODT/RTF round-trip, one-step undo, checked state, print.
+  find_package(Qt6 REQUIRED COMPONENTS Widgets)
+  add_executable(alignment_test
+    tests/alignment_test.cpp
+    src/Alignment.cpp
+    src/Alignment.hpp
+    src/AlignmentActions.cpp
+    src/AlignmentActions.hpp
+    src/DocumentIo.cpp
+    src/DocumentIo.hpp
+    src/PrintLayout.cpp
+    src/PrintLayout.hpp
+  )
+  target_include_directories(alignment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(alignment_test PRIVATE Qt6::Widgets)
+  add_test(NAME alignment COMMAND alignment_test)
+  set_tests_properties(alignment PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.

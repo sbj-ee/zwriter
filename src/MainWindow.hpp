@@ -32,6 +32,7 @@ class FindReplaceBar;
 class QTextTable;
 class QFileDialog;
 class UpdateChecker;
+namespace Alignment { class Actions; }
 class SpellChecker;
 class SpellHighlighter;
 
@@ -229,6 +230,7 @@ private:
     QAction *m_cutAction = nullptr;
     QAction *m_copyAction = nullptr;
     QAction *m_underlineAction = nullptr;
+    Alignment::Actions *m_alignActions = nullptr;
     QAction *m_alignLeftAction = nullptr;
     QAction *m_alignCenterAction = nullptr;
     QAction *m_alignRightAction = nullptr;

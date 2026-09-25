@@ -5,6 +5,31 @@ the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
 ## [Unreleased]
 
+### Paragraph alignment
+- Align Left, Center, Align Right and Justify are on the toolbar as well as in Format → Align
+  (`Ctrl+L` / `Ctrl+E` / `Ctrl+R` / `Ctrl+J`, `Cmd` on macOS). The buttons are one exclusive
+  group with drawn icons in each theme's ink (Paper, Dark room, Inverse); the checked one
+  follows the paragraph at the cursor on every cursor or selection move, and after undo/redo.
+- Alignment applies to the paragraph at the cursor or to every paragraph a selection touches
+  (the selected cells of a table selection) as one undo step. Choosing the alignment a paragraph
+  already has is not an edit: no undo step, and the document is not marked modified.
+- Undo/redo of a formatting-only step (alignment, bold, …) leaves the caret where it was; Qt
+  moved it to the end of the reformatted paragraph, into the next one.
+- Enter in an empty centered, right-aligned or justified paragraph adds another paragraph with
+  the same alignment. Qt reset the empty paragraph to left and swallowed the key, so a blank
+  line under a centered title lost its centering.
+- On KDE, whose standard Replace shortcut is `Ctrl+R`, `Ctrl+R` was bound twice (Replace and
+  Align Right), so it did nothing. Align Right keeps `Ctrl+R`; Replace keeps `Ctrl+H`.
+- ODT: justified paragraphs reopened as left-aligned (Qt's HTML import ignores
+  `text-align:justify`). Alignment is now also read from LibreOffice files that set it through
+  styles: `start` / `end` values, automatic styles inheriting from a parent, and named styles
+  in `styles.xml` (e.g. a centered Title, a justified Text Body).
+- RTF: import now reads `\ql` / `\qc` / `\qr` / `\qj` (and `\qd` as justified), reset by
+  `\pard`; before, every imported paragraph was left-aligned. Export also writes `\ql`.
+- Full Page view, Print, Print Preview and PDF export honour alignment on every page; the last
+  line of a justified paragraph stays ragged. Checked by the new `alignment` ctest (ODT and RTF
+  round-trips including LibreOffice/Word-style files, one-step undo, checked state, print layout).
+
 ### Command line
 - `zwriter --version` (`-v`) prints the version and `--help` (`-h`) prints usage. Both answer
   immediately, without starting the GUI or needing a display; before, they launched the app.
