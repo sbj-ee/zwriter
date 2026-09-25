@@ -3,6 +3,24 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.1.0] — 2026-09-24
+
+### All platforms
+- New **Inverse** theme (View → Theme): a true black page with white text, for maximum
+  contrast. The chrome follows the page like the other themes. The desk behind the sheet
+  lifts one shade and the page border stays bright, so the page edge is still visible in
+  Full Page view; selection is inverse video (white on black). Persisted in QSettings
+  alongside Paper and Dark room.
+- Header and footer ink is now always dark when printing or exporting to PDF. It previously
+  came from the screen theme, so Dark room printed pale grey headers onto white stock.
+
+### Linux
+- The menu bar is no longer missing on desktops running a global menu. Where an appmenu
+  service (`com.canonical.AppMenu.Registrar`, e.g. Fildem on GNOME) is present, Qt exported
+  the menu bar over D-Bus, leaving no visible menu when the panel applet did not render it —
+  and quietly breaking hide-away, which reveals chrome from the menu bar's geometry. zwriter
+  now keeps the bar in the window. macOS keeps its native menu bar.
+
 ## [1.0.1] — 2026-09-24
 
 ### macOS
