@@ -23,6 +23,8 @@ public:
     QString findText() const;
     QString replaceText() const;
     bool caseSensitive() const;
+    // Feedback after a search: empty clears it; notFound tints the field.
+    void setStatus(const QString &text, bool notFound);
 
 signals:
     void findNext();
@@ -47,4 +49,5 @@ private:
     QPushButton *m_replaceBtn = nullptr;
     QPushButton *m_replaceAllBtn = nullptr;
     QPushButton *m_closeBtn = nullptr;
+    QLabel *m_status = nullptr;
 };

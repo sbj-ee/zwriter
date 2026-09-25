@@ -237,7 +237,22 @@ QToolTip {
 }
 #findReplaceBar QPushButton:hover { background-color: @hover; }
 #findReplaceBar QPushButton:pressed { background-color: @pressed; }
-#findReplaceBar QCheckBox { color: @fg; background: transparent; }
+#findReplaceBar QCheckBox { color: @fg; background: transparent; spacing: 6px; }
+#findReplaceBar QLineEdit[notFound="true"] { border-color: #c0392b; background-color: @notFoundBg; }
+#findReplaceBar #findStatus { color: @muted; }
+#findReplaceBar #findStatus[notFound="true"] { color: #c0392b; }
+
+/* Check boxes: an always-visible box (the style sheet otherwise leaves an
+   unchecked box invisible on the themed background). */
+#findReplaceBar QCheckBox::indicator, QDialog QCheckBox::indicator {
+  width: 13px; height: 13px;
+  border: 1px solid @muted; border-radius: 3px;
+  background-color: @inputBg;
+}
+#findReplaceBar QCheckBox::indicator:hover, QDialog QCheckBox::indicator:hover { border-color: @accent; }
+#findReplaceBar QCheckBox::indicator:checked, QDialog QCheckBox::indicator:checked {
+  border-color: @accent; background-color: @accent; image: url(:/ui/check-@id.png);
+}
 
 /* ---- Dialogs ------------------------------------------------------------ */
 QDialog, QMessageBox { background-color: @windowBg; color: @fg; }
@@ -303,6 +318,7 @@ QDialog QHeaderView::section { background-color: @barBg; color: @fg; border: non
         {"@selBg", hex(c.selBg)},         {"@selFg", hex(c.selFg)},
         {"@bodyPt", QString::number(bodyPt) + QStringLiteral("pt")},
         {"@editorPad", pad},
+        {"@notFoundBg", c.id == QLatin1String("paper") ? QStringLiteral("#f7dcd8") : QStringLiteral("#4a1f1f")},
     };
     for (const auto &t : tokens) {
         css.replace(QLatin1String(t.key), t.value);

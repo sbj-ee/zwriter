@@ -40,6 +40,8 @@
 #include <QGuiApplication>
 #include <QComboBox>
 #include <QClipboard>
+#include <QMimeData>
+#include <QTextDocumentFragment>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
@@ -180,6 +182,16 @@ MainWindow::MainWindow(QWidget *parent)
     layout->addWidget(m_desk, 1);
     setCentralWidget(central);
     m_desk->installEventFilter(this);
+    // Hide-away: in Full Page view the pointer at the top edge is over the desk
+    // / scroll area, not the editor, so those need move events too.
+    for (QWidget *w : {static_cast<QWidget *>(m_desk), static_cast<QWidget *>(m_pageScroll),
+                       m_pageScroll->viewport(), static_cast<QWidget *>(m_pageCanvas),
+                       static_cast<QWidget *>(m_pageFrame)}) {
+        w->setMouseTracking(true);
+        if (w != m_desk) {
+            w->installEventFilter(this);
+        }
+    }
 
     m_keySounds = new TypewriterSounds(this);
     m_keySounds->setEnabled(
@@ -270,6 +282,17 @@ MainWindow::MainWindow(QWidget *parent)
     syncFormatActions();
     updateWindowTitle();
     updateFocusHighlight();
+    // Setting up the page layout above is not an edit.
+    m_editor->document()->clearUndoRedoStacks();
+    m_editor->document()->setModified(false);
+    // Type straight away: the editor owns keyboard focus from launch (hiding the
+    // chrome above can otherwise leave no focus widget at all).
+    m_editor->setFocus(Qt::OtherFocusReason);
+    QTimer::singleShot(0, this, [this]() {
+        if (!QApplication::focusWidget() || QApplication::focusWidget()->window() != this) {
+            m_editor->setFocus(Qt::OtherFocusReason);
+        }
+    });
 }
 
 void MainWindow::loadSettings()
@@ -288,7 +311,6 @@ void MainWindow::loadSettings()
     }
     m_recentFiles = s.value(QStringLiteral("files/recent")).toStringList();
     m_lastDocDir = s.value(QStringLiteral("files/lastDir")).toString();
-    m_lastSaveFilter = s.value(QStringLiteral("files/lastSaveFilter")).toString();
 }
 
 void MainWindow::saveSettings() const
@@ -308,7 +330,7 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("theme/id"), m_themeId);
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
     s.setValue(QStringLiteral("files/lastDir"), m_lastDocDir);
-    s.setValue(QStringLiteral("files/lastSaveFilter"), m_lastSaveFilter);
+    s.remove(QStringLiteral("files/lastSaveFilter")); // no longer used (untitled saves default to ODT)
     savePrinterSettings();
 }
 
@@ -382,6 +404,15 @@ void MainWindow::buildFileMenu()
 
     m_recentMenu = m_fileMenu->addMenu(QStringLiteral("Open &Recent"));
     rebuildRecentMenu();
+    // Files deleted or moved since the list was built drop out whenever the
+    // menu is about to be shown, instead of failing when clicked.
+    connect(m_fileMenu, &QMenu::aboutToShow, this, [this]() {
+        const int before = int(m_recentFiles.size());
+        rebuildRecentMenu();
+        if (m_recentFiles.size() != before) {
+            saveSettings();
+        }
+    });
 
     m_fileMenu->addSeparator();
 
@@ -452,7 +483,7 @@ void MainWindow::buildEditMenu()
     pasteAct->setShortcut(QKeySequence::Paste);
     connect(pasteAct, &QAction::triggered, m_editor, &QTextEdit::paste);
 
-    auto *pastePlainAct = m_editMenu->addAction(QStringLiteral("Paste as Plain &Text"));
+    auto *pastePlainAct = m_editMenu->addAction(QStringLiteral("Paste as P&lain Text"));
     pastePlainAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
     connect(pastePlainAct, &QAction::triggered, this, &MainWindow::editPastePlain);
 
@@ -477,7 +508,18 @@ void MainWindow::buildEditMenu()
     connect(findPrevAct, &QAction::triggered, this, &MainWindow::findPrev);
 
     auto *replaceAct = m_editMenu->addAction(QStringLiteral("R&eplace…"));
-    replaceAct->setShortcut(QKeySequence::Replace);
+    // QKeySequence::Replace is empty on Linux; Ctrl+H is the convention there
+    // (Cmd+H hides the app on macOS, which uses Cmd+Option+F instead).
+    QList<QKeySequence> replaceKeys = QKeySequence::keyBindings(QKeySequence::Replace);
+#ifdef Q_OS_MACOS
+    const QKeySequence replaceExtra(Qt::CTRL | Qt::ALT | Qt::Key_F);
+#else
+    const QKeySequence replaceExtra(Qt::CTRL | Qt::Key_H);
+#endif
+    if (!replaceKeys.contains(replaceExtra)) {
+        replaceKeys.append(replaceExtra);
+    }
+    replaceAct->setShortcuts(replaceKeys);
     connect(replaceAct, &QAction::triggered, this, &MainWindow::showReplace);
 
     // Undo/redo/cut/copy availability follows the editor.
@@ -616,7 +658,7 @@ void MainWindow::buildFormatMenu()
     m_formatMenu->addAction(m_numberListAction);
     m_formatMenu->addSeparator();
 
-    auto *tableAct = m_formatMenu->addAction(QStringLiteral("Insert Ta&ble…"));
+    auto *tableAct = m_formatMenu->addAction(QStringLiteral("Insert Tabl&e…"));
     tableAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
     tableAct->setToolTip(QStringLiteral("Insert a table (Ctrl+Shift+I)"));
     connect(tableAct, &QAction::triggered, this, &MainWindow::insertTable);
@@ -627,7 +669,7 @@ void MainWindow::buildFormatMenu()
     tableMenu->addAction(m_tableRemoveRowAction);
     tableMenu->addAction(m_tableRemoveColAction);
 
-    auto *pageBreakAct = m_formatMenu->addAction(QStringLiteral("Insert Page &Break"));
+    auto *pageBreakAct = m_formatMenu->addAction(QStringLiteral("Insert Page Brea&k"));
     pageBreakAct->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_Return),
                                 QKeySequence(Qt::CTRL | Qt::Key_Enter)});
     pageBreakAct->setToolTip(QStringLiteral(
@@ -717,7 +759,7 @@ void MainWindow::buildViewMenu()
 
     m_viewMenu->addSeparator();
 
-    m_spellCheckAction = m_viewMenu->addAction(QStringLiteral("S&pell Check"));
+    m_spellCheckAction = m_viewMenu->addAction(QStringLiteral("Spe&ll Check"));
     m_spellCheckAction->setCheckable(true);
     m_spellCheckAction->setToolTip(
         QStringLiteral("Underline misspellings (Hunspell en_US); right-click for suggestions"));
@@ -758,7 +800,7 @@ void MainWindow::buildViewMenu()
         QStringLiteral("Keep the toolbar, menus and status bar visible (Esc); off = hide-away"));
     connect(m_alwaysShowChromeAction, &QAction::triggered, this, &MainWindow::setChromePinned);
 
-    auto *fullscreenAct = m_viewMenu->addAction(QStringLiteral("Full &Screen"));
+    auto *fullscreenAct = m_viewMenu->addAction(QStringLiteral("Full Sc&reen"));
     fullscreenAct->setShortcut(QKeySequence(Qt::Key_F11));
     connect(fullscreenAct, &QAction::triggered, this, &MainWindow::toggleFullscreen);
 
@@ -904,8 +946,14 @@ void MainWindow::tableRemoveRow()
         return;
     }
     QTextCursor c = m_editor->textCursor();
-    const int row = table->cellAt(c).row();
+    const QTextTableCell cell = table->cellAt(c);
+    const int row = cell.row();
+    const int col = cell.column();
     table->removeRows(row, 1);
+    // Keep the caret in the table (removing the first row would otherwise
+    // leave it just outside, with the table actions greyed out).
+    m_editor->setTextCursor(
+        table->cellAt(qMin(row, table->rows() - 1), qMin(col, table->columns() - 1)).firstCursorPosition());
     updateTableActions();
     markDirty();
 }
@@ -917,8 +965,12 @@ void MainWindow::tableRemoveColumn()
         return;
     }
     QTextCursor c = m_editor->textCursor();
-    const int col = table->cellAt(c).column();
+    const QTextTableCell cell = table->cellAt(c);
+    const int row = cell.row();
+    const int col = cell.column();
     table->removeColumns(col, 1);
+    m_editor->setTextCursor(
+        table->cellAt(qMin(row, table->rows() - 1), qMin(col, table->columns() - 1)).firstCursorPosition());
     updateTableActions();
     markDirty();
 }
@@ -1097,8 +1149,12 @@ void MainWindow::buildFormatToolbar()
     m_fontCombo->setMaximumWidth(220);
     m_fontCombo->setCurrentFont(defaultDocumentFont());
     m_formatBar->addWidget(m_fontCombo);
-    connect(m_fontCombo, &QFontComboBox::currentFontChanged,
-            this, &MainWindow::onFontFamilyChosen);
+    // Apply only once a font is chosen (Enter, or picking from the list): the
+    // combo is editable, and applying on every keystroke of a typed name
+    // would send the rest of the name into the document.
+    connect(m_fontCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int) {
+        onFontFamilyChosen(m_fontCombo->currentFont());
+    });
 
     m_fontSizeSpin = new QSpinBox(m_formatBar);
     m_fontSizeSpin->setObjectName(QStringLiteral("fontSizeSpin"));
@@ -1108,8 +1164,17 @@ void MainWindow::buildFormatToolbar()
     m_fontSizeSpin->setSuffix(QStringLiteral(" pt"));
     m_fontSizeSpin->setFixedWidth(78);
     m_formatBar->addWidget(m_fontSizeSpin);
+    // Arrows / wheel apply each step live and keep focus in the box; typed
+    // digits apply on Enter (keyboard tracking off). Enter hands focus back.
+    m_fontSizeSpin->setKeyboardTracking(false);
     connect(m_fontSizeSpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, &MainWindow::onFontSizeChosen);
+    connect(m_fontSizeSpin, &QSpinBox::editingFinished, this, [this]() {
+        // Also emitted on focus loss; only Enter (focus still here) returns to the page.
+        if (m_fontSizeSpin->hasFocus() && m_editor) {
+            m_editor->setFocus();
+        }
+    });
 
     m_formatBar->addSeparator();
 
@@ -1286,6 +1351,12 @@ void MainWindow::scheduleHideAway()
 void MainWindow::hideAwayIdle()
 {
     if (m_hideAwayPinned) {
+        return;
+    }
+    // Never pull the bar away from under an open menu (e.g. one opened with
+    // Alt+letter while the chrome was hidden); try again later.
+    if (QApplication::activePopupWidget() || (menuBar() && menuBar()->activeAction())) {
+        m_hideTimer->start();
         return;
     }
     setChromeVisible(false);
@@ -1555,8 +1626,11 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
             toInsert.append(new QAction(menu));
             toInsert.back()->setSeparator(true);
 
-            for (int i = toInsert.size() - 1; i >= 0; --i) {
-                insertBefore(toInsert.at(i));
+            // Each one goes in front of the first standard action, so inserting
+            // in list order keeps the best suggestion on top and the separator
+            // right above Undo.
+            for (QAction *action : std::as_const(toInsert)) {
+                insertBefore(action);
             }
         }
     }
@@ -1717,6 +1791,7 @@ bool MainWindow::findInDoc(bool forward)
 {
     const QString needle = m_findBar->findText();
     if (needle.isEmpty()) {
+        m_findBar->setStatus(QString(), false);
         return false;
     }
     QTextDocument::FindFlags flags;
@@ -1726,24 +1801,42 @@ bool MainWindow::findInDoc(bool forward)
     if (m_findBar->caseSensitive()) {
         flags |= QTextDocument::FindCaseSensitively;
     }
+    const QTextCursor before = m_editor->textCursor();
     bool found = m_editor->find(needle, flags);
+    bool wrapped = false;
     if (!found) {
-        // Wrap around.
-        QTextCursor c(m_editor->document());
-        if (forward) {
-            c.movePosition(QTextCursor::Start);
+        // Wrap around, but only move the caret if the text is really there.
+        QTextCursor from(m_editor->document());
+        from.movePosition(forward ? QTextCursor::Start : QTextCursor::End);
+        const QTextCursor hit = m_editor->document()->find(needle, from, flags);
+        if (!hit.isNull()) {
+            m_editor->setTextCursor(hit);
+            found = true;
+            wrapped = true;
         } else {
-            c.movePosition(QTextCursor::End);
+            m_editor->setTextCursor(before);
         }
-        m_editor->setTextCursor(c);
-        found = m_editor->find(needle, flags);
+    }
+    if (!found) {
+        const QString msg = QStringLiteral("Not found: \u201c%1\u201d").arg(needle);
+        m_findBar->setStatus(QStringLiteral("Not found"), true);
+        statusBar()->showMessage(msg, 4000);
+    } else if (wrapped) {
+        const QString msg = forward ? QStringLiteral("Wrapped to the top")
+                                    : QStringLiteral("Wrapped to the bottom");
+        m_findBar->setStatus(msg, false);
+        statusBar()->showMessage(msg, 3000);
+    } else {
+        m_findBar->setStatus(QString(), false);
     }
     return found;
 }
 
 void MainWindow::findNext()
 {
-    if (!m_findBar->isVisible()) {
+    // F3 with the bar closed repeats the last search (and stays in the text);
+    // with nothing searched yet it opens the bar.
+    if (!m_findBar->isVisible() && m_findBar->findText().isEmpty()) {
         showFind();
         return;
     }
@@ -1752,7 +1845,7 @@ void MainWindow::findNext()
 
 void MainWindow::findPrev()
 {
-    if (!m_findBar->isVisible()) {
+    if (!m_findBar->isVisible() && m_findBar->findText().isEmpty()) {
         showFind();
         return;
     }
@@ -1890,7 +1983,7 @@ void MainWindow::onFontFamilyChosen(const QFont &font)
         fmt.setFontPointSize(size);
     }
     m_editor->mergeCurrentCharFormat(fmt);
-    m_editor->setFocus();
+    m_editor->setFocus(); // the choice is made: back to the page
 }
 
 void MainWindow::onFontSizeChosen(int pointSize)
@@ -1901,7 +1994,7 @@ void MainWindow::onFontSizeChosen(int pointSize)
     QTextCharFormat fmt;
     fmt.setFontPointSize(pointSize);
     m_editor->mergeCurrentCharFormat(fmt);
-    m_editor->setFocus();
+    // Focus stays in the size box so further arrow presses keep adjusting it.
 }
 
 void MainWindow::toggleUnderline()
@@ -1914,7 +2007,15 @@ void MainWindow::toggleUnderline()
 
 void MainWindow::editPastePlain()
 {
-    m_editor->insertPlainText(QGuiApplication::clipboard()->text());
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    QString text = mime ? mime->text() : QString();
+    if (text.isEmpty() && mime && mime->hasHtml()) {
+        // Browsers and some apps put only HTML on the clipboard.
+        text = QTextDocumentFragment::fromHtml(mime->html()).toPlainText();
+    }
+    if (!text.isEmpty()) {
+        m_editor->insertPlainText(text);
+    }
     m_editor->setFocus();
 }
 
@@ -2393,11 +2494,9 @@ QString MainWindow::runSaveDocumentDialog(DocumentIo::Format *outFormat)
     dlg.setNameFilters(DocumentIo::saveFilter().split(QStringLiteral(";;")));
     dlg.setDirectory(documentsStartDir());
 
-    QString filter = m_lastSaveFilter;
-    if (filter.isEmpty() || !dlg.nameFilters().contains(filter)) {
-        filter = QStringLiteral("OpenDocument Text (*.odt)");
-    }
-    // Prefer current document format when saving an existing file.
+    // New documents start as ODT (the native format); an existing file keeps
+    // its own format. The type last used for some other file doesn't carry over.
+    QString filter = QStringLiteral("OpenDocument Text (*.odt)");
     if (!m_currentPath.isEmpty()) {
         const DocumentIo::Format cur = m_currentFormat;
         if (cur == DocumentIo::Format::Txt) {
@@ -2427,21 +2526,15 @@ QString MainWindow::runSaveDocumentDialog(DocumentIo::Format *outFormat)
     }
     QString path = files.constFirst();
     const QString selectedFilter = dlg.selectedNameFilter();
-    DocumentIo::Format format = DocumentIo::formatFromFilter(selectedFilter, path);
-
-    // Extension always follows the chosen type — never leave a bare filename.
-    const QString wantExt = DocumentIo::formatName(format);
-    const QFileInfo fi(path);
-    if (fi.suffix().compare(wantExt, Qt::CaseInsensitive) != 0) {
-        if (fi.suffix().isEmpty()) {
-            path += QLatin1Char('.') + wantExt;
-        } else {
-            path = fi.absolutePath() + QLatin1Char('/') + fi.completeBaseName()
-                + QLatin1Char('.') + wantExt;
-        }
+    // A typed .odt / .txt / .rtf extension decides the format (and wins over
+    // the file-type box); otherwise the chosen type's extension is appended,
+    // so there is never a bare filename.
+    DocumentIo::Format format = DocumentIo::formatFromPath(path);
+    if (format == DocumentIo::Format::Unknown) {
+        format = DocumentIo::formatFromFilter(selectedFilter, QString());
+        path += QLatin1Char('.') + DocumentIo::formatName(format);
     }
 
-    m_lastSaveFilter = selectedFilter;
     rememberDocDir(path);
     if (outFormat) {
         *outFormat = format;
@@ -3662,6 +3755,29 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         // table. Fix those cases up; everything else is Qt's own behaviour.
         const Qt::KeyboardModifiers chord =
             ke->modifiers() & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+#ifndef Q_OS_MACOS
+        // Chrome hidden away: Alt+letter must open the menu, not type a letter.
+        // (Not on macOS, where Option+letter types accented characters.)
+        if (!m_chromeVisible && menuBar() && (ke->modifiers() & Qt::AltModifier)
+            && !(ke->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))
+            && ke->key() >= Qt::Key_A && ke->key() <= Qt::Key_Z) {
+            revealHideAway();
+            const QKeySequence wanted(QKeyCombination(Qt::AltModifier, Qt::Key(ke->key())));
+            for (QAction *a : menuBar()->actions()) {
+                if (QKeySequence::mnemonic(a->text()) == wanted) {
+                    menuBar()->setActiveAction(a);
+                    break;
+                }
+            }
+            return true;
+        }
+#endif
+        // Tab / Shift+Tab move between table cells (Tab in the last cell adds a row).
+        if (((ke->key() == Qt::Key_Tab && !chord)
+             || (ke->key() == Qt::Key_Backtab && (chord & ~Qt::ShiftModifier) == Qt::NoModifier))
+            && m_editor->textCursor().currentTable()) {
+            return moveToAdjacentCell(ke->key() == Qt::Key_Tab);
+        }
         if ((ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) && !chord) {
             QTextCursor c = m_editor->textCursor();
             if (!c.hasSelection() && !c.currentTable()

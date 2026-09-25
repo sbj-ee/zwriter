@@ -4,5 +4,7 @@
         <file>ui/arrow-up-paper.png</file>
         <file>ui/arrow-down-dark.png</file>
         <file>ui/arrow-up-dark.png</file>
+        <file>ui/check-paper.png</file>
+        <file>ui/check-dark.png</file>
     </qresource>
 </RCC>

@@ -3,6 +3,60 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [Unreleased]
+
+Fixes from the v1.0.0 GUI test report.
+
+### Printing, PDF and page setup
+- PDF export, Print and Print Preview drew body text about 12.5× too small (the layout is at
+  screen DPI and was painted onto the 1200 dpi printer unscaled). The document is now laid out
+  on a clone at screen DPI and the painter is scaled to the device, so text, header, footer and
+  page numbers come out at their real size.
+- Landscape in Page Setup now gives landscape sheets in Full Page view, with margins and header
+  intact.
+- Print Preview no longer shifts the page content by the margins (the footer fell off the sheet).
+
+### ODT
+- `meta.xml` is listed in `META-INF/manifest.xml`: LibreOffice refused to open zwriter files.
+- Header, footer (with `{page}` / `{pages}` as ODF fields), paper size, orientation and margins
+  are written as an ODF master page in `styles.xml`, so other applications show them.
+- Tables are saved with 0.5 pt light-grey borders and a 100 % relative width (was 1.125 pt and a
+  fixed 100 pt).
+- Reopened documents keep their spacing (no extra space between paragraphs or list items) and
+  the Courier fallback chain.
+
+### RTF
+- Import no longer leaks the font, colour and style tables into the text; `\uN` and `\'hh`
+  escapes decode properly; bold, italic, underline, larger (heading) sizes, page breaks and
+  tables are kept.
+- Export writes the document font, bold / italic / underline / strike, sizes, alignment, lists
+  (as literal markers), tables and page breaks.
+
+### Editing
+- Tables draw as a single 1 px light-grey grid instead of double rules. Insert Table puts the
+  caret in the first cell; Tab / Shift+Tab move between cells and Tab in the last cell adds a row.
+  Removing a row or column keeps the caret in the table.
+- The font and size boxes hand focus back to the editor only when a choice is made, so a typed
+  font name or repeated size arrows no longer spill into the document.
+- Typing works immediately at launch; a new window has nothing to undo.
+- Switching Full Page view on or off is no longer an undoable edit.
+- Paste as Plain Text works for HTML-only clipboards; rich pastes drop text and background
+  colours so pasted text follows the theme.
+- The spelling menu lists the best suggestion first.
+
+### Find, menus and dialogs
+- Find shows "Not found" (tinted field and status message) and leaves the caret where it was;
+  wrapping around is reported. F3 / Shift+F3 search again with the bar closed.
+- Replace is also on `Ctrl+H` explicitly (`Cmd+Option+F` on macOS).
+- Unique menu mnemonics (Paste as P&lain Text, Insert Tabl&e…, Insert Page Brea&k, Spe&ll Check,
+  Full Sc&reen).
+- With the chrome hidden, hovering the top edge reveals it in Full Page view too, and Alt+letter
+  reveals the chrome and opens that menu.
+- Check boxes in the find bar and dialogs are visible in every theme.
+- Save As for an untitled document defaults to ODT; a typed `.odt` / `.txt` / `.rtf` extension
+  decides the format.
+- The recent-files list drops files that no longer exist.
+
 ## [1.1.1] — 2026-09-24
 
 ### Linux

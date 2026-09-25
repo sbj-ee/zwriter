@@ -29,6 +29,9 @@ public:
     void setContinuousInset(bool on, const QMarginsF &documentMargins);
 
 protected:
+    // Rich paste keeps structure and emphasis but drops hard-coded text and
+    // background colours, which would clash with the theme (text follows it).
+    void insertFromMimeData(const QMimeData *source) override;
     void resizeEvent(QResizeEvent *event) override;
     void changeEvent(QEvent *event) override;
     void showEvent(QShowEvent *event) override;

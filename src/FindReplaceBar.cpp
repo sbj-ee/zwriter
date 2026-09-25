@@ -7,6 +7,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QShowEvent>
+#include <QStyle>
 #include <QVBoxLayout>
 
 FindReplaceBar::FindReplaceBar(QWidget *parent)
@@ -33,6 +34,11 @@ FindReplaceBar::FindReplaceBar(QWidget *parent)
 
     m_caseBox = new QCheckBox(QStringLiteral("Match case"), this);
     findRow->addWidget(m_caseBox);
+
+    m_status = new QLabel(this);
+    m_status->setObjectName(QStringLiteral("findStatus"));
+    m_status->setMinimumWidth(90);
+    findRow->addWidget(m_status);
 
     m_closeBtn = new QPushButton(QStringLiteral("×"), this);
     m_closeBtn->setFixedWidth(28);
@@ -63,8 +69,24 @@ FindReplaceBar::FindReplaceBar(QWidget *parent)
     connect(m_findEdit, &QLineEdit::returnPressed, this, &FindReplaceBar::findNext);
     connect(m_replaceEdit, &QLineEdit::returnPressed, this, &FindReplaceBar::replaceOne);
 
+    // A new search term or case setting: the old verdict no longer applies.
+    connect(m_findEdit, &QLineEdit::textChanged, this, [this]() { setStatus(QString(), false); });
+    connect(m_caseBox, &QCheckBox::toggled, this, [this]() { setStatus(QString(), false); });
+
     setReplaceVisible(false);
     hide();
+}
+
+void FindReplaceBar::setStatus(const QString &text, bool notFound)
+{
+    m_status->setText(text);
+    for (QWidget *w : {static_cast<QWidget *>(m_findEdit), static_cast<QWidget *>(m_status)}) {
+        if (w->property("notFound").toBool() != notFound) {
+            w->setProperty("notFound", notFound);
+            w->style()->unpolish(w);
+            w->style()->polish(w);
+        }
+    }
 }
 
 void FindReplaceBar::setReplaceVisible(bool visible)

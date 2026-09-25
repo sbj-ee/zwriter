@@ -275,7 +275,6 @@ private:
     DocumentMeta m_meta;
     QStringList m_recentFiles;
     QString m_lastDocDir;
-    QString m_lastSaveFilter;
     bool m_dirty = false;
     bool m_chromeVisible = false;
     bool m_hideAwayPinned = true;      // default: toolbar/menus/status stay visible

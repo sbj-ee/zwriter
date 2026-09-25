@@ -1,6 +1,11 @@
 #include "PageWidgets.hpp"
 
+#include <QMimeData>
 #include <QPaintEvent>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QTextDocumentFragment>
 #include <QPainter>
 #include <QVBoxLayout>
 
@@ -17,6 +22,44 @@ void PageTextEdit::reapplyPageSize()
     if (m_pageSize.isValid() && document() && document()->pageSize() != m_pageSize) {
         document()->setPageSize(m_pageSize);
     }
+}
+
+void PageTextEdit::insertFromMimeData(const QMimeData *source)
+{
+    if (!source || !acceptRichText() || !source->hasHtml()) {
+        QTextEdit::insertFromMimeData(source);
+        return;
+    }
+    QTextDocument tmp;
+    tmp.setHtml(source->html());
+    QTextCursor edit(&tmp);
+    edit.beginEditBlock();
+    for (QTextBlock b = tmp.begin(); b.isValid(); b = b.next()) {
+        QTextBlockFormat bf = b.blockFormat();
+        if (bf.hasProperty(QTextFormat::BackgroundBrush)) {
+            bf.clearBackground();
+            QTextCursor(b).setBlockFormat(bf);
+        }
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            QTextCharFormat cf = frag.charFormat();
+            if (!cf.hasProperty(QTextFormat::ForegroundBrush)
+                && !cf.hasProperty(QTextFormat::BackgroundBrush)) {
+                continue;
+            }
+            cf.clearForeground();
+            cf.clearBackground();
+            QTextCursor sel(&tmp);
+            sel.setPosition(frag.position());
+            sel.setPosition(frag.position() + frag.length(), QTextCursor::KeepAnchor);
+            sel.setCharFormat(cf);
+        }
+    }
+    edit.endEditBlock();
+    QTextCursor c = textCursor();
+    c.insertFragment(QTextDocumentFragment(&tmp));
+    setTextCursor(c);
+    ensureCursorVisible();
 }
 
 void PageTextEdit::setContinuousInset(bool on, const QMarginsF &documentMargins)
