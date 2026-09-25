@@ -555,6 +555,11 @@ void testPrintAlignment()
 
 int main(int argc, char **argv)
 {
+    // Unbuffered, so a crash still shows how far the checks got.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    // Headless on macOS the default native style needs a Cocoa window server
+    // and crashes under the offscreen platform; Fusion works everywhere.
+    QApplication::setStyle(QStringLiteral("Fusion"));
     QApplication app(argc, argv);
     QTemporaryDir dir;
     if (!dir.isValid()) {

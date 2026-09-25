@@ -240,7 +240,7 @@ if(ZWRITER_BUILD_TESTS)
   target_include_directories(alignment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(alignment_test PRIVATE Qt6::Widgets)
   add_test(NAME alignment COMMAND alignment_test)
-  set_tests_properties(alignment PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  set_tests_properties(alignment PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.
