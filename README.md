@@ -38,6 +38,16 @@ xattr -dr com.apple.quarantine /Applications/zwriter.app
 **Linux (amd64)**: `sudo apt install ./zwriter-X.Y.Z-Linux-amd64.deb`. The package is built on
 Ubuntu 24.04 and depends on the `t64` Qt 6 packages, so it needs **Ubuntu 24.04+ or Debian 13+**.
 
+Either name starts it from a terminal — `zwriter`, or the short `zw` (`/usr/bin/zw` is a symlink
+the package installs). Both accept the same arguments: `zw draft.odt`.
+
+On macOS the `.dmg` holds an app bundle, not a command, so there is no `zw` on `$PATH`. Add one
+if you want it:
+
+```bash
+ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
+```
+
 ### Implemented now
 
 - **Quiet formatting toolbar** (auto-hide optional; shown by default): font family + size, **B / I / U**, and a paragraph-style dropdown (Body / Heading 1–3). Everything else — alignment, lists, tables, clear formatting — is in the Format menu
@@ -190,6 +200,9 @@ desktops take the dock icon and hover name from a `zwriter.desktop` entry. A
 tools/install-desktop-entry.sh            # registers build/zwriter (per-user, no sudo)
 tools/install-desktop-entry.sh --remove   # undo
 ```
+
+The short `zw` command comes from the `.deb`; running out of the build tree there is only
+`./build/zwriter`.
 
 `qt6-base-dev` already pulls in Widgets + PrintSupport (PDF export + print).
 

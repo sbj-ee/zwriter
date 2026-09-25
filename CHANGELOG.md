@@ -3,6 +3,14 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [Unreleased]
+
+### Linux
+- The `.deb` installs `/usr/bin/zw` as a symlink to `zwriter`, so the app can be started from a
+  terminal under either name. Both take the same arguments. Running as `zw` changes nothing else:
+  the application, organisation and desktop-file names are set explicitly, so settings, window
+  title and dock icon are unaffected.
+
 ## [1.1.0] — 2026-09-24
 
 ### All platforms

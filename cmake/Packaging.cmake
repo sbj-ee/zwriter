@@ -28,6 +28,17 @@ if(UNIX AND NOT APPLE)
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6widgets6 | libqt6widgets6t64, libhunspell-1.7-0, hunspell-en-us")
 
   install(TARGETS zwriter RUNTIME DESTINATION bin COMPONENT zwriter)
+  # Short command name: `zw` next to `zwriter` on $PATH. A relative symlink, so
+  # it survives DESTDIR staging and a prefix move. Safe to run under either
+  # name: main.cpp sets the application, organisation and desktop-file names
+  # explicitly, so QSettings, the window title and the dock icon do not depend
+  # on argv[0].
+  install(CODE [[
+    set(_zw_bindir "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin")
+    file(MAKE_DIRECTORY "${_zw_bindir}")
+    file(CREATE_LINK zwriter "${_zw_bindir}/zw" SYMBOLIC)
+    message(STATUS "Symlinked ${_zw_bindir}/zw -> zwriter")
+  ]] COMPONENT zwriter)
   install(FILES ${CMAKE_SOURCE_DIR}/assets/linux/zwriter.desktop
           DESTINATION share/applications
           COMPONENT zwriter)
