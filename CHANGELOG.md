@@ -3,6 +3,29 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.0.1] — 2026-09-24
+
+### macOS
+- The `.dmg` now contains a real **zwriter.app** (drag it to Applications) instead of a bare
+  executable. Info.plist with bundle id `ee.sbj.zwriter`, version from `PROJECT_VERSION`,
+  Retina support, macOS 14 minimum, and ODT / plain text / RTF document types; typewriter
+  `.icns` icon generated from the existing art. Opens from Finder without a Terminal window.
+- Self-contained: macdeployqt bundles the Qt frameworks and plugins; libhunspell and the en_US
+  dictionary are inside the app (the spell checker looks in `Contents/Resources/hunspell`
+  first); the key sounds are in `Contents/Resources/assets/sounds`. Homebrew is not needed.
+- CI checks every Mach-O file in the app with `otool` and fails on any `/opt/homebrew` or
+  `/usr/local` reference, and verifies the ad-hoc signature (`codesign --verify --deep --strict`).
+- Still no Developer ID signature or notarization: first launch needs right-click → Open, or
+  `xattr -dr com.apple.quarantine /Applications/zwriter.app`.
+
+### All platforms
+- Help → Check for Updates now says why a check failed (network error, HTTP error, GitHub rate
+  limit with the reset time, unreadable reply, no published release) in the status bar and a
+  message box, instead of failing silently.
+
+### Linux
+- No changes besides the version (`zwriter-1.0.1-Linux-amd64.deb`, Ubuntu 24.04+ / Debian 13+).
+
 ## [1.0.0] — 2026-09-24
 
 First stable release. Linux amd64 and Apple Silicon only.
@@ -38,7 +61,7 @@ First stable release. Linux amd64 and Apple Silicon only.
   metadata saving need the `zip`/`unzip` tools.
 - Typing slows down on very long documents (roughly 12 ms per keystroke at ~370 pages, ~48 ms at
   ~1,500 pages), because Qt re-lays out the rest of the document on each edit.
-- The macOS `.dmg` contains a bare arm64 `zwriter` executable, not a `.app` bundle. It links
+- (Fixed in 1.0.1) The macOS `.dmg` contains a bare arm64 `zwriter` executable, not a `.app` bundle. It links
   Homebrew Qt and Hunspell under `/opt/homebrew` (`brew install qt hunspell` is required), and it
   is unsigned and not notarized, so Gatekeeper blocks the first launch (Control-click → Open, or
   `xattr -d com.apple.quarantine zwriter`).

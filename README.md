@@ -20,8 +20,23 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.0.0** — first stable release. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg`) are on the
+**1.0.1** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
+
+### Install
+
+**macOS (Apple Silicon, macOS 14 or newer)**: open `zwriter-X.Y.Z-Darwin.dmg` and drag
+**zwriter** onto **Applications**. Qt, Hunspell and the en_US dictionary are inside the app;
+Homebrew is not needed. The app is only ad-hoc signed (no Developer ID, not notarized yet), so
+macOS blocks the first launch. Either right-click zwriter in Applications → **Open** → **Open**,
+or run once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/zwriter.app
+```
+
+**Linux (amd64)**: `sudo apt install ./zwriter-X.Y.Z-Linux-amd64.deb`. The package is built on
+Ubuntu 24.04 and depends on the `t64` Qt 6 packages, so it needs **Ubuntu 24.04+ or Debian 13+**.
 
 ### Implemented now
 
@@ -51,7 +66,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 - **Manual page break** (Format → Insert Page Break, `Ctrl+Enter`): splits the paragraph and starts a new page; Backspace at the start of the new page removes it. Saved to ODT (`fo:break-before="page"`) and honoured in Full Page view, print and PDF
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
 - **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
-- CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg`)
+- CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg` with a self-contained, ad-hoc signed `zwriter.app`; CI fails if anything in it still references `/opt/homebrew` or `/usr/local`)
 
 ### Still roadmap / known limits
 
@@ -59,7 +74,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 - Daily word / time goal, scene / chapter navigation
 - Richer ODT/RTF style round-trip (colours, images, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is plain-text-oriented best-effort
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it. Headings are written as `text:h` the same way (a patch of `content.xml`); without `zip` they save as styled paragraphs and reopen as body text
-- macOS `.dmg` holds a bare arm64 `zwriter` executable (plus `share/zwriter/assets`), not a `.app` bundle. It is not built with macdeployqt: it links Homebrew Qt and Hunspell under `/opt/homebrew`, so `brew install qt hunspell` is required. It is unsigned and not notarized, so Gatekeeper blocks the first launch (Control-click → Open, or `xattr -d com.apple.quarantine zwriter`); double-clicking it opens Terminal. A proper `.app` is planned
+- macOS app is ad-hoc signed only — no Developer ID signature or notarization yet, so the first launch needs right-click → Open (see Install)
 - Status extras (pages / paragraphs) — later
 - Mouse-drag selection does not auto-scroll past the window edge in Full Page view (scroll, then shift-click); no widow/orphan control or keep-with-next
 
@@ -135,7 +150,7 @@ ODT open uses `unzip` to read `content.xml` / `meta.xml` (Linux + macOS). Prefer
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.0.0 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.0.1 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:
@@ -184,15 +199,21 @@ tools/install-desktop-entry.sh --remove   # undo
 brew install qt cmake ninja hunspell
 cmake -B build -G Ninja -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 cmake --build build
-./build/zwriter
+open build/zwriter.app
 
-# package .dmg (optional):
+# package .dmg (optional): installs zwriter.app into CPack's staging dir, runs
+# macdeployqt (Qt frameworks + plugins, libhunspell), removes rpaths that point
+# outside the bundle, ad-hoc signs, and runs tools/macos/check-bundle.sh
 cd build && cpack -G DragNDrop
 ```
 
-`CMakeLists.txt` forces `CMAKE_OSX_ARCHITECTURES=arm64` on Darwin before
-`project()` (same pattern as zedit). Multimedia and Hunspell remain optional
-(spell check enables when Hunspell + en_US dict are present).
+`CMakeLists.txt` forces `CMAKE_OSX_ARCHITECTURES=arm64` and a macOS 14.0
+deployment target on Darwin before `project()`. The bundle (`cmake/MacBundle.cmake`,
+`cmake/Info.plist.in`) is `ee.sbj.zwriter`, gets its `.icns` from
+`assets/icons/*.png` via `iconutil`, and carries the en_US Hunspell dictionary
+(`third_party/hunspell-en_US`) in `Contents/Resources/hunspell`, which the spell
+checker searches before the system paths. Multimedia and Hunspell remain optional
+at build time.
 
 ### Shortcuts
 

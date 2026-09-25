@@ -32,6 +32,9 @@ QUrl TypewriterSounds::findSample(const QString &fileName)
         QStringLiteral("assets/sounds/") + fileName,
         QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(
             QStringLiteral("../assets/sounds/") + fileName),
+        // macOS app bundle: Contents/MacOS/zwriter -> Contents/Resources/assets.
+        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(
+            QStringLiteral("../Resources/assets/sounds/") + fileName),
     };
     for (const QString &path : candidates) {
         if (QFile::exists(path)) {

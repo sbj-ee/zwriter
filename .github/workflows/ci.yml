@@ -72,11 +72,26 @@ jobs:
       - name: Test (ODT round-trip)
         run: ctest --test-dir build --output-on-failure
 
-      - name: Package .dmg
+      - name: Package .dmg (zwriter.app, macdeployqt, ad-hoc sign)
         run: |
           cd build
           cpack -G DragNDrop
           ls -la *.dmg
+
+      - name: Verify .dmg contents (no Homebrew references, signature)
+        run: |
+          set -euo pipefail
+          dmg=$(ls build/zwriter-*-Darwin.dmg)
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          trap 'hdiutil detach "$mnt" -quiet || true' EXIT
+          ls -la "$mnt"
+          test -d "$mnt/zwriter.app"
+          test -L "$mnt/Applications"
+          plutil -p "$mnt/zwriter.app/Contents/Info.plist"
+          tools/macos/check-bundle.sh "$mnt/zwriter.app"
+          codesign --verify --deep --strict --verbose=2 "$mnt/zwriter.app"
+          codesign -dv "$mnt/zwriter.app" 2>&1 | grep -E "Identifier|Signature|Format"
 
       - name: Upload .dmg artifact
         uses: actions/upload-artifact@v4

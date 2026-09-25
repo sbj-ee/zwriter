@@ -106,7 +106,7 @@ private slots:
     void helpCheckUpdates();
     void onUpdateAvailable(const QString &tag, const QString &url);
     void onUpToDate();
-    void onUpdateCheckFailed();
+    void onUpdateCheckFailed(const QString &reason);
     void printPreview(QPrinter *printer);
     void hideAwayIdle();
     void syncFormatActions();

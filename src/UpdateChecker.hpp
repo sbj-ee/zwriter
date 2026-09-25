@@ -27,12 +27,13 @@ public slots:
 
 signals:
     // Emitted only when a newer release is found (never on "up to date" /
-    // network failure / no releases — those fail soft).
+    // network failure / no releases).
     void updateAvailable(const QString &tagName, const QString &htmlUrl);
     // Optional: emitted when the check finishes with no newer release
     // (manual Check for Updates can show a brief status). Silent otherwise.
     void upToDate();
-    void checkFailed();
+    // The check could not be completed; reason is a short user-facing text.
+    void checkFailed(const QString &reason);
 
 private slots:
     void onFinished(QNetworkReply *reply);
@@ -41,10 +42,12 @@ private slots:
 private:
     static QList<int> parseSemver(QStringView s);
     static bool isNewer(const QString &tag, const QString &current);
+    static QString failureReason(QNetworkReply *reply);
 
     QNetworkAccessManager *m_nam = nullptr;
     QNetworkReply *m_reply = nullptr;
     QTimer *m_timeout = nullptr;
     QString m_currentVersion;
     bool m_checking = false;
+    bool m_timedOut = false;
 };

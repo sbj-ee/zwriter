@@ -7,11 +7,17 @@ cmake_minimum_required(VERSION 3.21)
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_ARCHITECTURES)
   set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Build architectures for macOS" FORCE)
 endif()
+# Minimum macOS for zwriter.app (Info.plist LSMinimumSystemVersion). CI links
+# Homebrew Qt bottles built for macOS 14 (Sonoma), so nothing older can work.
+set(ZWRITER_MACOS_MIN "14.0")
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "${ZWRITER_MACOS_MIN}" CACHE STRING "Minimum macOS version" FORCE)
+endif()
 
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.0.0 LANGUAGES CXX)
+project(zwriter VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -75,11 +81,6 @@ target_include_directories(zwriter PRIVATE
   ${ZWRITER_GENERATED_DIR}
 )
 
-if(APPLE)
-  set_target_properties(zwriter PROPERTIES
-    MACOSX_BUNDLE FALSE
-  )
-endif()
 
 if(TARGET Qt6::Multimedia)
   target_link_libraries(zwriter PRIVATE Qt6::Multimedia)
@@ -175,6 +176,12 @@ if(HUNSPELL_INCLUDE_DIR AND HUNSPELL_LIBRARY)
   message(STATUS "zwriter: Hunspell found — spell check enabled (${HUNSPELL_INCLUDE_DIR})")
 else()
   message(STATUS "zwriter: Hunspell not found — spell check stubs as no-op")
+endif()
+
+# macOS: zwriter.app bundle (Info.plist, icon, bundled dictionary/sounds,
+# macdeployqt at install time).
+if(APPLE)
+  include(cmake/MacBundle.cmake)
 endif()
 
 # Headless ODT round-trip regression test (ctest). Needs unzip + zip at run time.

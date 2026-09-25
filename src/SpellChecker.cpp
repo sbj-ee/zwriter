@@ -1,5 +1,6 @@
 #include "SpellChecker.hpp"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -15,6 +16,11 @@ namespace {
 QStringList dictionarySearchPaths()
 {
     QStringList paths;
+#ifdef Q_OS_MACOS
+    // zwriter.app ships en_US in Contents/Resources/hunspell; prefer it.
+    paths << QDir(QCoreApplication::applicationDirPath())
+                 .absoluteFilePath(QStringLiteral("../Resources/hunspell"));
+#endif
     paths << QStringLiteral("/usr/share/hunspell")
           << QStringLiteral("/usr/share/myspell/dicts")
           << QStringLiteral("/usr/local/share/hunspell")

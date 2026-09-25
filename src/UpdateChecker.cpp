@@ -5,6 +5,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QDateTime>
 #include <QTimer>
 #include <QUrl>
 
@@ -60,6 +61,7 @@ void UpdateChecker::checkForUpdates(const QString &currentVersion, const QString
     }
     m_currentVersion = currentVersion;
     m_checking = true;
+    m_timedOut = false;
 
     const QUrl url(QStringLiteral("https://api.github.com/repos/%1/releases/latest").arg(repo));
     QNetworkRequest req(url);
@@ -78,8 +80,30 @@ void UpdateChecker::checkForUpdates(const QString &currentVersion, const QString
 void UpdateChecker::onTimeout()
 {
     if (m_reply) {
+        m_timedOut = true;
         m_reply->abort();
     }
+}
+
+QString UpdateChecker::failureReason(QNetworkReply *reply)
+{
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if ((status == 403 || status == 429) && reply->rawHeader("x-ratelimit-remaining") == "0") {
+        bool ok = false;
+        const qint64 reset = reply->rawHeader("x-ratelimit-reset").toLongLong(&ok);
+        if (ok && reset > 0) {
+            return QStringLiteral("GitHub's rate limit for update checks was reached. Try again after %1.")
+                .arg(QDateTime::fromSecsSinceEpoch(reset).toLocalTime().toString(QStringLiteral("HH:mm")));
+        }
+        return QStringLiteral("GitHub's rate limit for update checks was reached. Try again later.");
+    }
+    if (status == 404) {
+        return QStringLiteral("No published zwriter release was found on GitHub.");
+    }
+    if (status >= 400) {
+        return QStringLiteral("GitHub answered with HTTP %1.").arg(status);
+    }
+    return QStringLiteral("Could not reach GitHub (%1).").arg(reply->errorString());
 }
 
 void UpdateChecker::onFinished(QNetworkReply *reply)
@@ -90,21 +114,25 @@ void UpdateChecker::onFinished(QNetworkReply *reply)
 
     reply->deleteLater();
 
+    if (m_timedOut) {
+        m_timedOut = false;
+        emit checkFailed(QStringLiteral("GitHub did not answer within 5 seconds."));
+        return;
+    }
     if (reply->error() != QNetworkReply::NoError) {
-        emit checkFailed();
+        emit checkFailed(failureReason(reply));
         return;
     }
 
     const QByteArray body = reply->readAll();
     const QJsonDocument doc = QJsonDocument::fromJson(body);
     if (!doc.isObject()) {
-        emit checkFailed();
+        emit checkFailed(QStringLiteral("GitHub sent a reply zwriter could not read."));
         return;
     }
     const QJsonObject obj = doc.object();
     if (!obj.contains(QStringLiteral("tag_name")) || !obj.value(QStringLiteral("tag_name")).isString()) {
-        // No releases yet (GitHub 404 body) — soft fail.
-        emit checkFailed();
+        emit checkFailed(QStringLiteral("No published zwriter release was found on GitHub."));
         return;
     }
 

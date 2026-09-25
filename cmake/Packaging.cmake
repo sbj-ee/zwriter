@@ -2,7 +2,7 @@
 # Version comes solely from project(zwriter VERSION ...) → PROJECT_VERSION.
 # Artifact names match zedit style:
 #   zwriter-${PROJECT_VERSION}-Linux-amd64.deb
-#   zwriter-${PROJECT_VERSION}-Darwin.dmg
+#   zwriter-${PROJECT_VERSION}-Darwin.dmg  (zwriter.app + /Applications link)
 
 set(CPACK_PACKAGE_NAME "zwriter")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
@@ -48,12 +48,14 @@ elseif(APPLE)
   set(CPACK_GENERATOR "DragNDrop")
   set(CPACK_DMG_VOLUME_NAME "zwriter ${PROJECT_VERSION}")
   set(CPACK_PACKAGE_FILE_NAME "zwriter-${PROJECT_VERSION}-Darwin")
-  # Binary at dmg root for now; full .app + macdeployqt can follow later.
-  install(TARGETS zwriter RUNTIME DESTINATION . COMPONENT zwriter)
-  install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/
-          DESTINATION share/zwriter/assets
-          COMPONENT zwriter
-          PATTERN "linux" EXCLUDE)
+  # No license-agreement prompt when the dmg is mounted (CMake >= 3.23); the
+  # licence is in the repository and the About box.
+  set(CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE OFF)
+  # zwriter.app at the dmg root next to CPack's /Applications symlink.
+  # MacDeploy.cmake (from cmake/MacBundle.cmake) then runs macdeployqt on the
+  # staged app, removes non-bundle rpaths, ad-hoc signs and checks it.
+  install(TARGETS zwriter BUNDLE DESTINATION . COMPONENT zwriter)
+  install(SCRIPT "${CMAKE_BINARY_DIR}/MacDeploy.cmake" COMPONENT zwriter)
 endif()
 
 include(CPack)

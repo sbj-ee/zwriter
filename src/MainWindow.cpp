@@ -3176,13 +3176,17 @@ void MainWindow::onUpToDate()
     statusBar()->showMessage(QStringLiteral("zwriter is up to date."), 4000);
 }
 
-void MainWindow::onUpdateCheckFailed()
+void MainWindow::onUpdateCheckFailed(const QString &reason)
 {
     if (m_checkUpdatesAction) {
         m_checkUpdatesAction->setEnabled(true);
         m_checkUpdatesAction->setText(QStringLiteral("Check for &Updates…"));
     }
-    // Soft fail — no scary dialog (no network / no releases yet).
+    // Checks only run from Help > Check for Updates, so say why it failed.
+    setChromeVisible(true);
+    statusBar()->showMessage(QStringLiteral("Update check failed: %1").arg(reason), 10000);
+    QMessageBox::warning(this, QStringLiteral("Check for Updates"),
+                         QStringLiteral("Couldn't check for updates.\n\n%1").arg(reason));
 }
 
 
