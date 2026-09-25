@@ -203,6 +203,15 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(m_statsLabel);
     statusBar()->setSizeGripEnabled(false);
 
+#ifndef Q_OS_MACOS
+    // Keep the menu bar inside the window on Linux. Desktops running a global
+    // menu (appmenu / Fildem register com.canonical.AppMenu.Registrar) make Qt
+    // export the bar over D-Bus, which leaves zwriter with no visible menu when
+    // the panel applet is absent -- and silently breaks hide-away, which reveals
+    // chrome from menuBar()->geometry() (see considerMouseHideAway).
+    menuBar()->setNativeMenuBar(false);
+#endif
+
     createFormatActions();
     buildFileMenu();
     buildEditMenu();
