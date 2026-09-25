@@ -33,7 +33,7 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      - name: Test (ODT round-trip)
+      - name: Test (ODT round-trip, regressions)
         run: ctest --test-dir build --output-on-failure
 
       - name: Package .deb
@@ -69,7 +69,7 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      - name: Test (ODT round-trip)
+      - name: Test (ODT round-trip, regressions)
         run: ctest --test-dir build --output-on-failure
 
       - name: Package .dmg (zwriter.app, macdeployqt, ad-hoc sign)

@@ -13,6 +13,7 @@
 #include <QList>
 #include <QTextBlock>
 #include <QStringList>
+#include <QBrush>
 #include <QColor>
 #include <QTextTableFormat>
 #include <QTextTable>
@@ -20,6 +21,10 @@
 #include <QXmlStreamReader>
 #include <QRegularExpression>
 #include <QTemporaryDir>
+#include <QSet>
+#include <QTextList>
+#include <QTextFragment>
+#include <functional>
 #include <QtGlobal>
 
 namespace DocumentIo {
@@ -30,127 +35,551 @@ QString extensionOf(const QString &path)
     return QFileInfo(path).suffix().toLower();
 }
 
-// Best-effort: strip common RTF control words to plain-ish text.
-QString rtfToPlain(const QString &rtf)
+// ---------------------------------------------------------------- RTF
+
+// Windows-1252 bytes 0x80..0x9F (the rest of the code page is Latin-1).
+QChar cp1252(int byte)
+{
+    static const char16_t high[32] = {
+        0x20AC, 0xFFFD, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0xFFFD, 0x017D, 0xFFFD,
+        0xFFFD, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0xFFFD, 0x017E, 0x0178};
+    if (byte >= 0x80 && byte <= 0x9F) {
+        return QChar(high[byte - 0x80]);
+    }
+    return QChar(byte & 0xFF);
+}
+
+QString htmlEscaped(QStringView text)
 {
     QString out;
-    out.reserve(rtf.size());
-    bool inCtrl = false;
-    bool inGroupIgnore = false;
-    int ignoreDepth = 0;
-    QString ctrl;
-
-    for (int i = 0; i < rtf.size(); ++i) {
-        const QChar c = rtf.at(i);
-        if (inGroupIgnore) {
-            if (c == QLatin1Char('{')) {
-                ++ignoreDepth;
-            } else if (c == QLatin1Char('}')) {
-                --ignoreDepth;
-                if (ignoreDepth <= 0) {
-                    inGroupIgnore = false;
-                    ignoreDepth = 0;
-                }
-            }
-            continue;
+    out.reserve(text.size());
+    for (const QChar ch : text) {
+        if (ch == QLatin1Char('<')) {
+            out += QStringLiteral("&lt;");
+        } else if (ch == QLatin1Char('>')) {
+            out += QStringLiteral("&gt;");
+        } else if (ch == QLatin1Char('&')) {
+            out += QStringLiteral("&amp;");
+        } else if (ch == QLatin1Char('"')) {
+            out += QStringLiteral("&quot;");
+        } else {
+            out += ch;
         }
-        if (c == QLatin1Char('{')) {
-            // Skip font/color tables etc. heuristically when immediately followed by \*
-            if (i + 2 < rtf.size() && rtf.at(i + 1) == QLatin1Char('\\')
-                && rtf.at(i + 2) == QLatin1Char('*')) {
-                inGroupIgnore = true;
-                ignoreDepth = 1;
-            }
-            continue;
-        }
-        if (c == QLatin1Char('}')) {
-            continue;
-        }
-        if (c == QLatin1Char('\\')) {
-            if (i + 1 < rtf.size() && rtf.at(i + 1) == QLatin1Char('\\')) {
-                out.append(QLatin1Char('\\'));
-                ++i;
-                continue;
-            }
-            if (i + 1 < rtf.size() && rtf.at(i + 1) == QLatin1Char('{')) {
-                out.append(QLatin1Char('{'));
-                ++i;
-                continue;
-            }
-            if (i + 1 < rtf.size() && rtf.at(i + 1) == QLatin1Char('}')) {
-                out.append(QLatin1Char('}'));
-                ++i;
-                continue;
-            }
-            // \'hh hex char
-            if (i + 3 < rtf.size() && rtf.at(i + 1) == QLatin1Char('\'')) {
-                const QString hex = rtf.mid(i + 2, 2);
-                bool ok = false;
-                const int v = hex.toInt(&ok, 16);
-                if (ok) {
-                    out.append(QChar(v));
-                }
-                i += 3;
-                continue;
-            }
-            inCtrl = true;
-            ctrl.clear();
-            continue;
-        }
-        if (inCtrl) {
-            if (c.isLetter()) {
-                ctrl.append(c);
-                continue;
-            }
-            // End of control word
-            if (ctrl == QLatin1String("par") || ctrl == QLatin1String("line")) {
-                out.append(QLatin1Char('\n'));
-            } else if (ctrl == QLatin1String("tab")) {
-                out.append(QLatin1Char('\t'));
-            }
-            inCtrl = false;
-            if (c == QLatin1Char(' ')) {
-                continue; // delimiter space after control word
-            }
-            if (c.isDigit() || c == QLatin1Char('-')) {
-                // skip numeric arg
-                while (i + 1 < rtf.size()
-                       && (rtf.at(i + 1).isDigit() || rtf.at(i + 1) == QLatin1Char('-'))) {
-                    ++i;
-                }
-                if (i + 1 < rtf.size() && rtf.at(i + 1) == QLatin1Char(' ')) {
-                    ++i;
-                }
-                continue;
-            }
-            // fall through to emit non-delimiter char
-        }
-        if (c == QLatin1Char('\n') || c == QLatin1Char('\r')) {
-            continue;
-        }
-        out.append(c);
     }
     return out;
 }
 
-QString plainToRtf(const QString &plain)
+constexpr char16_t kRtfBlankParagraphMark = 0xE000; // same as kBlankParagraphMark below
+
+// RTF -> simple HTML for QTextDocument: paragraphs, bold / italic / underline,
+// large font sizes (headings), tables, page breaks and Unicode text. Font,
+// colour and style tables, document info and every other destination are
+// skipped. Body font and size follow zwriter's defaults.
+QString rtfToHtml(const QByteArray &rtf)
 {
-    QString body;
-    body.reserve(plain.size() * 2);
-    for (const QChar c : plain) {
-        if (c == QLatin1Char('\\') || c == QLatin1Char('{') || c == QLatin1Char('}')) {
-            body.append(QLatin1Char('\\'));
-            body.append(c);
-        } else if (c == QLatin1Char('\n')) {
-            body.append(QStringLiteral("\\par\n"));
-        } else if (c.unicode() > 127) {
-            body.append(QStringLiteral("\\u%1?").arg(static_cast<int>(c.unicode())));
+    struct State {
+        bool skip = false;
+        bool bold = false;
+        bool italic = false;
+        bool underline = false;
+        int halfPoints = 24;
+        int uc = 1; // chars to skip after \uN
+    };
+    struct Inline {
+        bool bold = false;
+        bool italic = false;
+        bool underline = false;
+        int halfPoints = 24;
+        bool operator==(const Inline &o) const
+        {
+            return bold == o.bold && italic == o.italic && underline == o.underline
+                && halfPoints == o.halfPoints;
+        }
+    };
+    static const QSet<QByteArray> skipDestinations = {
+        "fonttbl", "colortbl", "stylesheet", "info", "pict", "header", "headerl",
+        "headerr", "headerf", "footer", "footerl", "footerr", "footerf", "footnote",
+        "listtable", "listoverridetable", "rsidtbl", "generator", "xmlnstbl",
+        "themedata", "colorschememapping", "datastore", "latentstyles", "pgdsctbl",
+        "object", "fldinst", "revtbl", "filetbl", "pntxta", "pntxtb", "userprops", "bkmkstart", "bkmkend", "ftnsep", "ftnsepc",
+        "aftnsep", "aftnsepc", "operator", "author", "title", "subject", "company"};
+
+    QList<State> stack{State{}};
+    QString html = QStringLiteral("<html><body>");
+    QString para;           // inline HTML of the current paragraph
+    bool paraHasText = false;
+    Inline emitted;         // style of the open <span>, if any
+    bool spanOpen = false;
+    bool inTable = false;   // paragraph properties: \intbl
+    bool pendingBreak = false;
+    QString cellHtml;
+    QStringList rowCells;
+    bool tableOpen = false;
+    int skipChars = 0;      // fallback characters after \uN
+
+    auto closeSpan = [&]() {
+        if (spanOpen) {
+            para += QStringLiteral("</span>");
+            spanOpen = false;
+        }
+    };
+    auto appendText = [&](const QString &text) {
+        const State &st = stack.last();
+        if (st.skip || text.isEmpty()) {
+            return;
+        }
+        const Inline want{st.bold, st.italic, st.underline, st.halfPoints};
+        const bool plain = !want.bold && !want.italic && !want.underline && want.halfPoints < 26;
+        if (spanOpen && !(emitted == want)) {
+            closeSpan();
+        }
+        if (!spanOpen && !plain) {
+            QString css;
+            if (want.bold) {
+                css += QStringLiteral("font-weight:700;");
+            }
+            if (want.italic) {
+                css += QStringLiteral("font-style:italic;");
+            }
+            if (want.underline) {
+                css += QStringLiteral("text-decoration:underline;");
+            }
+            if (want.halfPoints >= 26) {
+                // Only headings-sized text keeps its size; body text follows
+                // zwriter's 12 pt default rather than Word's 11 pt.
+                css += QStringLiteral("font-size:%1pt;").arg(want.halfPoints / 2.0);
+            }
+            para += QStringLiteral("<span style=\"%1\">").arg(css);
+            spanOpen = true;
+            emitted = want;
+        }
+        para += htmlEscaped(text);
+        paraHasText = true;
+    };
+    auto wrapParagraph = [&]() -> QString {
+        closeSpan();
+        QString css = QStringLiteral("margin:0px;white-space:pre-wrap;");
+        if (pendingBreak) {
+            css += QStringLiteral("page-break-before:always;");
+            pendingBreak = false;
+        }
+        const QString body = paraHasText ? para : QString(QChar(kRtfBlankParagraphMark));
+        para.clear();
+        paraHasText = false;
+        return QStringLiteral("<p style=\"%1\">%2</p>").arg(css, body);
+    };
+    auto closeTable = [&]() {
+        if (tableOpen) {
+            html += QStringLiteral("</table>");
+            tableOpen = false;
+        }
+    };
+    auto endParagraph = [&]() {
+        if (inTable) {
+            cellHtml += wrapParagraph();
         } else {
-            body.append(c);
+            closeTable();
+            html += wrapParagraph();
+        }
+    };
+    auto endCell = [&]() {
+        if (paraHasText || cellHtml.isEmpty()) {
+            cellHtml += wrapParagraph();
+        } else {
+            closeSpan();
+            para.clear();
+        }
+        rowCells.append(cellHtml);
+        cellHtml.clear();
+    };
+    auto endRow = [&]() {
+        if (paraHasText) {
+            endCell();
+        }
+        if (rowCells.isEmpty()) {
+            return;
+        }
+        if (!tableOpen) {
+            html += QStringLiteral("<table>");
+            tableOpen = true;
+        }
+        html += QStringLiteral("<tr>");
+        for (const QString &cell : std::as_const(rowCells)) {
+            html += QStringLiteral("<td>") + cell + QStringLiteral("</td>");
+        }
+        html += QStringLiteral("</tr>");
+        rowCells.clear();
+    };
+
+    const int n = int(rtf.size());
+    int i = 0;
+    bool groupStart = false; // the next control word is the first in its group
+    while (i < n) {
+        const char c = rtf.at(i);
+        if (c == '{') {
+            State st = stack.last();
+            stack.append(st);
+            groupStart = true;
+            skipChars = 0;
+            ++i;
+            continue;
+        }
+        if (c == '}') {
+            if (stack.size() > 1) {
+                stack.removeLast();
+            }
+            groupStart = false;
+            skipChars = 0;
+            ++i;
+            continue;
+        }
+        if (c == '\r' || c == '\n') {
+            ++i;
+            continue;
+        }
+        if (c != '\\') {
+            // Plain text run (bytes are ANSI; zwriter writes ASCII + \uN).
+            QString run;
+            while (i < n) {
+                const char t = rtf.at(i);
+                if (t == '\\' || t == '{' || t == '}') {
+                    break;
+                }
+                ++i;
+                if (t == '\r' || t == '\n') {
+                    continue;
+                }
+                if (skipChars > 0) {
+                    --skipChars;
+                    continue;
+                }
+                run += cp1252(static_cast<unsigned char>(t));
+            }
+            appendText(run);
+            groupStart = false;
+            continue;
+        }
+        // Backslash: control symbol or control word.
+        ++i;
+        if (i >= n) {
+            break;
+        }
+        const char s = rtf.at(i);
+        if (!((s >= 'a' && s <= 'z') || (s >= 'A' && s <= 'Z'))) {
+            ++i;
+            const bool first = groupStart;
+            groupStart = false;
+            if (s == '\'' && i + 1 < n) {
+                bool ok = false;
+                const int v = QByteArray(rtf.constData() + i, 2).toInt(&ok, 16);
+                i += 2;
+                if (skipChars > 0) {
+                    --skipChars;
+                } else if (ok) {
+                    appendText(QString(cp1252(v)));
+                }
+            } else if (s == '*') {
+                if (first) {
+                    stack.last().skip = true; // unknown-destination marker
+                }
+            } else if (s == '~') {
+                appendText(QString(QChar(0x00A0)));
+            } else if (s == '_') {
+                appendText(QString(QChar(0x2011)));
+            } else if (s == '-') {
+                // optional hyphen: nothing to show
+            } else if (s == '\n' || s == '\r') {
+                if (!stack.last().skip) {
+                    endParagraph();
+                }
+            } else if (s == '\\' || s == '{' || s == '}') {
+                appendText(QString(QLatin1Char(s)));
+            }
+            continue;
+        }
+        const int wordStart = i;
+        while (i < n && ((rtf.at(i) >= 'a' && rtf.at(i) <= 'z') || (rtf.at(i) >= 'A' && rtf.at(i) <= 'Z'))) {
+            ++i;
+        }
+        const QByteArray word = rtf.mid(wordStart, i - wordStart);
+        bool hasParam = false;
+        int param = 0;
+        if (i < n && (rtf.at(i) == '-' || (rtf.at(i) >= '0' && rtf.at(i) <= '9'))) {
+            const int numStart = i;
+            ++i;
+            while (i < n && rtf.at(i) >= '0' && rtf.at(i) <= '9') {
+                ++i;
+            }
+            param = rtf.mid(numStart, i - numStart).toInt(&hasParam);
+        }
+        if (i < n && rtf.at(i) == ' ') {
+            ++i; // delimiter
+        }
+        const bool first = groupStart;
+        groupStart = false;
+        State &st = stack.last();
+        if (first && skipDestinations.contains(word)) {
+            st.skip = true;
+            continue;
+        }
+        if (word == "u" && hasParam) {
+            if (skipChars > 0) {
+                --skipChars;
+                continue;
+            }
+            appendText(QString(QChar(char16_t(param < 0 ? param + 65536 : param))));
+            skipChars = st.uc;
+            continue;
+        }
+        skipChars = 0;
+        if (st.skip) {
+            continue;
+        }
+        const bool on = !hasParam || param != 0;
+        if (word == "par") {
+            endParagraph();
+        } else if (word == "line") {
+            appendText(QString(QChar(QChar::LineSeparator)));
+        } else if (word == "tab") {
+            appendText(QStringLiteral("\t"));
+        } else if (word == "page") {
+            endParagraph();
+            pendingBreak = true;
+        } else if (word == "b") {
+            st.bold = on;
+        } else if (word == "i") {
+            st.italic = on;
+        } else if (word == "ul") {
+            st.underline = on;
+        } else if (word == "ulnone") {
+            st.underline = false;
+        } else if (word == "fs" && hasParam && param > 0) {
+            st.halfPoints = param;
+        } else if (word == "plain") {
+            st.bold = st.italic = st.underline = false;
+            st.halfPoints = 24;
+        } else if (word == "uc" && hasParam) {
+            st.uc = qMax(0, param);
+        } else if (word == "pard") {
+            inTable = false;
+        } else if (word == "intbl") {
+            inTable = true;
+        } else if (word == "cell" || word == "nestcell") {
+            endCell();
+        } else if (word == "row" || word == "nestrow") {
+            endRow();
+        } else if (word == "emdash") {
+            appendText(QString(QChar(0x2014)));
+        } else if (word == "endash") {
+            appendText(QString(QChar(0x2013)));
+        } else if (word == "lquote") {
+            appendText(QString(QChar(0x2018)));
+        } else if (word == "rquote") {
+            appendText(QString(QChar(0x2019)));
+        } else if (word == "ldblquote") {
+            appendText(QString(QChar(0x201C)));
+        } else if (word == "rdblquote") {
+            appendText(QString(QChar(0x201D)));
+        } else if (word == "bullet") {
+            appendText(QString(QChar(0x2022)));
         }
     }
-    return QStringLiteral("{\\rtf1\\ansi\\deff0\n{\\fonttbl{\\f0 Times New Roman;}}\n\\f0\\fs24\n%1\n}\n")
-        .arg(body);
+    if (paraHasText) {
+        if (inTable) {
+            endCell();
+            endRow();
+        } else {
+            endParagraph();
+        }
+    }
+    endRow();
+    closeTable();
+    html += QStringLiteral("</body></html>");
+    return html;
+}
+
+// RTF escaping for one run of text.
+QString rtfEscaped(QStringView text)
+{
+    QString out;
+    out.reserve(text.size() + 8);
+    for (const QChar c : text) {
+        if (c == QLatin1Char('\\') || c == QLatin1Char('{') || c == QLatin1Char('}')) {
+            out += QLatin1Char('\\');
+            out += c;
+        } else if (c == QLatin1Char('\t')) {
+            out += QStringLiteral("\\tab ");
+        } else if (c == QChar::LineSeparator || c == QLatin1Char('\n')) {
+            out += QStringLiteral("\\line ");
+        } else if (c == QChar(0x00A0)) {
+            out += QStringLiteral("\\~");
+        } else if (c.unicode() > 127) {
+            const int v = c.unicode();
+            out += QStringLiteral("\\u%1?").arg(v > 32767 ? v - 65536 : v);
+        } else if (c.unicode() >= 32) {
+            out += c;
+        }
+    }
+    return out;
+}
+
+// QTextDocument -> RTF: paragraphs with alignment, bold / italic / underline,
+// font family and size, lists (as literal bullets/numbers), page breaks and
+// tables. Readable by LibreOffice, Word, TextEdit and zwriter itself.
+QString documentToRtf(const QTextDocument *doc)
+{
+    const QFont base = doc->defaultFont();
+    const QString baseFamily = base.family().isEmpty() ? QStringLiteral("Courier New") : base.family();
+    const qreal basePt = base.pointSizeF() > 0 ? base.pointSizeF() : 12.0;
+
+    QStringList fonts{baseFamily};
+    auto fontIndex = [&fonts](const QString &family) {
+        int idx = int(fonts.indexOf(family));
+        if (idx < 0) {
+            fonts.append(family);
+            idx = int(fonts.size()) - 1;
+        }
+        return idx;
+    };
+
+    auto blockRtf = [&](const QTextBlock &block, bool inCell) -> QString {
+        QString out = QStringLiteral("\\pard\\plain");
+        if (inCell) {
+            out += QStringLiteral("\\intbl");
+        }
+        const QTextBlockFormat bf = block.blockFormat();
+        if (bf.pageBreakPolicy() & QTextFormat::PageBreak_AlwaysBefore) {
+            out.prepend(QStringLiteral("\\page"));
+        }
+        const Qt::Alignment al = bf.alignment();
+        if (al & Qt::AlignHCenter) {
+            out += QStringLiteral("\\qc");
+        } else if (al & Qt::AlignRight) {
+            out += QStringLiteral("\\qr");
+        } else if (al & Qt::AlignJustify) {
+            out += QStringLiteral("\\qj");
+        }
+        out += QStringLiteral("\\f0\\fs%1 ").arg(qRound(basePt * 2));
+        if (const QTextList *list = block.textList()) {
+            const auto style = list->format().style();
+            const bool bullet = style == QTextListFormat::ListDisc
+                                || style == QTextListFormat::ListCircle
+                                || style == QTextListFormat::ListSquare;
+            // Qt has no marker text for bullets; RTF's \bullet is U+2022.
+            out += bullet ? QStringLiteral("{\\bullet\\tab }")
+                          : QStringLiteral("{%1\\tab }").arg(rtfEscaped(list->itemText(block)));
+        }
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (!frag.isValid()) {
+                continue;
+            }
+            const QTextCharFormat cf = frag.charFormat();
+            QString ctl;
+            const QStringList fams = cf.fontFamilies().toStringList();
+            const QString fam = fams.isEmpty() ? baseFamily : fams.first();
+            const int fi = fontIndex(fam);
+            if (fi != 0) {
+                ctl += QStringLiteral("\\f%1").arg(fi);
+            }
+            const qreal pt = cf.fontPointSize() > 0 ? cf.fontPointSize() : basePt;
+            if (!qFuzzyCompare(pt, basePt)) {
+                ctl += QStringLiteral("\\fs%1").arg(qRound(pt * 2));
+            }
+            if (cf.fontWeight() >= QFont::DemiBold) {
+                ctl += QStringLiteral("\\b");
+            }
+            if (cf.fontItalic()) {
+                ctl += QStringLiteral("\\i");
+            }
+            if (cf.fontUnderline()) {
+                ctl += QStringLiteral("\\ul");
+            }
+            if (cf.fontStrikeOut()) {
+                ctl += QStringLiteral("\\strike");
+            }
+            QString text = frag.text();
+            text.remove(QChar::ObjectReplacementCharacter);
+            if (ctl.isEmpty()) {
+                out += rtfEscaped(text);
+            } else {
+                out += QStringLiteral("{%1 %2}").arg(ctl, rtfEscaped(text));
+            }
+        }
+        return out;
+    };
+
+    QString body;
+    std::function<void(QTextFrame *)> writeFrame = [&](QTextFrame *frame) {
+        for (auto it = frame->begin(); !it.atEnd(); ++it) {
+            if (QTextFrame *child = it.currentFrame()) {
+                if (auto *table = qobject_cast<QTextTable *>(child)) {
+                    const int cols = qMax(1, table->columns());
+                    const int textTwips = 9360; // 6.5 in text width
+                    for (int r = 0; r < table->rows(); ++r) {
+                        body += QStringLiteral("\\trowd\\trgaph108\\trleft0");
+                        for (int col = 0; col < cols; ++col) {
+                            body += QStringLiteral(
+                                        "\\clbrdrt\\brdrs\\brdrw10\\brdrcf1\\clbrdrl\\brdrs\\brdrw10\\brdrcf1"
+                                        "\\clbrdrb\\brdrs\\brdrw10\\brdrcf1\\clbrdrr\\brdrs\\brdrw10\\brdrcf1"
+                                        "\\cellx%1")
+                                        .arg(textTwips * (col + 1) / cols);
+                        }
+                        body += QLatin1Char('\n');
+                        for (int col = 0; col < cols; ++col) {
+                            const QTextTableCell cell = table->cellAt(r, col);
+                            bool firstBlock = true;
+                            if (cell.isValid() && cell.row() == r && cell.column() == col) {
+                                for (auto ci = cell.begin(); !ci.atEnd(); ++ci) {
+                                    const QTextBlock b = ci.currentBlock();
+                                    if (!b.isValid()) {
+                                        continue;
+                                    }
+                                    if (!firstBlock) {
+                                        body += QStringLiteral("\\par\n");
+                                    }
+                                    body += blockRtf(b, true);
+                                    firstBlock = false;
+                                }
+                            }
+                            if (firstBlock) {
+                                body += QStringLiteral("\\pard\\plain\\intbl ");
+                            }
+                            body += QStringLiteral("\\cell\n");
+                        }
+                        body += QStringLiteral("\\row\n");
+                    }
+                    body += QStringLiteral("\\pard\n");
+                } else {
+                    writeFrame(child);
+                }
+            } else {
+                const QTextBlock b = it.currentBlock();
+                if (b.isValid()) {
+                    body += blockRtf(b, false);
+                    body += QStringLiteral("\\par\n");
+                }
+            }
+        }
+    };
+    writeFrame(doc->rootFrame());
+
+    QString fontTable;
+    for (int f = 0; f < fonts.size(); ++f) {
+        const bool mono = f == 0 ? base.fixedPitch() || baseFamily.contains(QLatin1String("Courier"))
+                                 : fonts.at(f).contains(QLatin1String("Mono"))
+                || fonts.at(f).contains(QLatin1String("Courier"));
+        fontTable += QStringLiteral("{\\f%1\\f%2\\fcharset0 %3;}")
+                         .arg(f)
+                         .arg(mono ? QStringLiteral("modern") : QStringLiteral("nil"))
+                         .arg(rtfEscaped(fonts.at(f)));
+    }
+    return QStringLiteral("{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1\n{\\fonttbl%1}\n"
+                          "{\\colortbl;\\red176\\green176\\blue176;}\n"
+                          "\\paperw11906\\paperh16838\\margl1440\\margr1440\\margt1440\\margb1440\n%2}\n")
+        .arg(fontTable, body);
 }
 
 // Marks a paragraph that is empty in the ODT. Qt's HTML importer drops empty
@@ -166,6 +595,33 @@ int headingLevelFromStyleName(const QString &name)
     static const QRegularExpression re(QStringLiteral(R"(^Heading(?:_20_| )([1-9])$)"));
     const QRegularExpressionMatch m = re.match(name);
     return m.hasMatch() ? m.captured(1).toInt() : 0;
+}
+
+// CSS font-family list for a stored family. zwriter's Courier default is saved
+// as its first choice, "Courier New"; if that face isn't installed, fontconfig
+// would substitute something unrelated (e.g. Cousine) on reopen, so a Courier
+// family gets the same fallback chain the editor uses for new documents.
+QString cssFontFamilies(const QString &family)
+{
+    auto quoted = [](const QString &f) {
+        if (f == QLatin1String("monospace") || f == QLatin1String("serif")
+            || f == QLatin1String("sans-serif")) {
+            return f;
+        }
+        QString e = f.toHtmlEscaped();
+        e.remove(QLatin1Char('\''));
+        return QStringLiteral("'%1'").arg(e);
+    };
+    QStringList out{quoted(family)};
+    if (family.compare(QLatin1String("Courier New"), Qt::CaseInsensitive) == 0
+        || family.compare(QLatin1String("Courier"), Qt::CaseInsensitive) == 0) {
+        for (const QString &f : defaultFontFamilies()) {
+            if (f.compare(family, Qt::CaseInsensitive) != 0) {
+                out.append(quoted(f));
+            }
+        }
+    }
+    return out.join(QLatin1Char(','));
 }
 
 // Convert a slice of ODT content.xml into simple HTML for QTextDocument.
@@ -321,9 +777,8 @@ QString odtXmlToHtml(const QByteArray &xml)
 
     QXmlStreamReader reader(xml);
     // No colour here: text must follow the theme (Paper / Dark room).
-    QString html = QStringLiteral(
-        "<html><body style=\"font-family: 'Courier New', 'Liberation Mono', 'Noto Sans Mono', "
-        "Courier, Menlo, Monaco, 'DejaVu Sans Mono', monospace; font-size: 12pt;\">");
+    QString html = QStringLiteral("<html><body style=\"font-family:%1; font-size: 12pt;\">")
+                       .arg(cssFontFamilies(defaultFontFamilies().first()));
 
     struct OpenList {
         QString styleName; // effective (inherited when the element has none)
@@ -363,7 +818,7 @@ QString odtXmlToHtml(const QByteArray &xml)
     auto cssFromStyle = [&](const StyleInfo &info) -> QString {
         QString css;
         if (!info.fontFamily.isEmpty()) {
-            css += QStringLiteral("font-family:'%1';").arg(info.fontFamily.toHtmlEscaped());
+            css += QStringLiteral("font-family:%1;").arg(cssFontFamilies(info.fontFamily));
         }
         if (!info.fontSize.isEmpty()) {
             css += QStringLiteral("font-size:%1;").arg(info.fontSize.toHtmlEscaped());
@@ -376,12 +831,10 @@ QString odtXmlToHtml(const QByteArray &xml)
 
     // Block-level properties only make sense on <p>/<h*>, not on inline spans.
     auto blockCss = [&](const StyleInfo &info, int level) -> QString {
-        QString css = QStringLiteral("white-space:pre-wrap;");
-        if (level > 0) {
-            // Headings made in zwriter have no extra paragraph spacing; don't
-            // let Qt's <hN> defaults add some on every reopen.
-            css += QStringLiteral("margin-top:0px;margin-bottom:0px;");
-        }
+        // zwriter paragraphs, headings and list items have no extra spacing;
+        // don't let Qt's HTML defaults (12 px around <p>/<hN>) add some on
+        // every reopen.
+        QString css = QStringLiteral("white-space:pre-wrap;margin-top:0px;margin-bottom:0px;");
         css += cssFromStyle(info);
         if (level > 0) {
             // Same look as Format > Paragraph Style when the file doesn't say
@@ -547,10 +1000,10 @@ QString odtXmlToHtml(const QByteArray &xml)
                 OpenList open;
                 open.styleName = styleName;
                 if (info.ordered) {
-                    html += QStringLiteral("<ol type=\"%1\">").arg(info.type);
+                    html += QStringLiteral("<ol type=\"%1\" style=\"margin-top:0px;margin-bottom:0px;\">").arg(info.type);
                     open.closer = QStringLiteral("</ol>");
                 } else {
-                    html += QStringLiteral("<ul type=\"%1\">")
+                    html += QStringLiteral("<ul type=\"%1\" style=\"margin-top:0px;margin-bottom:0px;\">")
                                 .arg(info.type.isEmpty() ? QStringLiteral("disc") : info.type);
                     open.closer = QStringLiteral("</ul>");
                 }
@@ -649,16 +1102,7 @@ void restyleTables(QTextFrame *frame)
 {
     for (QTextFrame *child : frame->childFrames()) {
         if (auto *table = qobject_cast<QTextTable *>(child)) {
-            QTextTableFormat fmt = table->format();
-            fmt.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
-            // Qt 6.8+ defaults to collapsed borders, which draws no grid with this format.
-            fmt.setBorderCollapse(false);
-            fmt.setBorder(1.5);
-            fmt.setBorderBrush(QColor(QStringLiteral("#a0a0a0")));
-            fmt.setCellPadding(8);
-            fmt.setCellSpacing(0);
-            fmt.setWidth(QTextLength(QTextLength::PercentageLength, 100));
-            table->setFormat(fmt);
+            styleTable(table);
         }
         restyleTables(child);
     }
@@ -804,7 +1248,55 @@ QString headingPatchedContent(const QString &src, const QHash<QString, int> &hea
     return out;
 }
 
-bool patchOdtHeadings(QTextDocument *doc, const QString &path, QString *error)
+// Qt's ODF writer gets tables wrong for zwriter: a 100 % wide table is written
+// as style:width="100pt", and the borders come out as the table border width
+// on every cell. Write the table as full width (rel-width 100 %, aligned to the
+// margins) and the grid as one 0.5 pt light-grey line.
+QString tablePatchedContent(QString xml)
+{
+    static const QRegularExpression tableProps(
+        QStringLiteral(R"(<style:table-properties\b[^>]*>)"));
+    static const QRegularExpression width(QStringLiteral(R"(\s(?:style:width|style:rel-width|table:align)="[^"]*")"));
+    static const QRegularExpression cellProps(
+        QStringLiteral(R"(<style:table-cell-properties\b[^>]*>)"));
+    static const QRegularExpression border(QStringLiteral(R"(\sfo:border(?:-left|-right|-top|-bottom)?="[^"]*")"));
+    const QString rule = QStringLiteral(" fo:border=\"0.5pt solid %1\"").arg(tableBorderColor().name());
+
+    auto rewrite = [&xml](const QRegularExpression &element, const std::function<QString(QString)> &fix) {
+        QString out;
+        out.reserve(xml.size() + 256);
+        qsizetype last = 0;
+        auto it = element.globalMatch(xml);
+        while (it.hasNext()) {
+            const QRegularExpressionMatch m = it.next();
+            out += QStringView(xml).mid(last, m.capturedStart() - last);
+            out += fix(m.captured());
+            last = m.capturedEnd();
+        }
+        out += QStringView(xml).mid(last);
+        xml = out;
+    };
+    rewrite(tableProps, [&](QString tag) {
+        tag.remove(width);
+        const qsizetype at = tag.indexOf(QLatin1String("style:table-properties")) + 22;
+        tag.insert(at, QStringLiteral(" style:rel-width=\"100%\" table:align=\"margins\""));
+        return tag;
+    });
+    rewrite(cellProps, [&](QString tag) {
+        if (!border.match(tag).hasMatch()) {
+            return tag; // Qt also writes unused border-less cell styles
+        }
+        tag.remove(border);
+        const qsizetype at = tag.indexOf(QLatin1String("style:table-cell-properties")) + 27;
+        tag.insert(at, rule);
+        return tag;
+    });
+    return xml;
+}
+
+// Post-process content.xml written by QTextDocumentWriter: headings (text:h)
+// and table styling. Best effort: the document itself is already saved.
+bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
 {
     QHash<QString, int> headingStyles;
     for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
@@ -813,7 +1305,9 @@ bool patchOdtHeadings(QTextDocument *doc, const QString &path, QString *error)
             headingStyles.insert(QStringLiteral("p%1").arg(b.blockFormatIndex()), qMin(level, 6));
         }
     }
-    if (headingStyles.isEmpty()) {
+    QList<QTextTable *> tables;
+    collectTables(doc->rootFrame(), &tables);
+    if (headingStyles.isEmpty() && tables.isEmpty()) {
         return true;
     }
     auto fail = [error](const QString &msg) {
@@ -826,17 +1320,22 @@ bool patchOdtHeadings(QTextDocument *doc, const QString &path, QString *error)
     unzip.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("content.xml")});
     if (!unzip.waitForFinished(15000) || unzip.exitStatus() != QProcess::NormalExit
         || unzip.exitCode() != 0) {
-        return fail(QStringLiteral("Headings saved as plain paragraphs (unzip unavailable)."));
+        return fail(QStringLiteral("Headings/tables saved unpatched (unzip unavailable)."));
     }
-    const QString patched =
-        headingPatchedContent(QString::fromUtf8(unzip.readAllStandardOutput()), headingStyles);
-    if (patched.isEmpty()) {
-        return fail(QStringLiteral("Headings saved as plain paragraphs (could not parse content.xml)."));
+    QString patched = QString::fromUtf8(unzip.readAllStandardOutput());
+    if (!headingStyles.isEmpty()) {
+        patched = headingPatchedContent(patched, headingStyles);
+        if (patched.isEmpty()) {
+            return fail(QStringLiteral("Headings saved as plain paragraphs (could not parse content.xml)."));
+        }
+    }
+    if (!tables.isEmpty()) {
+        patched = tablePatchedContent(patched);
     }
     QTemporaryDir dir;
     QFile content(dir.filePath(QStringLiteral("content.xml")));
     if (!dir.isValid() || !content.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        return fail(QStringLiteral("Headings saved as plain paragraphs (temp dir unavailable)."));
+        return fail(QStringLiteral("Headings/tables saved unpatched (temp dir unavailable)."));
     }
     content.write(patched.toUtf8());
     content.close();
@@ -846,7 +1345,7 @@ bool patchOdtHeadings(QTextDocument *doc, const QString &path, QString *error)
     zip.start(QStringLiteral("zip"), {QStringLiteral("-X"), QStringLiteral("-q"),
                                       QFileInfo(path).absoluteFilePath(), QStringLiteral("content.xml")});
     if (!zip.waitForFinished(30000) || zip.exitStatus() != QProcess::NormalExit || zip.exitCode() != 0) {
-        return fail(QStringLiteral("Headings saved as plain paragraphs (zip unavailable)."));
+        return fail(QStringLiteral("Headings/tables saved unpatched (zip unavailable)."));
     }
     return true;
 }
@@ -864,6 +1363,72 @@ bool saveWithWriter(QTextDocument *doc, const QString &path, const QByteArray &f
 }
 
 } // namespace
+
+QStringList defaultFontFamilies()
+{
+    // Courier first, then Courier-class monospace faces.
+    return {
+        QStringLiteral("Courier New"),
+        QStringLiteral("Courier"),
+        QStringLiteral("Courier Prime"),
+        QStringLiteral("Nimbus Mono PS"),
+        QStringLiteral("Liberation Mono"),
+        QStringLiteral("Noto Sans Mono"),
+        QStringLiteral("Menlo"),
+        QStringLiteral("Monaco"),
+        QStringLiteral("DejaVu Sans Mono"),
+        QStringLiteral("monospace"),
+    };
+}
+
+const QColor &tableBorderColor()
+{
+    static const QColor c(QStringLiteral("#b8b8b8"));
+    return c;
+}
+
+void styleTable(QTextTable *table)
+{
+    if (!table) {
+        return;
+    }
+    // One thin light-grey grid line between cells, like a word processor:
+    // collapsed borders, a 1 px table edge and 1 px on every cell (with
+    // collapsed borders Qt draws the inner grid from the cell formats only).
+    // 1 layout px is 0.75 pt on paper; the ODT gets 0.5 pt.
+    // One edit block so the (paginated) layout runs once, not once per cell:
+    // a large table otherwise takes minutes to open.
+    QTextCursor batch(table->document());
+    batch.beginEditBlock();
+    QTextTableFormat fmt = table->format();
+    fmt.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+    fmt.setBorderCollapse(true);
+    fmt.setBorder(kTableBorderPx);
+    fmt.setBorderBrush(tableBorderColor());
+    fmt.setCellPadding(8);
+    fmt.setCellSpacing(0);
+    fmt.setWidth(QTextLength(QTextLength::PercentageLength, 100));
+    table->setFormat(fmt);
+    for (int r = 0; r < table->rows(); ++r) {
+        for (int c = 0; c < table->columns(); ++c) {
+            QTextTableCell cell = table->cellAt(r, c);
+            if (!cell.isValid() || cell.row() != r || cell.column() != c) {
+                continue; // covered by a span
+            }
+            QTextTableCellFormat cf = cell.format().toTableCellFormat();
+            if (qFuzzyCompare(cf.topBorder(), kTableBorderPx)
+                && qFuzzyCompare(cf.leftBorder(), kTableBorderPx)
+                && cf.topBorderBrush() == QBrush(tableBorderColor())) {
+                continue;
+            }
+            cf.setBorder(kTableBorderPx);
+            cf.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+            cf.setBorderBrush(tableBorderColor());
+            cell.setFormat(cf);
+        }
+    }
+    batch.endEditBlock();
+}
 
 Format formatFromPath(const QString &path)
 {
@@ -967,7 +1532,9 @@ bool load(QTextDocument *doc, const QString &path, QString *error)
 
     if (fmt == Format::Rtf
         || QString::fromUtf8(bytes.left(5)).startsWith(QLatin1String("{\\rtf"))) {
-        doc->setPlainText(rtfToPlain(QString::fromUtf8(bytes)));
+        doc->setHtml(rtfToHtml(bytes));
+        restyleTables(doc->rootFrame());
+        normaliseImportedBlocks(doc);
         doc->clearUndoRedoStacks();
         doc->setModified(false);
         return true;
@@ -995,7 +1562,7 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
         }
         // Best effort, like the meta.xml patch: the body is already saved.
         QString headingError;
-        if (!patchOdtHeadings(doc, path, &headingError)) {
+        if (!patchOdtContent(doc, path, &headingError)) {
             qWarning("zwriter: %s", qPrintable(headingError));
         }
         return true;
@@ -1004,8 +1571,7 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
         return saveWithWriter(doc, path, QByteArrayLiteral("plaintext"), error);
     }
     if (format == Format::Rtf) {
-        // Best-effort RTF: plain text body with escapes (bold/italic round-trip
-        // via ODT; RTF keeps readable interchange).
+        // Basic RTF: paragraphs, character formatting, lists and tables.
         QFile file(path);
         if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             if (error) {
@@ -1013,7 +1579,7 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
             }
             return false;
         }
-        const QByteArray data = plainToRtf(doc->toPlainText()).toUtf8();
+        const QByteArray data = documentToRtf(doc).toLatin1(); // ASCII only: non-ASCII is escaped
         if (file.write(data) != data.size()) {
             if (error) {
                 *error = QStringLiteral("Short write to %1.").arg(path);

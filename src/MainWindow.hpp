@@ -98,6 +98,7 @@ private slots:
     void openRecentFile();
     void clearRecentFiles();
     void insertTable();
+    bool moveToAdjacentCell(bool forward);
     void editHeaderFooter();
     void showEditorContextMenu(const QPoint &pos);
     void tableInsertRow();

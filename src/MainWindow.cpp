@@ -803,21 +803,66 @@ void MainWindow::insertTable()
     cursor.beginEditBlock();
     QTextTable *table = cursor.insertTable(rows, cols);
     if (table) {
-        QTextTableFormat fmt = table->format();
-        fmt.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
-        // Qt 6.8+ defaults to collapsed borders, which draws no grid with this format.
-        fmt.setBorderCollapse(false);
-        fmt.setBorder(1.5);
-        fmt.setBorderBrush(QColor(QStringLiteral("#a0a0a0")));
-        fmt.setCellPadding(8);
-        fmt.setCellSpacing(0);
-        fmt.setWidth(QTextLength(QTextLength::PercentageLength, 100));
-        table->setFormat(fmt);
+        DocumentIo::styleTable(table);
     }
     cursor.endEditBlock();
+    if (table) {
+        // Start typing in the first cell, not below the table.
+        m_editor->setTextCursor(table->cellAt(0, 0).firstCursorPosition());
+    }
     m_editor->setFocus();
     updateTableActions();
     markDirty();
+}
+
+bool MainWindow::moveToAdjacentCell(bool forward)
+{
+    QTextCursor c = m_editor->textCursor();
+    QTextTable *table = c.currentTable();
+    if (!table) {
+        return false;
+    }
+    const QTextTableCell cell = table->cellAt(c);
+    int row = cell.row();
+    int col = cell.column();
+    if (forward) {
+        col += qMax(1, cell.columnSpan());
+        if (col >= table->columns()) {
+            col = 0;
+            row += qMax(1, cell.rowSpan());
+        }
+        if (row >= table->rows()) {
+            // Tab in the last cell adds a row, like other word processors.
+            QTextCursor edit(c);
+            edit.beginEditBlock();
+            table->appendRows(1);
+            DocumentIo::styleTable(table);
+            edit.endEditBlock();
+            row = table->rows() - 1;
+            col = 0;
+        }
+    } else {
+        --col;
+        if (col < 0) {
+            if (row == 0) {
+                return true; // first cell: stay put
+            }
+            --row;
+            col = table->columns() - 1;
+        }
+    }
+    const QTextTableCell target = table->cellAt(row, col);
+    if (!target.isValid()) {
+        return true;
+    }
+    QTextCursor to = target.firstCursorPosition();
+    to.setPosition(target.lastCursorPosition().position(), QTextCursor::KeepAnchor);
+    if (!forward || to.selectedText().isEmpty()) {
+        to = target.firstCursorPosition();
+    }
+    m_editor->setTextCursor(to);
+    updateTableActions();
+    return true;
 }
 
 void MainWindow::tableInsertRow()
@@ -828,7 +873,10 @@ void MainWindow::tableInsertRow()
     }
     QTextCursor c = m_editor->textCursor();
     const int row = table->cellAt(c).row();
+    c.beginEditBlock();
     table->insertRows(row + 1, 1);
+    DocumentIo::styleTable(table); // new cells get the grid too
+    c.endEditBlock();
     updateTableActions();
     markDirty();
 }
@@ -841,7 +889,10 @@ void MainWindow::tableInsertColumn()
     }
     QTextCursor c = m_editor->textCursor();
     const int col = table->cellAt(c).column();
+    c.beginEditBlock();
     table->insertColumns(col + 1, 1);
+    DocumentIo::styleTable(table); // new cells get the grid too
+    c.endEditBlock();
     updateTableActions();
     markDirty();
 }
@@ -1116,18 +1167,7 @@ QFont MainWindow::defaultDocumentFont() const
     // Shipping default: Courier, 12 pt (falls back through Courier-class monospace
     // faces; user can switch via toolbar).
     QFont font;
-    font.setFamilies({
-        QStringLiteral("Courier New"),
-        QStringLiteral("Courier"),
-        QStringLiteral("Courier Prime"),
-        QStringLiteral("Nimbus Mono PS"),
-        QStringLiteral("Liberation Mono"),
-        QStringLiteral("Noto Sans Mono"),
-        QStringLiteral("Menlo"),
-        QStringLiteral("Monaco"),
-        QStringLiteral("DejaVu Sans Mono"),
-        QStringLiteral("monospace"),
-    });
+    font.setFamilies(DocumentIo::defaultFontFamilies());
     font.setPointSize(kDefaultBodyPointSize);
     font.setStyleHint(QFont::TypeWriter);
     font.setFixedPitch(true);
@@ -2165,7 +2205,20 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
 
     if (format == DocumentIo::Format::Odt) {
         QString metaErr;
-        if (!OdtMeta::writeToOdt(path, m_meta, &metaErr)) {
+        OdtPageStyle page;
+        if (m_printer) {
+            const QPageLayout layout = m_printer->pageLayout();
+            page.sheetMm = PrintLayout::sheetSizeMm(layout);
+            page.marginsMm = layout.margins(QPageLayout::Millimeter);
+            page.landscape = layout.orientation() == QPageLayout::Landscape;
+        }
+        const QFont body = m_editor->document()->defaultFont();
+        if (!body.family().isEmpty()) {
+            page.fontFamily = body.family();
+        }
+        const qreal bodyPt = body.pointSizeF() > 0 ? body.pointSizeF() : qreal(kDefaultBodyPointSize);
+        page.fontPointSize = qMax(8.0, bodyPt - 2.0); // as paintHeaderFooter()
+        if (!OdtMeta::writeToOdt(path, m_meta, &metaErr, page)) {
             statusBar()->showMessage(
                 metaErr.isEmpty() ? QStringLiteral("Saved (metadata patch skipped)")
                                   : metaErr,
@@ -3308,16 +3361,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         cursor.insertText(QStringLiteral("Scene notes"));
         cursor.insertBlock();
         QTextTable *table = cursor.insertTable(3, 3);
-        QTextTableFormat fmt = table->format();
-        fmt.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
-        // Qt 6.8+ defaults to collapsed borders, which draws no grid with this format.
-        fmt.setBorderCollapse(false);
-        fmt.setBorder(1.5);
-        fmt.setBorderBrush(QColor(QStringLiteral("#a0a0a0")));
-        fmt.setCellPadding(8);
-        fmt.setCellSpacing(0);
-        fmt.setWidth(QTextLength(QTextLength::PercentageLength, 100));
-        table->setFormat(fmt);
+        DocumentIo::styleTable(table);
         const QStringList cells = {
             QStringLiteral("Beat"), QStringLiteral("Place"), QStringLiteral("Note"),
             QStringLiteral("1"), QStringLiteral("Harbor"), QStringLiteral("Rain"),

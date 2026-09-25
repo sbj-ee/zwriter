@@ -200,6 +200,21 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(odt_roundtrip_test PRIVATE Qt6::Gui)
   add_test(NAME odt_roundtrip COMMAND odt_roundtrip_test)
   set_tests_properties(odt_roundtrip PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+  # GUI-test regressions: print scale, ODT manifest/styles, RTF import/export, tables.
+  add_executable(regression_test
+    tests/regression_test.cpp
+    src/DocumentIo.cpp
+    src/DocumentIo.hpp
+    src/DocumentMeta.cpp
+    src/DocumentMeta.hpp
+    src/PrintLayout.cpp
+    src/PrintLayout.hpp
+  )
+  target_include_directories(regression_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ZWRITER_GENERATED_DIR})
+  target_link_libraries(regression_test PRIVATE Qt6::Gui)
+  add_test(NAME regression COMMAND regression_test)
+  set_tests_properties(regression PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.
