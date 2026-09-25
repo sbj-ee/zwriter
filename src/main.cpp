@@ -10,6 +10,9 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <cstdio>
+#include <cstring>
+
 namespace {
 
 // Icon embedded in the binary (src/icons.qrc) so it is present wherever the
@@ -48,6 +51,26 @@ private:
 
 int main(int argc, char *argv[])
 {
+    // Answer --version / --help before touching Qt's GUI: no window, no display needed.
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
+            std::printf("zwriter %s\n", zwriter::kVersionString);
+            return 0;
+        }
+        if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+            std::printf("zwriter %s — distraction-free writing\n\n"
+                        "Usage: zwriter [FILE...]\n\n"
+                        "  FILE...              open ODT, TXT or RTF documents (first in this window,\n"
+                        "                       each further one in its own window)\n"
+                        "  -v, --version        print the version and exit\n"
+                        "  -h, --help           print this help and exit\n"
+                        "  --capture-screenshots DIR\n"
+                        "                       write the documentation screenshots to DIR and exit\n",
+                        zwriter::kVersionString);
+            return 0;
+        }
+    }
+
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("zwriter"));
     QApplication::setOrganizationName(QStringLiteral("sbj-ee"));

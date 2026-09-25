@@ -3,6 +3,12 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [Unreleased]
+
+### Command line
+- `zwriter --version` (`-v`) prints the version and `--help` (`-h`) prints usage. Both answer
+  immediately, without starting the GUI or needing a display; before, they launched the app.
+
 ## [1.1.2] — 2026-09-25
 
 Fixes from the v1.0.0 GUI test report.
