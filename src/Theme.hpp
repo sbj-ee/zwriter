@@ -9,7 +9,7 @@
 // light page in a dark frame.
 struct ThemeColors
 {
-    QString id;        // "paper" or "dark" (selects the arrow images)
+    QString id;        // arrow-image variant: "paper" or "dark" (inverse reuses dark)
     // Chrome
     QColor windowBg;   // window / dialog background
     QColor barBg;      // menu bar, toolbar, status bar
@@ -36,7 +36,8 @@ struct ThemeColors
 
 namespace Theme {
 
-ThemeColors colors(bool paper);
+// themeId: "paper" | "dark" | "inverse". Anything else is treated as "paper".
+ThemeColors colors(const QString &themeId);
 
 // Complete application stylesheet for the given palette.
 //   fullPage    - page sits centred on a desk (true) or fills the window (false)

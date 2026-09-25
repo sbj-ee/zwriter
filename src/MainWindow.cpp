@@ -282,7 +282,7 @@ void MainWindow::loadSettings()
     m_spellCheck = s.value(QStringLiteral("view/spellCheck"), true).toBool();
     m_fullPageView = s.value(QStringLiteral("view/fullPageView"), true).toBool();
     m_themeId = s.value(QStringLiteral("theme/id"), QStringLiteral("paper")).toString();
-    if (m_themeId != QLatin1String("dark")) {
+    if (m_themeId != QLatin1String("dark") && m_themeId != QLatin1String("inverse")) {
         m_themeId = QStringLiteral("paper");
     }
     m_recentFiles = s.value(QStringLiteral("files/recent")).toStringList();
@@ -739,10 +739,15 @@ void MainWindow::buildViewMenu()
     m_themeDarkAction = themeMenu->addAction(QStringLiteral("&Dark room"));
     m_themeDarkAction->setCheckable(true);
     m_themeDarkAction->setToolTip(QStringLiteral("Charcoal page and dark chrome"));
+    m_themeInverseAction = themeMenu->addAction(QStringLiteral("&Inverse"));
+    m_themeInverseAction->setCheckable(true);
+    m_themeInverseAction->setToolTip(QStringLiteral("Black page, white text -- maximum contrast"));
     themeGroup->addAction(m_themePaperAction);
     themeGroup->addAction(m_themeDarkAction);
+    themeGroup->addAction(m_themeInverseAction);
     connect(m_themePaperAction, &QAction::triggered, this, &MainWindow::setThemePaper);
     connect(m_themeDarkAction, &QAction::triggered, this, &MainWindow::setThemeDark);
+    connect(m_themeInverseAction, &QAction::triggered, this, &MainWindow::setThemeInverse);
 
     m_viewMenu->addSeparator();
 
@@ -1016,12 +1021,13 @@ void MainWindow::syncViewActions()
         m_focusParagraphAction->setChecked(!m_focusSentence);
         m_focusSentenceAction->setChecked(m_focusSentence);
     }
-    if (m_themePaperAction && m_themeDarkAction) {
+    if (m_themePaperAction && m_themeDarkAction && m_themeInverseAction) {
         const QSignalBlocker b1(m_themePaperAction);
         const QSignalBlocker b2(m_themeDarkAction);
-        const bool paper = isPaperTheme();
-        m_themePaperAction->setChecked(paper);
-        m_themeDarkAction->setChecked(!paper);
+        const QSignalBlocker b3(m_themeInverseAction);
+        m_themePaperAction->setChecked(m_themeId == QLatin1String("paper"));
+        m_themeDarkAction->setChecked(m_themeId == QLatin1String("dark"));
+        m_themeInverseAction->setChecked(m_themeId == QLatin1String("inverse"));
     }
 }
 
@@ -1099,7 +1105,9 @@ void MainWindow::loadWindowIcon()
 
 bool MainWindow::isPaperTheme() const
 {
-    return m_themeId != QLatin1String("dark");
+    // "Is the page light?" -- drives ink colours for guides, dimmed focus text
+    // and header/footer. Both dark themes answer no.
+    return m_themeId == QLatin1String("paper");
 }
 
 QFont MainWindow::defaultDocumentFont() const
@@ -1147,12 +1155,12 @@ void MainWindow::applyDocumentDefaults()
     }
 }
 
-void MainWindow::setThemePaper()
+void MainWindow::setTheme(const QString &id)
 {
-    if (m_themeId == QLatin1String("paper")) {
+    if (m_themeId == id) {
         return;
     }
-    m_themeId = QStringLiteral("paper");
+    m_themeId = id;
     applyTheme();
     saveSettings();
     syncViewActions();
@@ -1162,19 +1170,19 @@ void MainWindow::setThemePaper()
     }
 }
 
+void MainWindow::setThemePaper()
+{
+    setTheme(QStringLiteral("paper"));
+}
+
 void MainWindow::setThemeDark()
 {
-    if (m_themeId == QLatin1String("dark")) {
-        return;
-    }
-    m_themeId = QStringLiteral("dark");
-    applyTheme();
-    saveSettings();
-    syncViewActions();
-    updateFocusHighlight();
-    if (m_pageGuides) {
-        m_editor->viewport()->update();
-    }
+    setTheme(QStringLiteral("dark"));
+}
+
+void MainWindow::setThemeInverse()
+{
+    setTheme(QStringLiteral("inverse"));
 }
 
 void MainWindow::applyTheme()
@@ -1182,7 +1190,7 @@ void MainWindow::applyTheme()
     // Restyling (fonts, margins) touches the document, but it is not an edit.
     const QScopedValueRollback guard(m_suppressDirty, true);
     const bool wasModified = m_editor && m_editor->document()->isModified();
-    const ThemeColors c = Theme::colors(isPaperTheme());
+    const ThemeColors c = Theme::colors(m_themeId);
     setStyleSheet(Theme::styleSheet(c, m_fullPageView, kDefaultBodyPointSize));
 
     // Links in dialogs (About) use the accent colour, not default blue.
@@ -2806,8 +2814,17 @@ void MainWindow::paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
     const qreal bodyPt = font.pointSizeF() > 0 ? font.pointSizeF() : qreal(kDefaultBodyPointSize);
     font.setPointSizeF(qMax(8.0, bodyPt - 2.0));
     painter->setFont(font);
-    painter->setPen(isPaperTheme() ? QColor(QStringLiteral("#1a1a1a"))
-                                   : QColor(QStringLiteral("#d4d4d4")));
+    // On screen the ink follows the theme; on paper/PDF it is always dark,
+    // since a dark theme must not print near-invisible grey on white stock.
+    const bool toScreen = m_editor
+        && painter->device() == static_cast<const QPaintDevice *>(m_editor->viewport());
+    if (!toScreen || isPaperTheme()) {
+        painter->setPen(QColor(QStringLiteral("#1a1a1a")));
+    } else if (m_themeId == QLatin1String("inverse")) {
+        painter->setPen(QColor(QStringLiteral("#ffffff")));
+    } else {
+        painter->setPen(QColor(QStringLiteral("#d4d4d4")));
+    }
 
     qreal leftM = pageRect.width() * 0.12;
     qreal rightM = leftM;
@@ -2879,7 +2896,7 @@ void MainWindow::paintPageOverlays(const QRect &clip)
     if (paged) {
         // Page breaks: a strip of desk between sheets. It is clamped to the
         // page margins so it can never cover text, even with tiny margins.
-        const ThemeColors c = Theme::colors(isPaperTheme());
+        const ThemeColors c = Theme::colors(m_themeId);
         const QTextFrameFormat fmt = m_editor->document()->rootFrame()->frameFormat();
         const qreal above = qBound(0.0, fmt.bottomMargin() - 2.0, 9.0);
         const qreal below = qBound(0.0, fmt.topMargin() - 2.0, 9.0);

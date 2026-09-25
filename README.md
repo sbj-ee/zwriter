@@ -41,7 +41,7 @@ Ubuntu 24.04 and depends on the `t64` Qt 6 packages, so it needs **Ubuntu 24.04+
 ### Implemented now
 
 - **Quiet formatting toolbar** (auto-hide optional; shown by default): font family + size, **B / I / U**, and a paragraph-style dropdown (Body / Heading 1–3). Everything else — alignment, lists, tables, clear formatting — is in the Format menu
-- **Paper and ink** (default) or **Dark room** theme — the whole window follows the theme (warm light chrome with a paper page, or calm charcoal); View → Theme (persisted in QSettings). Slim scrollbars, roomy menus, window size and position remembered
+- **Paper and ink** (default), **Dark room** or **Inverse** theme — the whole window follows the theme (warm light chrome with a paper page, calm charcoal, or a true black page with white text for maximum contrast); View → Theme (persisted in QSettings). Slim scrollbars, roomy menus, window size and position remembered
 - **Full Page view** (default **on**) — centered paper page on a desk background at **true physical size** (mm → DIPs via logical DPI); **multi-page**: the paper grows as you write, pages are stacked with a visible break and real top/bottom margins, the window follows the caret onto the next page, and the status bar shows **Page N of M** — what you see matches print and PDF; shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF use the same page metrics; View → Full Page (Ctrl+Shift+P); off = continuous strip
 - **Default body face: typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Courier` → `Courier Prime` → `Nimbus Mono PS` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
 - **Five menus, nothing extra**: **File** (New / Open / Recent / Save / Export PDF / Print / Page Setup / Properties / Quit), **Edit** (Undo–Redo, Cut/Copy/Paste, Paste as Plain Text, Find / Replace), **Format** (B/I/U, Paragraph Style, Align, Lists, Insert Table, Table rows/columns, Insert Page Break, Page Numbers, Header & Footer, Clear Formatting), **View** (Full Page, Page Guides, Typewriter Scroll, Focus Mode, Key Sounds, Spell Check, Smart Quotes, Theme, Always Show Toolbar, Full Screen), **Help**
@@ -70,7 +70,7 @@ Ubuntu 24.04 and depends on the `t64` Qt 6 packages, so it needs **Ubuntu 24.04+
 
 ### Still roadmap / known limits
 
-- Richer themes pack (beyond Paper / Dark room), autosave + restore cursor, multi-document / sessions
+- Richer themes pack (beyond Paper / Dark room / Inverse), autosave + restore cursor, multi-document / sessions
 - Daily word / time goal, scene / chapter navigation
 - Richer ODT/RTF style round-trip (colours, images, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is plain-text-oriented best-effort
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it. Headings are written as `text:h` the same way (a patch of `content.xml`); without `zip` they save as styled paragraphs and reopen as body text
@@ -82,7 +82,7 @@ Ubuntu 24.04 and depends on the `t64` Qt 6 packages, so it needs **Ubuntu 24.04+
 
 - Fullscreen / hide-away chrome
 - Quiet formatting toolbar (font family / size / B I U / paragraph style)
-- **Paper-white page** default theme (dark chrome); Dark room optional
+- **Paper-white page** default theme (dark chrome); Dark room and Inverse optional
 - **Full Page view** (default on) — A4 at true screen DIP size on desk (Page Setup can change size); continuous strip when off
 - **Courier default body font at 12 pt** (Courier-class monospace fallbacks); user-selectable
 - **Bottom status bar** with live word + character counts + **reading time**
@@ -102,7 +102,7 @@ Ubuntu 24.04 and depends on the `t64` Qt 6 packages, so it needs **Ubuntu 24.04+
 - **Tables** (insert, edit cells, add/remove row/column; ODT round-trip)
 - **Header & Footer** + opt-in page numbers (`{page}` / `{pages}`; off by default)
 - **Spell check** (Hunspell en_US; toggle; context suggestions)
-- Themes (Paper default + Dark room; fuller packs later)
+- Themes (Paper default + Dark room + Inverse; fuller packs later)
 - Autosave + restore cursor
 - Multi-document / sessions
 - Daily word / time goal

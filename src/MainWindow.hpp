@@ -70,6 +70,7 @@ private slots:
     void onFontSizeChosen(int pointSize);
     void setThemePaper();
     void setThemeDark();
+    void setThemeInverse();
     void togglePageGuides();
     void toggleFullPageView();
     void toggleTypewriterScroll();
@@ -185,6 +186,7 @@ private:
     QTextTable *currentTable() const;
     void updateTableActions();
     bool isPaperTheme() const;
+    void setTheme(const QString &id);
 
     PageTextEdit *m_editor = nullptr;
     PageCanvas *m_pageCanvas = nullptr;
@@ -237,6 +239,7 @@ private:
     QSpinBox *m_fontSizeSpin = nullptr;
     QAction *m_themePaperAction = nullptr;
     QAction *m_themeDarkAction = nullptr;
+    QAction *m_themeInverseAction = nullptr;
     QAction *m_h1Action = nullptr;
     QAction *m_h2Action = nullptr;
     QAction *m_h3Action = nullptr;
@@ -280,5 +283,5 @@ private:
     bool m_smartQuotes = false;       // default OFF
     bool m_spellCheck = true;         // default ON
     bool m_centering = false;         // re-entrancy guard for scroll
-    QString m_themeId = QStringLiteral("paper"); // paper (default) | dark
+    QString m_themeId = QStringLiteral("paper"); // paper (default) | dark | inverse
 };

@@ -2,9 +2,12 @@
 
 namespace Theme {
 
-ThemeColors colors(bool paper)
+ThemeColors colors(const QString &themeId)
 {
     ThemeColors c;
+    const bool inverse = (themeId == QLatin1String("inverse"));
+    const bool paper = !inverse && (themeId != QLatin1String("dark"));
+    // Only two arrow-image variants ship; the dark pair suits both dark themes.
     c.id = paper ? QStringLiteral("paper") : QStringLiteral("dark");
     if (paper) {
         // Warm paper and ink.
@@ -27,6 +30,30 @@ ThemeColors colors(bool paper)
         c.pageBorder  = QColor("#d8d2c6");
         c.desk        = QColor("#d3cdc1");
         c.selBg       = QColor("#bcd4ec");
+        c.selFg       = QColor("#000000");
+    } else if (inverse) {
+        // Inverse video: a true black sheet with white ink, maximum contrast.
+        c.windowBg    = QColor("#000000");
+        c.barBg       = QColor("#0d0d0d");
+        c.menuBg      = QColor("#151515");
+        c.inputBg     = QColor("#000000");
+        c.fg          = QColor("#ffffff");
+        c.muted       = QColor("#9a9a9a");
+        c.border      = QColor("#3c3c3c");
+        c.hover       = QColor("#242424");
+        c.pressed     = QColor("#333333");
+        c.accent      = QColor("#8ab4f8");
+        c.accentSoft  = QColor("#20375a");
+        c.accentFg    = QColor("#ffffff");
+        c.scroll      = QColor("#4a4a4a");
+        c.scrollHover = QColor("#6d6d6d");
+        c.pageBg      = QColor("#000000");
+        c.pageFg      = QColor("#ffffff");
+        // The sheet is pure black, so the desk lifts a shade and the border
+        // stays bright -- otherwise the page edge vanishes in full-page view.
+        c.pageBorder  = QColor("#4f4f4f");
+        c.desk        = QColor("#0b0b0b");
+        c.selBg       = QColor("#ffffff");
         c.selFg       = QColor("#000000");
     } else {
         // Calm charcoal.
