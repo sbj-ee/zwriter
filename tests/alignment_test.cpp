@@ -493,24 +493,24 @@ void testPrintAlignment()
     page.marginsMm = QMarginsF(25.4, 25.4, 25.4, 25.4);
     const int w = qRound(210 / 25.4 * dpi);
     const int h = qRound(297 / 25.4 * dpi);
+    // One painter for the whole run, as with QPrinter: paintDocument keeps
+    // the painter it was given across newPage(). Each finished page is
+    // copied out and the canvas cleared.
     QList<QImage> pages;
-    {
-        QImage img(w, h, QImage::Format_RGB32);
-        img.fill(Qt::white);
-        pages.append(img);
-    }
-    QPainter *painter = new QPainter(&pages.last());
-    const int n = PrintLayout::paintDocument(doc, painter, page, dpi, dpi, [&]() {
-        painter->end();
-        delete painter;
-        QImage img(w, h, QImage::Format_RGB32);
-        img.fill(Qt::white);
-        pages.append(img);
-        painter = new QPainter(&pages.last());
+    QImage canvas(w, h, QImage::Format_RGB32);
+    canvas.fill(Qt::white);
+    QPainter painter(&canvas);
+    const int n = PrintLayout::paintDocument(doc, &painter, page, dpi, dpi, [&]() {
+        pages.append(canvas.copy());
+        painter.save();
+        painter.resetTransform();
+        painter.setClipping(false);
+        painter.fillRect(QRect(0, 0, w, h), Qt::white);
+        painter.restore();
         return true;
     });
-    painter->end();
-    delete painter;
+    painter.end();
+    pages.append(canvas.copy());
     check(n == 2 && pages.size() == 2, "print: two pages (page break)", QStringLiteral("%1 pages").arg(n));
 
     const qreal marginPx = dpi; // 25.4 mm = 1 in
