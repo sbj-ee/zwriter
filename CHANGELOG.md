@@ -3,7 +3,9 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [Unreleased]
+## [1.1.3] — 2026-09-25
+
+Paragraph alignment on the toolbar, and alignment round-trip fixes.
 
 ### Paragraph alignment
 - Align Left, Center, Align Right and Justify are on the toolbar as well as in Format → Align
