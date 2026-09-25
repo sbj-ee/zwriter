@@ -18,6 +18,7 @@ class QTimer;
 class QKeyEvent;
 class QMenu;
 class QPrinter;
+class QPageLayout;
 class QFontComboBox;
 class QSpinBox;
 class QComboBox;
@@ -167,7 +168,8 @@ private:
     void handleEnterOnPageBreak(QKeyEvent *ke);
     bool pageNumbersOn() const;
     void paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
-                           int pageNumber, int pageCount) const;
+                           int pageNumber, int pageCount,
+                           const QPageLayout *printLayout = nullptr) const;
     QString expandHeaderFooterTokens(const QString &pattern, int pageNumber,
                                     int pageCount) const;
     int visiblePageNumber() const;
@@ -175,6 +177,7 @@ private:
     void applyFullPageView();
     void updateFullPageGeometry();
     QSizeF printerPageSizePx() const;
+    QMarginsF pageMarginsPx() const;
     void applyDocumentPageMetrics(const QSize &pagePx);
     void clearDocumentPageMetrics();
     void centerCaret();

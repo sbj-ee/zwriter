@@ -284,7 +284,9 @@ QDialog QTableWidget, QDialog QTableView, QDialog QListView, QDialog QTreeView {
 QDialog QHeaderView::section { background-color: @barBg; color: @fg; border: none; padding: 5px 8px; }
 )CSS");
 
-    const QString pad = fullPage ? QStringLiteral("0px") : QStringLiteral("48px 20%");
+    // The continuous view's reading column comes from PageTextEdit's viewport
+    // inset (the page margins stay in the document in both views).
+    const QString pad = QStringLiteral("0px");
     const auto hex = [](const QColor &col) { return col.name(); };
     const struct { const char *key; QString value; } tokens[] = {
         {"@id", c.id},

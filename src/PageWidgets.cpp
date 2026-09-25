@@ -19,9 +19,34 @@ void PageTextEdit::reapplyPageSize()
     }
 }
 
+void PageTextEdit::setContinuousInset(bool on, const QMarginsF &documentMargins)
+{
+    m_continuousInset = on;
+    m_documentMargins = documentMargins;
+    updateInset();
+}
+
+void PageTextEdit::updateInset()
+{
+    if (!m_continuousInset) {
+        setViewportMargins(0, 0, 0, 0);
+        return;
+    }
+    const qreal side = width() * 0.20 + 4.0;
+    const int left = qMax(0, qRound(side - m_documentMargins.left()));
+    const int right = qMax(0, qRound(side - m_documentMargins.right()));
+    const int top = qMax(0, qRound(52.0 - m_documentMargins.top()));
+    const int bottom = qMax(0, qRound(52.0 - m_documentMargins.bottom()));
+    const QMargins want(left, top, right, bottom);
+    if (viewportMargins() != want) {
+        setViewportMargins(want);
+    }
+}
+
 void PageTextEdit::resizeEvent(QResizeEvent *event)
 {
     QTextEdit::resizeEvent(event);
+    updateInset();
     reapplyPageSize();
 }
 

@@ -7,6 +7,7 @@
 #include "SpellHighlighter.hpp"
 #include "InsertTableDialog.hpp"
 #include "PageWidgets.hpp"
+#include "PrintLayout.hpp"
 #include "PropertiesDialog.hpp"
 #include "TypewriterSounds.hpp"
 #include "UpdateChecker.hpp"
@@ -2487,7 +2488,8 @@ void MainWindow::exportPdf()
     pdf.setOutputFileName(path);
     pdf.setPageSize(m_printer->pageLayout().pageSize());
     pdf.setPageOrientation(m_printer->pageLayout().orientation());
-    pdf.setPageMargins(m_printer->pageLayout().margins(), QPageLayout::Millimeter);
+    pdf.setPageMargins(m_printer->pageLayout().margins(QPageLayout::Millimeter),
+                       QPageLayout::Millimeter);
 
     doPrint(&pdf);
     statusBar()->showMessage(QStringLiteral("Exported PDF: %1").arg(QFileInfo(path).fileName()), 4000);
@@ -2499,47 +2501,24 @@ void MainWindow::doPrint(QPrinter *printer)
         return;
     }
 
-    QTextDocument *src = m_editor->document();
-    QTextDocument printDoc;
-    printDoc.setDefaultFont(src->defaultFont());
-    printDoc.setHtml(src->toHtml());
-    printDoc.setDocumentMargin(0);
-
     // Paint the full physical sheet so margin bands match Full Page (header/footer).
     const bool savedFullPage = printer->fullPage();
     printer->setFullPage(true);
 
-    const QSizeF sizeMm = printer->pageLayout().pageSize().size(QPageSize::Millimeter);
-    const qreal dpiX = printer->logicalDpiX();
-    const qreal dpiY = printer->logicalDpiY();
-    const QSizeF pageSizePx(sizeMm.width() * dpiX / 25.4, sizeMm.height() * dpiY / 25.4);
-    printDoc.setPageSize(pageSizePx);
-
-    const QMarginsF marginsMm = printer->pageLayout().margins(QPageLayout::Millimeter);
-    QTextFrameFormat fmt = printDoc.rootFrame()->frameFormat();
-    fmt.setLeftMargin(marginsMm.left() * dpiX / 25.4);
-    fmt.setRightMargin(marginsMm.right() * dpiX / 25.4);
-    fmt.setTopMargin(marginsMm.top() * dpiY / 25.4);
-    fmt.setBottomMargin(marginsMm.bottom() * dpiY / 25.4);
-    printDoc.rootFrame()->setFrameFormat(fmt);
-
-    const int pages = qMax(1, printDoc.pageCount());
-    const QRectF pageRect(0, 0, pageSizePx.width(), pageSizePx.height());
+    const QPageLayout layout = printer->pageLayout();
+    PrintLayout::Page page;
+    page.sheetMm = PrintLayout::sheetSizeMm(layout);
+    page.marginsMm = layout.margins(QPageLayout::Millimeter);
 
     QPainter painter(printer);
     painter.setRenderHint(QPainter::Antialiasing, false);
-    for (int i = 0; i < pages; ++i) {
-        if (i > 0) {
-            printer->newPage();
-        }
-        painter.save();
-        const QRectF view(0, i * pageRect.height(), pageRect.width(), pageRect.height());
-        painter.setClipRect(pageRect);
-        painter.translate(0, -i * pageRect.height());
-        printDoc.drawContents(&painter, view);
-        painter.restore();
-        paintHeaderFooter(&painter, pageRect, i + 1, pages);
-    }
+    PrintLayout::paintDocument(
+        *m_editor->document(), &painter, page, printer->logicalDpiX(), printer->logicalDpiY(),
+        [printer]() { return printer->newPage(); },
+        [this, &layout](QPainter *p, const QRectF &sheet, int pageNo, int pages) {
+            paintHeaderFooter(p, sheet, pageNo, pages, &layout);
+        });
+    painter.end();
 
     printer->setFullPage(savedFullPage);
 }
@@ -2563,18 +2542,23 @@ void MainWindow::filePageSetup()
     QPageSetupDialog dlg(m_printer, this);
     if (dlg.exec() == QDialog::Accepted) {
         savePrinterSettings();
-        if (m_fullPageView) {
-            updateFullPageGeometry();
-        }
+        applyFullPageView(); // new sheet size / orientation / margins, either view
+        m_editor->viewport()->update();
     }
 }
 
 void MainWindow::filePrintPreview()
 {
+    // The preview fixes its page origin when it is created, so full-page mode
+    // (origin at the sheet corner, as doPrint paints) must be on beforehand;
+    // otherwise everything is shifted by the margins.
+    const bool savedFullPage = m_printer->fullPage();
+    m_printer->setFullPage(true);
     QPrintPreviewDialog dlg(m_printer, this);
     dlg.setWindowTitle(QStringLiteral("Print Preview"));
     connect(&dlg, &QPrintPreviewDialog::paintRequested, this, &MainWindow::printPreview);
     dlg.exec();
+    m_printer->setFullPage(savedFullPage);
 }
 
 void MainWindow::printPreview(QPrinter *printer)
@@ -2602,11 +2586,26 @@ QSizeF MainWindow::printerPageSizePx() const
     if (!m_printer) {
         return QSizeF(794, 1123); // A4 @ 96 DPI fallback (210×297 mm)
     }
-    const QPageLayout layout = m_printer->pageLayout();
-    const QSizeF sizeMm = layout.pageSize().size(QPageSize::Millimeter);
+    const QSizeF sizeMm = PrintLayout::sheetSizeMm(m_printer->pageLayout());
     const qreal dpiX = m_editor ? m_editor->logicalDpiX() : 96.0;
     const qreal dpiY = m_editor ? m_editor->logicalDpiY() : 96.0;
     return QSizeF(sizeMm.width() * dpiX / 25.4, sizeMm.height() * dpiY / 25.4);
+}
+
+QMarginsF MainWindow::pageMarginsPx() const
+{
+    if (!m_printer) {
+        return QMarginsF(96, 96, 96, 96);
+    }
+    // Same px-per-mm as the (rounded) sheet in Full Page view, so both views
+    // compute identical margins and switching views never touches them.
+    const QSizeF native = printerPageSizePx();
+    const QSizeF pageMm = PrintLayout::sheetSizeMm(m_printer->pageLayout());
+    const QMarginsF marginsMm = m_printer->pageLayout().margins(QPageLayout::Millimeter);
+    const qreal sx = pageMm.width() > 0 ? qMax(1, qRound(native.width())) / pageMm.width() : 1.0;
+    const qreal sy = pageMm.height() > 0 ? qMax(1, qRound(native.height())) / pageMm.height() : 1.0;
+    return QMarginsF(marginsMm.left() * sx, marginsMm.top() * sy, marginsMm.right() * sx,
+                     marginsMm.bottom() * sy);
 }
 
 void MainWindow::applyDocumentPageMetrics(const QSize &pagePx)
@@ -2619,13 +2618,9 @@ void MainWindow::applyDocumentPageMetrics(const QSize &pagePx)
         doc->setPageSize(QSizeF(pagePx));
     }
     m_editor->setFixedPageSize(QSizeF(pagePx)); // QTextEdit would reset it to unpaginated
-
-    const QSizeF pageMm = m_printer->pageLayout().pageSize().size(QPageSize::Millimeter);
-    const QMarginsF marginsMm = m_printer->pageLayout().margins(QPageLayout::Millimeter);
-    const qreal sx = pageMm.width() > 0 ? pagePx.width() / pageMm.width() : 1.0;
-    const qreal sy = pageMm.height() > 0 ? pagePx.height() / pageMm.height() : 1.0;
-    setRootFrameMargins(marginsMm.left() * sx, marginsMm.top() * sy, marginsMm.right() * sx,
-                        marginsMm.bottom() * sy, 0);
+    m_editor->setContinuousInset(false, QMarginsF());
+    const QMarginsF m = pageMarginsPx();
+    setRootFrameMargins(m.left(), m.top(), m.right(), m.bottom(), 0);
 }
 
 void MainWindow::setRootFrameMargins(qreal left, qreal top, qreal right, qreal bottom,
@@ -2663,7 +2658,13 @@ void MainWindow::clearDocumentPageMetrics()
     m_editor->setFixedPageSize(QSizeF());
     QTextDocument *doc = m_editor->document();
     doc->setPageSize(QSizeF(0, 0)); // continuous layout
-    setRootFrameMargins(0, 0, 0, 0, 4);
+    // The root-frame margins stay the page margins in both views: changing them
+    // is an undoable document edit to Qt, so a view toggle would cost an undo
+    // step (and Ctrl+Z would revert the layout, not the text). The continuous
+    // view gets its reading column from the editor's viewport inset instead.
+    const QMarginsF m = pageMarginsPx();
+    setRootFrameMargins(m.left(), m.top(), m.right(), m.bottom(), 0);
+    m_editor->setContinuousInset(true, m);
     refreshPageCount();
 }
 
@@ -2804,7 +2805,8 @@ void MainWindow::updatePageLabel()
 }
 
 void MainWindow::paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
-                                   int pageNumber, int pageCount) const
+                                   int pageNumber, int pageCount,
+                                   const QPageLayout *printLayout) const
 {
     if (!painter || !m_meta.hasHeaderFooter()) {
         return;
@@ -2838,9 +2840,10 @@ void MainWindow::paintHeaderFooter(QPainter *painter, const QRectF &pageRect,
         rightM = fmt.rightMargin();
         topM = fmt.topMargin();
         bottomM = fmt.bottomMargin();
-    } else if (m_printer) {
-        const QMarginsF mm = m_printer->pageLayout().margins(QPageLayout::Millimeter);
-        const QSizeF paperMm = m_printer->pageLayout().pageSize().size(QPageSize::Millimeter);
+    } else if (printLayout || m_printer) {
+        const QPageLayout layout = printLayout ? *printLayout : m_printer->pageLayout();
+        const QMarginsF mm = layout.margins(QPageLayout::Millimeter);
+        const QSizeF paperMm = PrintLayout::sheetSizeMm(layout);
         if (paperMm.width() > 0 && paperMm.height() > 0) {
             const qreal sx = pageRect.width() / paperMm.width();
             const qreal sy = pageRect.height() / paperMm.height();

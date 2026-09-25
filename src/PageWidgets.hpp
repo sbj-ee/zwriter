@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QMarginsF>
 #include <QSizeF>
 #include <QTextEdit>
 #include <QWidget>
@@ -22,6 +23,11 @@ public:
     void setFixedPageSize(const QSizeF &size);
     QSizeF fixedPageSize() const { return m_pageSize; }
 
+    // Continuous view: the document keeps the page margins in its root frame;
+    // this adds a viewport inset on top so the reading column matches the
+    // classic look (about 20 % of the width each side, 52 px at the top).
+    void setContinuousInset(bool on, const QMarginsF &documentMargins);
+
 protected:
     void resizeEvent(QResizeEvent *event) override;
     void changeEvent(QEvent *event) override;
@@ -29,8 +35,11 @@ protected:
 
 private:
     void reapplyPageSize();
+    void updateInset();
 
     QSizeF m_pageSize; // invalid until set
+    bool m_continuousInset = false;
+    QMarginsF m_documentMargins;
 };
 
 // Holds the paper. In "paper" mode the page is centred with breathing room and
