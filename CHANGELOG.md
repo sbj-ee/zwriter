@@ -3,7 +3,7 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [Unreleased]
+## [1.1.2] — 2026-09-25
 
 Fixes from the v1.0.0 GUI test report.
 
@@ -58,6 +58,12 @@ Fixes from the v1.0.0 GUI test report.
 - Save As for an untitled document defaults to ODT; a typed `.odt` / `.txt` / `.rtf` extension
   decides the format.
 - The recent-files list drops files that no longer exist.
+
+### Known issues
+- Typing near the top of a long document still lags (about 13 ms per character at 90 pages,
+  about 50 ms at 350): Qt re-lays out the whole paginated document on every edit.
+- Changing margins in Page Setup still adds an undo step.
+- RTF import keeps only sizes of 13 pt and up (as headings); lists are exported as literal text.
 
 ## [1.1.1] — 2026-09-24
 
