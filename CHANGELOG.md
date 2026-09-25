@@ -24,6 +24,8 @@ Fixes from the v1.0.0 GUI test report.
   fixed 100 pt).
 - Reopened documents keep their spacing (no extra space between paragraphs or list items) and
   the Courier fallback chain.
+- With Qt 6.4 (the Debian/Ubuntu build) every saved text run was recorded as font "Sans", so
+  documents reopened in a sans-serif face. The real font is now written.
 
 ### RTF
 - Import no longer leaks the font, colour and style tables into the text; `\uN` and `\'hh`

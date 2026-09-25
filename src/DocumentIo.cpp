@@ -10,6 +10,8 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextDocumentWriter>
+
+#include <memory>
 #include <QList>
 #include <QTextBlock>
 #include <QStringList>
@@ -818,7 +820,10 @@ QString odtXmlToHtml(const QByteArray &xml)
     auto cssFromStyle = [&](const StyleInfo &info) -> QString {
         QString css;
         if (!info.fontFamily.isEmpty()) {
-            css += QStringLiteral("font-family:%1;").arg(cssFontFamilies(info.fontFamily));
+            // One family here: some Qt versions (6.4) mis-parse a quoted list
+            // on spans. The Courier fallback chain is restored after import.
+            css += QStringLiteral("font-family:'%1';")
+                       .arg(info.fontFamily.toHtmlEscaped().remove(QLatin1Char('\'')));
         }
         if (!info.fontSize.isEmpty()) {
             css += QStringLiteral("font-size:%1;").arg(info.fontSize.toHtmlEscaped());
@@ -1157,6 +1162,36 @@ void normaliseImportedBlocks(QTextDocument *doc)
         merge.deleteChar();
         merge.setBlockFormat(keep);
     }
+
+    // 3) Courier text gets the full Courier-class fallback chain, so a file
+    //    saved as "Courier New" still shows a typewriter face where that font
+    //    is missing (fontconfig would otherwise pick e.g. Cousine or a sans).
+    const QStringList chain = defaultFontFamilies();
+    auto isCourier = [](const QString &f) {
+        return f.compare(QLatin1String("Courier New"), Qt::CaseInsensitive) == 0
+            || f.compare(QLatin1String("Courier"), Qt::CaseInsensitive) == 0;
+    };
+    QList<QPair<int, int>> ranges;
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            const QTextCharFormat cf = frag.charFormat();
+            const QFont font = cf.font();
+            const QStringList fams = font.families();
+            const QString first = fams.isEmpty() ? font.family() : fams.first();
+            if (isCourier(first) && fams.size() < 2) {
+                ranges.append({frag.position(), frag.length()});
+            }
+        }
+    }
+    for (const auto &r : std::as_const(ranges)) {
+        QTextCursor sel(doc);
+        sel.setPosition(r.first);
+        sel.setPosition(r.first + r.second, QTextCursor::KeepAnchor);
+        QTextCharFormat f;
+        f.setFontFamilies(chain);
+        sel.mergeCharFormat(f);
+    }
     c.endEditBlock();
 }
 
@@ -1307,7 +1342,21 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
     }
     QList<QTextTable *> tables;
     collectTables(doc->rootFrame(), &tables);
-    if (headingStyles.isEmpty() && tables.isEmpty()) {
+    // Qt names each automatic text style "c<format index>". Qt 6.4's writer
+    // puts fo:font-family="Sans" into every one of them, whatever the font;
+    // put the format's real (first) family back.
+    QHash<QString, QString> textStyleFamilies;
+    const QList<QTextFormat> formats = doc->allFormats();
+    for (int i = 0; i < formats.size(); ++i) {
+        if (!formats.at(i).isCharFormat()) {
+            continue;
+        }
+        const QStringList fams = formats.at(i).property(QTextFormat::FontFamilies).toStringList();
+        if (!fams.isEmpty() && !fams.first().isEmpty()) {
+            textStyleFamilies.insert(QStringLiteral("c%1").arg(i), fams.first());
+        }
+    }
+    if (headingStyles.isEmpty() && tables.isEmpty() && textStyleFamilies.isEmpty()) {
         return true;
     }
     auto fail = [error](const QString &msg) {
@@ -1322,7 +1371,8 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
         || unzip.exitCode() != 0) {
         return fail(QStringLiteral("Headings/tables saved unpatched (unzip unavailable)."));
     }
-    QString patched = QString::fromUtf8(unzip.readAllStandardOutput());
+    const QString original = QString::fromUtf8(unzip.readAllStandardOutput());
+    QString patched = original;
     if (!headingStyles.isEmpty()) {
         patched = headingPatchedContent(patched, headingStyles);
         if (patched.isEmpty()) {
@@ -1331,6 +1381,28 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
     }
     if (!tables.isEmpty()) {
         patched = tablePatchedContent(patched);
+    }
+    if (!textStyleFamilies.isEmpty()) {
+        static const QRegularExpression re(QStringLiteral(
+            R"re((<style:style style:name="(c\d+)" style:family="text">\s*<style:text-properties[^>]*?fo:font-family=")([^"]*)("))re"));
+        QString out;
+        qsizetype last = 0;
+        auto it = re.globalMatch(patched);
+        while (it.hasNext()) {
+            const QRegularExpressionMatch m = it.next();
+            const auto fam = textStyleFamilies.constFind(m.captured(2));
+            if (fam == textStyleFamilies.cend()) {
+                continue;
+            }
+            out += QStringView(patched).mid(last, m.capturedStart(3) - last);
+            out += fam->toHtmlEscaped();
+            last = m.capturedEnd(3);
+        }
+        out += QStringView(patched).mid(last);
+        patched = out;
+    }
+    if (patched == original) {
+        return true;
     }
     QTemporaryDir dir;
     QFile content(dir.filePath(QStringLiteral("content.xml")));
@@ -1348,6 +1420,37 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
         return fail(QStringLiteral("Headings/tables saved unpatched (zip unavailable)."));
     }
     return true;
+}
+
+void spellOutDefaultFamilies(QTextDocument *doc, const QFont &defaultFont)
+{
+    QStringList families = defaultFont.families();
+    if (families.isEmpty() && !defaultFont.family().isEmpty()) {
+        families << defaultFont.family();
+    }
+    if (families.isEmpty()) {
+        return;
+    }
+    QList<QPair<int, int>> ranges;
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (!frag.charFormat().hasProperty(QTextFormat::FontFamilies)) {
+                ranges.append({frag.position(), frag.length()});
+            }
+        }
+    }
+    QTextCursor edit(doc);
+    edit.beginEditBlock();
+    for (const auto &r : std::as_const(ranges)) {
+        QTextCursor sel(doc);
+        sel.setPosition(r.first);
+        sel.setPosition(r.first + r.second, QTextCursor::KeepAnchor);
+        QTextCharFormat f;
+        f.setFontFamilies(families);
+        sel.mergeCharFormat(f);
+    }
+    edit.endEditBlock();
 }
 
 bool saveWithWriter(QTextDocument *doc, const QString &path, const QByteArray &fmt, QString *error)
@@ -1557,12 +1660,18 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
     }
 
     if (format == Format::Odt) {
-        if (!saveWithWriter(doc, path, QByteArrayLiteral("odf"), error)) {
+        // Text typed with the document's default font carries no family of
+        // its own; some Qt versions (6.4) then write the application default
+        // ("Sans") into the ODT. Save a copy with the default families spelled
+        // out so the file records the face actually shown.
+        std::unique_ptr<QTextDocument> copy(doc->clone());
+        spellOutDefaultFamilies(copy.get(), doc->defaultFont());
+        if (!saveWithWriter(copy.get(), path, QByteArrayLiteral("odf"), error)) {
             return false;
         }
         // Best effort, like the meta.xml patch: the body is already saved.
         QString headingError;
-        if (!patchOdtContent(doc, path, &headingError)) {
+        if (!patchOdtContent(copy.get(), path, &headingError)) {
             qWarning("zwriter: %s", qPrintable(headingError));
         }
         return true;
