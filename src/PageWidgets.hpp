@@ -6,6 +6,7 @@
 #include <QTextEdit>
 #include <QWidget>
 
+class QTimer;
 class QVBoxLayout;
 
 // QTextEdit resets its document's page size to "widget width, unpaginated"
@@ -28,6 +29,19 @@ public:
     // classic look (about 20 % of the width each side, 52 px at the top).
     void setContinuousInset(bool on, const QMarginsF &documentMargins);
 
+    // View zoom (View > Fit Page to Width). The document keeps its true-size
+    // layout, so lines and pages break exactly as they print; only painting
+    // and pointer positions are scaled. The widget must be sized to the zoomed
+    // page by the caller. cursorRect() and cursorForPosition() stay in
+    // unzoomed document coordinates: convert with toView() / toDocument().
+    void setZoom(qreal zoom);
+    qreal zoom() const { return m_zoom; }
+    bool isZoomed() const { return m_zoom != 1.0; }
+    QPoint toDocument(const QPoint &viewportPos) const;
+    QRect toView(const QRectF &documentRect) const;
+
+    QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
+
 protected:
     // Rich paste keeps structure and emphasis but drops hard-coded text and
     // background colours, which would clash with the theme (text follows it).
@@ -35,14 +49,29 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
     void changeEvent(QEvent *event) override;
     void showEvent(QShowEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+    void focusInEvent(QFocusEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
 
 private:
     void reapplyPageSize();
     void updateInset();
+    void restartCaretBlink();
 
     QSizeF m_pageSize; // invalid until set
     bool m_continuousInset = false;
     QMarginsF m_documentMargins;
+    qreal m_zoom = 1.0;
+    // QTextEdit's own caret blink state is private, so zoomed painting runs
+    // its own blink.
+    QTimer *m_blinkTimer = nullptr;
+    bool m_caretOn = true;
 };
 
 // Holds the paper. In "paper" mode the page is centred with breathing room and

@@ -67,6 +67,7 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStyle>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTextBlock>
@@ -321,6 +322,7 @@ void MainWindow::loadSettings()
     m_hideAwayPinned = s.value(QStringLiteral("view/chromePinned"), true).toBool();
     m_spellCheck = s.value(QStringLiteral("view/spellCheck"), true).toBool();
     m_fullPageView = s.value(QStringLiteral("view/fullPageView"), true).toBool();
+    m_fitPageWidth = s.value(QStringLiteral("view/fitPageWidth"), false).toBool();
     m_themeId = s.value(QStringLiteral("theme/id"), QStringLiteral("paper")).toString();
     if (m_themeId != QLatin1String("dark") && m_themeId != QLatin1String("inverse")) {
         m_themeId = QStringLiteral("paper");
@@ -343,6 +345,7 @@ void MainWindow::saveSettings() const
     }
     s.setValue(QStringLiteral("view/spellCheck"), m_spellCheck);
     s.setValue(QStringLiteral("view/fullPageView"), m_fullPageView);
+    s.setValue(QStringLiteral("view/fitPageWidth"), m_fitPageWidth);
     s.setValue(QStringLiteral("theme/id"), m_themeId);
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
     s.setValue(QStringLiteral("files/lastDir"), m_lastDocDir);
@@ -722,6 +725,13 @@ void MainWindow::buildViewMenu()
         QStringLiteral("Show a centered paper page on the desk (Ctrl+Shift+P); off = continuous strip"));
     connect(m_fullPageViewAction, &QAction::triggered, this, &MainWindow::toggleFullPageView);
 
+    m_fitPageWidthAction = m_viewMenu->addAction(QStringLiteral("Fit Page to &Width"));
+    m_fitPageWidthAction->setCheckable(true);
+    m_fitPageWidthAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_W));
+    m_fitPageWidthAction->setToolTip(QStringLiteral(
+        "Zoom the page to fill the window width (Ctrl+Shift+W); lines still break as they print"));
+    connect(m_fitPageWidthAction, &QAction::triggered, this, &MainWindow::toggleFitPageWidth);
+
     m_pageGuidesAction = m_viewMenu->addAction(QStringLiteral("Page &Guides"));
     m_pageGuidesAction->setCheckable(true);
     // Ctrl+G is Find Next on Linux; keep guides on their own chord.
@@ -815,7 +825,7 @@ void MainWindow::buildViewMenu()
     connect(fullscreenAct, &QAction::triggered, this, &MainWindow::toggleFullscreen);
 
     for (QAction *a : {m_typewriterScrollAction, m_focusModeAction, m_fullPageViewAction,
-                       m_pageGuidesAction, m_keySoundsAction, fullscreenAct}) {
+                       m_fitPageWidthAction, m_pageGuidesAction, m_keySoundsAction, fullscreenAct}) {
         addAction(a);
     }
 }
@@ -1128,6 +1138,11 @@ void MainWindow::syncViewActions()
     if (m_fullPageViewAction) {
         const QSignalBlocker b(m_fullPageViewAction);
         m_fullPageViewAction->setChecked(m_fullPageView);
+    }
+    if (m_fitPageWidthAction) {
+        const QSignalBlocker b(m_fitPageWidthAction);
+        m_fitPageWidthAction->setChecked(m_fitPageWidth);
+        m_fitPageWidthAction->setEnabled(m_fullPageView); // the continuous view already fills
     }
     if (m_focusParagraphAction && m_focusSentenceAction) {
         const QSignalBlocker b1(m_focusParagraphAction);
@@ -1587,13 +1602,14 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
         return;
     }
 
-    QMenu *menu = m_editor->createStandardContextMenu(pos);
+    const QPoint docPos = m_editor->toDocument(pos); // pos is in the (zoomed) viewport
+    QMenu *menu = m_editor->createStandardContextMenu(docPos);
     if (!menu) {
         menu = new QMenu(m_editor);
     }
 
     if (m_spellChecker && m_spellChecker->isEnabled() && m_spellChecker->isAvailable()) {
-        QTextCursor cursor = m_editor->cursorForPosition(pos);
+        QTextCursor cursor = m_editor->cursorForPosition(docPos);
         cursor.select(QTextCursor::WordUnderCursor);
         const QString word = cursor.selectedText().trimmed();
         bool hasLetter = false;
@@ -1683,9 +1699,10 @@ void MainWindow::centerCaret()
     const QRect cr = m_editor->cursorRect();
 
     if (m_fullPageView && m_pageScroll && m_pageCanvas) {
+        const QRect shown = m_editor->toView(cr);
         // Pages stack in the canvas; the outer scroll area follows the caret.
         m_centering = true;
-        const QPoint c = m_editor->mapTo(m_pageCanvas, cr.center());
+        const QPoint c = m_editor->mapTo(m_pageCanvas, shown.center());
         if (m_typewriterScroll) {
             if (!m_mouseActive) { // don't yank the view around on a mouse click
                 QScrollBar *vs = m_pageScroll->verticalScrollBar();
@@ -1759,7 +1776,12 @@ void MainWindow::updateFocusHighlight()
         return;
     }
     if (!m_focusMode) {
-        m_editor->setExtraSelections({});
+        if (!m_editor->extraSelections().isEmpty()) {
+            m_editor->setExtraSelections({});
+            if (m_editor->isZoomed()) {
+                m_editor->viewport()->update();
+            }
+        }
         return;
     }
 
@@ -1788,6 +1810,9 @@ void MainWindow::updateFocusHighlight()
         extras.append(after);
     }
     m_editor->setExtraSelections(extras);
+    if (m_editor->isZoomed()) {
+        m_editor->viewport()->update(); // QTextEdit repaints unzoomed regions
+    }
 }
 
 void MainWindow::showFind()
@@ -2738,6 +2763,33 @@ void MainWindow::toggleFullPageView()
     }
 }
 
+void MainWindow::toggleFitPageWidth()
+{
+    m_fitPageWidth = m_fitPageWidthAction && m_fitPageWidthAction->isChecked();
+    updateFullPageGeometry();
+    saveSettings();
+    syncViewActions();
+    centerCaret();
+}
+
+qreal MainWindow::fitPageZoom() const
+{
+    if (!m_fitPageWidth || !m_fullPageView || !m_pageScroll) {
+        return 1.0;
+    }
+    // Leave room for the vertical scroll bar whether or not it is showing, so
+    // the zoom does not flip when the page grows tall enough to need it, and
+    // for PageCanvas's 28 px paper-mode side margins (the shadow lives there).
+    const int bar = m_pageScroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr,
+                                                       m_pageScroll->verticalScrollBar());
+    const int avail = m_pageScroll->width() - bar - 2 * 28 - 4;
+    const qreal pageW = printerPageSizePx().width();
+    if (avail <= 0 || pageW <= 0) {
+        return 1.0;
+    }
+    return qBound(0.25, avail / pageW, 8.0);
+}
+
 QSizeF MainWindow::printerPageSizePx() const
 {
     // True physical page in device-independent pixels (mm → px via logical DPI).
@@ -2841,6 +2893,8 @@ void MainWindow::updateFullPageGeometry()
     const int pageH = qMax(1, qRound(native.height()));
 
     applyDocumentPageMetrics(QSize(pageW, pageH));
+    // Fit Page to Width only scales the view: the document stays true size.
+    m_editor->setZoom(fitPageZoom());
     syncPageFrameHeight();
     m_editor->viewport()->update();
 }
@@ -2857,7 +2911,8 @@ void MainWindow::syncPageFrameHeight()
     const int pageH = qMax(1, qRound(native.height()));
     refreshPageCount();
     const int pages = m_pageCount;
-    const QSize want(pageW, pageH * pages);
+    const qreal zoom = m_editor->zoom();
+    const QSize want(qRound(pageW * zoom), qRound(qreal(pageH) * pages * zoom));
     if (m_pageFrame->size() != want) {
         m_pageFrame->setFixedSize(want);
         // The caret may have just moved onto a new page: bring it into view.
@@ -2897,6 +2952,7 @@ void MainWindow::applyFullPageView()
         m_pageFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         m_editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
         m_editor->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        m_editor->setZoom(1.0);
         clearDocumentPageMetrics();
         m_editor->viewport()->update();
     }
@@ -3047,14 +3103,19 @@ void MainWindow::paintPageOverlays(const QRect &clip)
 {
     QWidget *vp = m_editor->viewport();
     QPainter painter(vp);
-    painter.setClipRect(clip);
+    // Overlays are drawn in document units, like the text under them.
+    const qreal zoom = m_editor->zoom();
+    painter.scale(zoom, zoom);
+    const QRectF docClip(QPointF(clip.topLeft()) / zoom, QSizeF(clip.size()) / zoom);
+    painter.setClipRect(docClip);
     const bool paged = m_fullPageView && m_editor->document()->pageSize().height() > 1.0;
     const int pages = paged ? documentPageCount() : 1;
     const qreal pageH = paged ? m_editor->document()->pageSize().height() : vp->height();
+    const qreal pageW = paged ? m_editor->document()->pageSize().width() : vp->width();
     // Only the pages that intersect the repainted area (a long document has
     // hundreds; a caret blink repaints a few pixels).
-    const int firstPage = paged ? qBound(0, int(clip.top() / pageH), pages - 1) : 0;
-    const int lastPage = paged ? qBound(0, int(clip.bottom() / pageH), pages - 1) : 0;
+    const int firstPage = paged ? qBound(0, int(docClip.top() / pageH), pages - 1) : 0;
+    const int lastPage = paged ? qBound(0, int(docClip.bottom() / pageH), pages - 1) : 0;
 
     if (paged) {
         // Page breaks: a strip of desk between sheets. It is clamped to the
@@ -3065,15 +3126,15 @@ void MainWindow::paintPageOverlays(const QRect &clip)
         const qreal below = qBound(0.0, fmt.topMargin() - 2.0, 9.0);
         for (int n = qMax(1, firstPage); n <= qMin(pages - 1, lastPage + 1); ++n) {
             const qreal y = n * pageH;
-            const QRectF band(-2, y - above, vp->width() + 4, above + below);
+            const QRectF band(-2, y - above, pageW + 4, above + below);
             painter.fillRect(band, c.desk);
-            painter.setPen(QPen(c.pageBorder, 1));
-            painter.drawLine(QPointF(0, band.top()), QPointF(vp->width(), band.top()));
-            painter.drawLine(QPointF(0, band.bottom()), QPointF(vp->width(), band.bottom()));
+            painter.setPen(QPen(c.pageBorder, 0)); // cosmetic: 1 device px at any zoom
+            painter.drawLine(QPointF(0, band.top()), QPointF(pageW, band.top()));
+            painter.drawLine(QPointF(0, band.bottom()), QPointF(pageW, band.bottom()));
         }
         if (m_meta.hasHeaderFooter()) {
             for (int i = firstPage; i <= lastPage; ++i) {
-                paintHeaderFooter(&painter, QRectF(0, i * pageH, vp->width(), pageH),
+                paintHeaderFooter(&painter, QRectF(0, i * pageH, pageW, pageH),
                                   i + 1, pages);
             }
         }
@@ -3089,10 +3150,12 @@ void MainWindow::paintPageGuides(QPainter &painter, int firstPage, int lastPage,
     painter.setRenderHint(QPainter::Antialiasing, false);
     QPen pen(isPaperTheme() ? QColor(160, 150, 140, 180) : QColor(80, 80, 80, 160));
     pen.setStyle(Qt::DotLine);
+    pen.setCosmetic(true); // 1 device px at any zoom
     painter.setPen(pen);
 
-    const int w = vp->width();
-    if (m_fullPageView && m_editor->document() && pageH > 1.0) {
+    const bool paged = m_fullPageView && m_editor->document() && pageH > 1.0;
+    const int w = paged ? qRound(m_editor->document()->pageSize().width()) : vp->width();
+    if (paged) {
         const QTextFrameFormat fmt = m_editor->document()->rootFrame()->frameFormat();
         const int left = qRound(fmt.leftMargin());
         const int right = w - qRound(fmt.rightMargin());
@@ -3748,7 +3811,9 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             // would jump to the end. Move by what is actually visible instead.
             const int step = qMax(40, m_pageScroll->viewport()->height() - 60);
             const QRect cr = m_editor->cursorRect();
-            const int dy = ke->key() == Qt::Key_PageDown ? step : -step;
+            // cursorRect()/cursorForPosition() are in unzoomed document units.
+            const int docStep = qRound(step / m_editor->zoom());
+            const int dy = ke->key() == Qt::Key_PageDown ? docStep : -docStep;
             const QTextCursor target = m_editor->cursorForPosition(
                 QPoint(cr.center().x(), cr.center().y() + dy));
             QTextCursor tc = m_editor->textCursor();

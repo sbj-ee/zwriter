@@ -75,6 +75,7 @@ private slots:
     void setThemeInverse();
     void togglePageGuides();
     void toggleFullPageView();
+    void toggleFitPageWidth();
     void toggleTypewriterScroll();
     void toggleFocusMode();
     void setFocusScopeSentence();
@@ -178,6 +179,7 @@ private:
     int documentPageCount() const;
     void applyFullPageView();
     void updateFullPageGeometry();
+    qreal fitPageZoom() const;
     QSizeF printerPageSizePx() const;
     QMarginsF pageMarginsPx() const;
     void applyDocumentPageMetrics(const QSize &pagePx);
@@ -252,6 +254,7 @@ private:
     QAction *m_paragraphAction = nullptr;
     QAction *m_pageGuidesAction = nullptr;
     QAction *m_fullPageViewAction = nullptr;
+    QAction *m_fitPageWidthAction = nullptr;
     QAction *m_typewriterScrollAction = nullptr;
     QAction *m_focusModeAction = nullptr;
     QAction *m_focusSentenceAction = nullptr;
@@ -282,6 +285,7 @@ private:
     bool m_hideAwayPinned = true;      // default: toolbar/menus/status stay visible
     bool m_pageGuides = false;
     bool m_fullPageView = true;        // default ON — paper page frame
+    bool m_fitPageWidth = false;       // default OFF — page shown at true size
     bool m_typewriterScroll = true;   // default ON — distraction-free
     bool m_focusMode = false;         // default OFF
     bool m_focusSentence = false;     // false = paragraph scope

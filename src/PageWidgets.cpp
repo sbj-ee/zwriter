@@ -1,7 +1,12 @@
 #include "PageWidgets.hpp"
 
+#include <QAbstractTextDocumentLayout>
+#include <QApplication>
+#include <QDropEvent>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPaintEvent>
+#include <QTimer>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -103,6 +108,210 @@ void PageTextEdit::showEvent(QShowEvent *event)
 {
     QTextEdit::showEvent(event);
     reapplyPageSize();
+}
+
+void PageTextEdit::setZoom(qreal zoom)
+{
+    zoom = qBound(0.25, zoom, 8.0);
+    if (qFuzzyCompare(zoom, m_zoom)) {
+        return;
+    }
+    if (!m_blinkTimer) {
+        // QTextEdit asks for repaints in unzoomed coordinates, so while zoomed
+        // the regions it invalidates are the wrong ones. Invalidate the zoomed
+        // equivalents: layout changes, caret moves and selection changes.
+        m_blinkTimer = new QTimer(this);
+        connect(m_blinkTimer, &QTimer::timeout, this, [this]() {
+            m_caretOn = !m_caretOn;
+            viewport()->update(toView(cursorRect()).adjusted(-2, -2, 2, 2));
+        });
+        connect(document()->documentLayout(), &QAbstractTextDocumentLayout::update, this,
+                [this](const QRectF &r) {
+                    if (isZoomed()) {
+                        viewport()->update(toView(r).adjusted(-2, -2, 2, 2));
+                    }
+                });
+        connect(this, &QTextEdit::cursorPositionChanged, this, [this]() {
+            if (isZoomed()) {
+                restartCaretBlink();
+                viewport()->update();
+            }
+        });
+        connect(this, &QTextEdit::selectionChanged, this, [this]() {
+            if (isZoomed()) {
+                viewport()->update();
+            }
+        });
+    }
+    m_zoom = zoom;
+    restartCaretBlink();
+    viewport()->update();
+}
+
+QPoint PageTextEdit::toDocument(const QPoint &viewportPos) const
+{
+    return (QPointF(viewportPos) / m_zoom).toPoint();
+}
+
+QRect PageTextEdit::toView(const QRectF &documentRect) const
+{
+    return QRectF(documentRect.topLeft() * m_zoom, documentRect.size() * m_zoom)
+        .toAlignedRect();
+}
+
+void PageTextEdit::restartCaretBlink()
+{
+    if (!m_blinkTimer) {
+        return;
+    }
+    m_caretOn = true;
+    const int flash = QApplication::cursorFlashTime();
+    if (isZoomed() && hasFocus() && flash > 0) {
+        m_blinkTimer->start(flash / 2);
+    } else {
+        m_blinkTimer->stop();
+    }
+}
+
+void PageTextEdit::paintEvent(QPaintEvent *event)
+{
+    if (!isZoomed()) {
+        QTextEdit::paintEvent(event);
+        return;
+    }
+    // Draw the true-size layout scaled, with the caret and selections QTextEdit
+    // would draw (its own painter cannot take a transform).
+    QPainter p(viewport());
+    p.scale(m_zoom, m_zoom);
+    const QRectF r = event->rect();
+    QAbstractTextDocumentLayout::PaintContext ctx;
+    ctx.clip = QRectF(r.topLeft() / m_zoom, r.size() / m_zoom).adjusted(-1, -1, 1, 1);
+    ctx.palette = palette();
+    if (m_caretOn && hasFocus() && (textInteractionFlags() & Qt::TextEditable)) {
+        ctx.cursorPosition = textCursor().position();
+    }
+    const QList<ExtraSelection> extras = extraSelections();
+    for (const ExtraSelection &es : extras) {
+        ctx.selections.append({es.cursor, es.format});
+    }
+    const QTextCursor tc = textCursor();
+    if (tc.hasSelection()) {
+        const QPalette::ColorGroup group = hasFocus() ? QPalette::Active : QPalette::Inactive;
+        QTextCharFormat sel;
+        sel.setBackground(palette().brush(group, QPalette::Highlight));
+        sel.setForeground(palette().brush(group, QPalette::HighlightedText));
+        ctx.selections.append({tc, sel});
+    }
+    p.setClipRect(ctx.clip);
+    document()->documentLayout()->draw(&p, ctx);
+}
+
+namespace {
+QMouseEvent unzoomed(const QMouseEvent *e, qreal zoom)
+{
+    return QMouseEvent(e->type(), e->position() / zoom, e->scenePosition(), e->globalPosition(),
+                       e->button(), e->buttons(), e->modifiers(), e->pointingDevice());
+}
+} // namespace
+
+void PageTextEdit::mousePressEvent(QMouseEvent *event)
+{
+    if (!isZoomed()) {
+        QTextEdit::mousePressEvent(event);
+        return;
+    }
+    QMouseEvent e = unzoomed(event, m_zoom);
+    QTextEdit::mousePressEvent(&e);
+    event->setAccepted(e.isAccepted());
+}
+
+void PageTextEdit::mouseMoveEvent(QMouseEvent *event)
+{
+    if (!isZoomed()) {
+        QTextEdit::mouseMoveEvent(event);
+        return;
+    }
+    QMouseEvent e = unzoomed(event, m_zoom);
+    QTextEdit::mouseMoveEvent(&e);
+    event->setAccepted(e.isAccepted());
+}
+
+void PageTextEdit::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (!isZoomed()) {
+        QTextEdit::mouseReleaseEvent(event);
+        return;
+    }
+    QMouseEvent e = unzoomed(event, m_zoom);
+    QTextEdit::mouseReleaseEvent(&e);
+    event->setAccepted(e.isAccepted());
+}
+
+void PageTextEdit::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    if (!isZoomed()) {
+        QTextEdit::mouseDoubleClickEvent(event);
+        return;
+    }
+    QMouseEvent e = unzoomed(event, m_zoom);
+    QTextEdit::mouseDoubleClickEvent(&e);
+    event->setAccepted(e.isAccepted());
+}
+
+void PageTextEdit::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (!isZoomed()) {
+        QTextEdit::dragMoveEvent(event);
+        return;
+    }
+    QDragMoveEvent e(event->position().toPoint() / m_zoom, event->possibleActions(),
+                     event->mimeData(), event->buttons(), event->modifiers());
+    QTextEdit::dragMoveEvent(&e);
+    event->setDropAction(e.dropAction());
+    event->setAccepted(e.isAccepted());
+    viewport()->update(); // the drop caret moved
+}
+
+void PageTextEdit::dropEvent(QDropEvent *event)
+{
+    if (!isZoomed()) {
+        QTextEdit::dropEvent(event);
+        return;
+    }
+    QDropEvent e(event->position() / m_zoom, event->possibleActions(), event->mimeData(),
+                 event->buttons(), event->modifiers());
+    QTextEdit::dropEvent(&e);
+    event->setDropAction(e.dropAction());
+    event->setAccepted(e.isAccepted());
+}
+
+void PageTextEdit::focusInEvent(QFocusEvent *event)
+{
+    QTextEdit::focusInEvent(event);
+    if (isZoomed()) {
+        restartCaretBlink();
+        viewport()->update();
+    }
+}
+
+void PageTextEdit::focusOutEvent(QFocusEvent *event)
+{
+    QTextEdit::focusOutEvent(event);
+    if (isZoomed()) {
+        restartCaretBlink();
+        viewport()->update();
+    }
+}
+
+QVariant PageTextEdit::inputMethodQuery(Qt::InputMethodQuery query) const
+{
+    QVariant v = QTextEdit::inputMethodQuery(query);
+    if (isZoomed()
+        && (query == Qt::ImCursorRectangle || query == Qt::ImAnchorRectangle)) {
+        // Where the input-method popup goes: the caret as drawn, not as laid out.
+        return QVariant(QRectF(toView(v.toRectF())));
+    }
+    return v;
 }
 
 PageCanvas::PageCanvas(QWidget *page, QWidget *parent)

@@ -3,6 +3,16 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [Unreleased]
+
+### Fit Page to Width
+- View → Fit Page to Width (`Ctrl+Shift+W`, default off) zooms the Full Page view so the page fills
+  the window width, and follows the window as it is resized. The document keeps its true-size
+  layout and only painting and pointer positions are scaled, so lines and pages break exactly as
+  they print, and turning it on or off is never an edit (no undo step, no unsaved-changes mark).
+  The setting is remembered. It is unavailable in the continuous view, which already fills the
+  window.
+
 ## [1.1.4] — 2026-09-26
 
 ### Typewriter key sounds
