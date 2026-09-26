@@ -3,6 +3,13 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.1.4] — 2026-09-26
+
+### Typewriter key sounds
+- Typing past the end of a line now plays the carriage-return sound, the same one Enter plays,
+  when the text wraps onto the next line. The key click for the character plays first, then the
+  return. Space, Backspace, Delete, arrow keys and pasting never trigger it.
+
 ## [1.1.3] — 2026-09-25
 
 Paragraph alignment on the toolbar, and alignment round-trip fixes.
