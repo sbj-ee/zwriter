@@ -3,7 +3,9 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [Unreleased]
+## [1.1.5] — 2026-09-26
+
+Fit Page to Width: zoom the Full Page view to the window.
 
 ### Fit Page to Width
 - View → Fit Page to Width (`Ctrl+Shift+W`, default off) zooms the Full Page view so the page fills
