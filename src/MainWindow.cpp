@@ -87,6 +87,7 @@
 #include <QSizePolicy>
 #include <QTextFrame>
 #include <QTextFrameFormat>
+#include <QTextLayout>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -96,6 +97,19 @@ constexpr int kReadingWpm = 225;
 constexpr int kMaxRecentFiles = 8;
 // Typewriter body density on A4 (~pica / 10 CPI). User can enlarge via the picker.
 constexpr int kDefaultBodyPointSize = 12;
+
+// Where the caret sits visually: (block number, wrapped line within block).
+// Used to hear the carriage return when typing soft-wraps onto a new line.
+QPair<int, int> caretVisualLine(QTextEdit *editor)
+{
+    const QTextCursor c = editor->textCursor();
+    const QTextBlock block = c.block();
+    // Force layout of this block so the line info is current.
+    editor->document()->documentLayout()->blockBoundingRect(block);
+    const QTextLayout *layout = block.layout();
+    const QTextLine line = layout ? layout->lineForTextPosition(c.positionInBlock()) : QTextLine();
+    return {block.blockNumber(), line.isValid() ? line.lineNumber() : 0};
+}
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -3750,9 +3764,14 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             Alignment::undoRedoKeepingCaret(m_editor, ke->matches(QKeySequence::Redo));
             return true;
         }
+        const bool soundsOn = m_keySounds && m_keySounds->isEnabled();
+        const QPair<int, int> lineBefore = soundsOn ? caretVisualLine(m_editor) : QPair<int, int>();
         if (trySmartTypography(ke)) {
-            if (m_keySounds) {
+            if (soundsOn) {
                 m_keySounds->playKey();
+                if (caretVisualLine(m_editor) == qMakePair(lineBefore.first, lineBefore.second + 1)) {
+                    m_keySounds->playReturn();
+                }
             }
             return true;
         }
@@ -3830,6 +3849,15 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                     m_keySounds->playSpace();
                 } else if (!ke->text().isEmpty() && ke->text().at(0).isPrint()) {
                     m_keySounds->playKey();
+                    // The editor inserts the character after this filter returns;
+                    // if that soft-wraps the caret onto the next line, ding.
+                    QTimer::singleShot(0, this, [this, lineBefore]() {
+                        if (m_keySounds && m_keySounds->isEnabled()
+                            && caretVisualLine(m_editor)
+                                   == qMakePair(lineBefore.first, lineBefore.second + 1)) {
+                            m_keySounds->playReturn();
+                        }
+                    });
                 }
             }
         }
