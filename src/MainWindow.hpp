@@ -35,6 +35,9 @@ class UpdateChecker;
 namespace Alignment { class Actions; }
 class SpellChecker;
 class WritingHighlighter;
+class PreviewPane;
+class LibrarySidebar;
+class QSplitter;
 
 class MainWindow : public QMainWindow
 {
@@ -83,6 +86,9 @@ private slots:
     void setFocusScopeParagraph();
     void toggleSmartQuotes();
     void toggleSpellCheck();
+    void toggleMarkdownPreview();
+    void toggleLibrary();
+    void chooseLibraryFolder();
     void showFind();
     void showReplace();
     void findNext();
@@ -202,6 +208,7 @@ private:
     bool trySmartTypography(QKeyEvent *event);
     bool findInDoc(bool forward);
     void syncViewActions();
+    void saveLibrarySettings() const;
     QTextTable *currentTable() const;
     void updateTableActions();
     bool isPaperTheme() const;
@@ -290,6 +297,14 @@ private:
     QAction *m_tableRemoveRowAction = nullptr;
     QAction *m_tableRemoveColAction = nullptr;
     QPrinter *m_printer = nullptr;
+    // Side panes (PreviewPane.cpp / LibrarySidebar.cpp): library | desk | preview.
+    QSplitter *m_splitter = nullptr;
+    LibrarySidebar *m_library = nullptr;
+    PreviewPane *m_preview = nullptr;
+    QAction *m_previewAction = nullptr;
+    QAction *m_libraryAction = nullptr;
+    QAction *m_chooseLibraryAction = nullptr;
+    bool m_previewWanted = false; // markdown/previewVisible; shown in Markdown mode only
 
     QString m_currentPath;
     DocumentIo::Format m_currentFormat = DocumentIo::Format::Odt;

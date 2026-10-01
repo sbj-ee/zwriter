@@ -8,7 +8,9 @@
 #include "SpellChecker.hpp"
 #include "WritingHighlighter.hpp"
 #include "InsertTableDialog.hpp"
+#include "LibrarySidebar.hpp"
 #include "PageWidgets.hpp"
+#include "PreviewPane.hpp"
 #include "PrintLayout.hpp"
 #include "PropertiesDialog.hpp"
 #include "TypewriterSounds.hpp"
@@ -24,9 +26,11 @@
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFileSystemModel>
 #include <QFont>
 #include <QFontComboBox>
 #include <QFontInfo>
@@ -69,6 +73,7 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStyle>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -81,8 +86,10 @@
 #include <QTextTableFormat>
 #include <QTextLength>
 #include <QTextEdit>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolBar>
+#include <QTreeView>
 #include <QUrl>
 #include <QFrame>
 #include <QGraphicsDropShadowEffect>
@@ -205,7 +212,39 @@ MainWindow::MainWindow(QWidget *parent)
                 });
             });
 
-    layout->addWidget(m_desk, 1);
+    // Library sidebar | page desk | Markdown preview. Both side panes start
+    // hidden, so a window without them is laid out exactly as before.
+    m_splitter = new QSplitter(Qt::Horizontal, central);
+    m_splitter->setObjectName(QStringLiteral("workspaceSplitter"));
+    m_splitter->setChildrenCollapsible(false);
+    m_splitter->setHandleWidth(1);
+    m_library = new LibrarySidebar(m_splitter);
+    m_library->hide();
+    m_splitter->addWidget(m_library);
+    m_splitter->addWidget(m_desk);
+    m_preview = new PreviewPane(m_splitter);
+    m_preview->hide();
+    m_splitter->addWidget(m_preview);
+    m_splitter->setStretchFactor(0, 0);
+    m_splitter->setStretchFactor(1, 3);
+    m_splitter->setStretchFactor(2, 2);
+    m_preview->attachEditor(m_editor);
+    m_previewWanted = PreviewPane::loadVisibleSetting();
+    {
+        const LibrarySidebar::Settings lib = LibrarySidebar::loadSettings();
+        m_library->setRootPath(lib.rootPath);
+        m_library->setVisible(lib.visible);
+    }
+    connect(m_library, &LibrarySidebar::rootPathChosen, this, [this]() { saveLibrarySettings(); });
+    connect(m_library, &LibrarySidebar::fileActivated, this, [this](const QString &path) {
+        if (m_currentPath.isEmpty() || QFileInfo(path) != QFileInfo(m_currentPath)) {
+            openExternalFile(path); // unsaved-changes prompt, then open
+        }
+        m_library->setCurrentFile(m_currentPath); // e.g. the prompt was cancelled
+        m_editor->setFocus(Qt::OtherFocusReason);
+    });
+
+    layout->addWidget(m_splitter, 1);
     setCentralWidget(central);
     m_desk->installEventFilter(this);
     // Hide-away: in Full Page view the pointer at the top edge is over the desk
@@ -849,12 +888,32 @@ void MainWindow::buildViewMenu()
         QStringLiteral("Keep the toolbar, menus and status bar visible (Esc); off = hide-away"));
     connect(m_alwaysShowChromeAction, &QAction::triggered, this, &MainWindow::setChromePinned);
 
+    m_viewMenu->addSeparator();
+
+    m_previewAction = m_viewMenu->addAction(QStringLiteral("Markdown Pre&view"));
+    m_previewAction->setCheckable(true);
+    m_previewAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
+    m_previewAction->setToolTip(QStringLiteral(
+        "Show the rendered Markdown beside the editor (Ctrl+Alt+P; Markdown documents only)"));
+    connect(m_previewAction, &QAction::triggered, this, &MainWindow::toggleMarkdownPreview);
+
+    m_libraryAction = m_viewMenu->addAction(QStringLiteral("Li&brary Sidebar"));
+    m_libraryAction->setCheckable(true);
+    m_libraryAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    m_libraryAction->setToolTip(
+        QStringLiteral("Show the .md / .txt files of your library folder (Ctrl+Shift+L)"));
+    connect(m_libraryAction, &QAction::triggered, this, &MainWindow::toggleLibrary);
+
+    m_chooseLibraryAction = m_viewMenu->addAction(QStringLiteral("Choose Library &Folder…"));
+    connect(m_chooseLibraryAction, &QAction::triggered, this, &MainWindow::chooseLibraryFolder);
+
     auto *fullscreenAct = m_viewMenu->addAction(QStringLiteral("Full Sc&reen"));
     fullscreenAct->setShortcut(QKeySequence(Qt::Key_F11));
     connect(fullscreenAct, &QAction::triggered, this, &MainWindow::toggleFullscreen);
 
     for (QAction *a : {m_typewriterScrollAction, m_focusModeAction, m_fullPageViewAction,
-                       m_fitPageWidthAction, m_pageGuidesAction, m_keySoundsAction, fullscreenAct}) {
+                       m_fitPageWidthAction, m_pageGuidesAction, m_keySoundsAction, fullscreenAct,
+                       m_previewAction, m_libraryAction}) {
         addAction(a);
     }
 }
@@ -1191,6 +1250,52 @@ void MainWindow::syncViewActions()
         m_themeDarkAction->setChecked(m_themeId == QLatin1String("dark"));
         m_themeInverseAction->setChecked(m_themeId == QLatin1String("inverse"));
     }
+    if (m_preview) {
+        m_preview->setVisible(m_markdownMode && m_previewWanted); // ODT/TXT/RTF: never
+    }
+    if (m_previewAction) {
+        const QSignalBlocker b(m_previewAction);
+        m_previewAction->setChecked(m_previewWanted);
+        m_previewAction->setEnabled(m_markdownMode);
+    }
+    if (m_libraryAction && m_library) {
+        const QSignalBlocker b(m_libraryAction);
+        m_libraryAction->setChecked(m_library->isVisibleTo(this));
+    }
+}
+
+void MainWindow::toggleMarkdownPreview()
+{
+    m_previewWanted = !m_previewWanted;
+    PreviewPane::saveVisibleSetting(m_previewWanted);
+    syncViewActions();
+}
+
+void MainWindow::toggleLibrary()
+{
+    const bool show = !m_library->isVisibleTo(this);
+    m_library->setVisible(show);
+    if (show && m_library->rootPath().isEmpty()) {
+        m_library->chooseRootFolder(); // cancelled: the pane says how to pick one
+    }
+    if (show) {
+        m_library->setCurrentFile(m_currentPath);
+    }
+    saveLibrarySettings();
+    syncViewActions();
+}
+
+void MainWindow::chooseLibraryFolder()
+{
+    m_library->chooseRootFolder(); // saves through rootPathChosen
+    if (!m_library->isVisibleTo(this) && !m_library->rootPath().isEmpty()) {
+        toggleLibrary();
+    }
+}
+
+void MainWindow::saveLibrarySettings() const
+{
+    LibrarySidebar::saveSettings({m_library->rootPath(), m_library->isVisibleTo(this)});
 }
 
 void MainWindow::buildFormatToolbar()
@@ -1421,6 +1526,12 @@ void MainWindow::applyTheme()
     if (m_alignActions) {
         m_alignActions->setIconColors(c.fg, c.accentFg, c.muted);
     }
+    if (m_splitter) {
+        m_splitter->setStyleSheet(QStringLiteral("QSplitter#workspaceSplitter::handle { background-color: %1; }")
+                                      .arg(c.border.name()));
+        m_preview->applyTheme(c, markdownFont());
+        m_library->applyTheme(c);
+    }
 
     // Typed text carries no explicit colour, so it follows the theme.
     if (m_editor) {
@@ -1568,6 +1679,10 @@ void MainWindow::setCurrentFile(const QString &path, DocumentIo::Format format)
     updateWindowTitle();
     if (!path.isEmpty()) {
         addToRecentFiles(path);
+    }
+    if (m_preview) {
+        m_preview->setBaseDirectory(path.isEmpty() ? QString() : QFileInfo(path).absolutePath());
+        m_library->setCurrentFile(path);
     }
 }
 
@@ -3661,6 +3776,9 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     resize(1024, 1400);
 
     // Screenshots use the default paper theme (near-white page) + full page view.
+    // Side panes stay off until their own shots, whatever the user's settings.
+    m_previewWanted = false;
+    m_library->hide();
     m_themeId = QStringLiteral("paper");
     m_fullPageView = true;
     applyDocumentDefaults();
@@ -4008,6 +4126,118 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         m_editor->clear();
         applyDocumentDefaults();
         applyTheme();
+        resize(1024, 1400);
+        setChromeVisible(true);
+        QApplication::processEvents();
+    }
+
+    // Markdown preview and the library sidebar (phase 2). The library is a demo
+    // folder in a temporary directory; only .md / .txt files and folders show.
+    {
+        QTemporaryDir demoDir;
+        const QString lib = demoDir.path() + QStringLiteral("/Writing");
+        QDir().mkpath(lib + QStringLiteral("/Chapters"));
+        QDir().mkpath(lib + QStringLiteral("/Research"));
+        const auto write = [](const QString &path, const QByteArray &bytes) {
+            QFile f(path);
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write(bytes);
+            }
+        };
+        const QByteArray draft =
+            "# The Quiet Draft\n"
+            "\n"
+            "Write first, *polish* later. The preview shows the page as a reader will see it, "
+            "while the editor keeps every **marker** in plain sight.\n"
+            "\n"
+            "## Notes for chapter two\n"
+            "\n"
+            "- Keep the harbor scene short\n"
+            "- [x] Move the letter to page one\n"
+            "- Check the `draft-2.md` outline\n"
+            "\n"
+            "> The best way out is always through.\n"
+            "\n"
+            "See [the style notes](https://example.com/style) before the next pass.\n"
+            "\n"
+            "```text\n"
+            "Fenced code keeps its own colour.\n"
+            "```\n";
+        write(lib + QStringLiteral("/The Quiet Draft.md"), draft);
+        write(lib + QStringLiteral("/Notes on light.md"), "# Notes on light\n");
+        write(lib + QStringLiteral("/todo.txt"), "call the printer\n");
+        write(lib + QStringLiteral("/letter.odt"), "not listed");
+        write(lib + QStringLiteral("/cover.png"), "not listed");
+        write(lib + QStringLiteral("/Chapters/01 Harbor.md"), "# Harbor\n");
+        write(lib + QStringLiteral("/Chapters/02 The Letter.md"), "# The Letter\n");
+        write(lib + QStringLiteral("/Chapters/outline.docx"), "not listed");
+        write(lib + QStringLiteral("/Research/sources.txt"), "sources\n");
+
+        m_focusMode = false;
+        updateFocusHighlight();
+        hideFindBar();
+        resize(1280, 780);
+        statusBar()->clearMessage();
+        m_themeId = QStringLiteral("paper");
+        openPath(lib + QStringLiteral("/The Quiet Draft.md"));
+        statusBar()->clearMessage();
+        m_hideAwayPinned = false;
+        setChromeVisible(false);
+        applyTheme();
+
+        // a) Editor + preview.
+        m_previewWanted = true; // not saved: capture leaves the settings alone
+        syncViewActions();
+        m_splitter->setSizes({0, 720, 560});
+        m_preview->renderNow();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/markdown-preview.png"), "PNG");
+
+        // b) The same in the Dark room theme.
+        m_themeId = QStringLiteral("dark");
+        applyTheme();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/markdown-preview-dark.png"), "PNG");
+        m_themeId = QStringLiteral("paper");
+        applyTheme();
+
+        // c) Library sidebar + editor (preview off), Chapters expanded.
+        m_previewWanted = false;
+        m_library->setRootPath(lib);
+        m_library->show();
+        syncViewActions();
+        m_splitter->setSizes({250, 1030, 0});
+        QElapsedTimer loading;
+        loading.start();
+        const QModelIndex chapters = m_library->model()->index(lib + QStringLiteral("/Chapters"));
+        while (loading.elapsed() < 3000
+               && (m_library->model()->rowCount(m_library->view()->rootIndex()) < 5
+                   || m_library->model()->rowCount(chapters) < 2)) {
+            m_library->model()->fetchMore(chapters);
+            QApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        m_library->view()->expand(chapters);
+        m_library->setCurrentFile(m_currentPath);
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/library-sidebar.png"), "PNG");
+
+        // d) Everything: library, editor, preview.
+        m_previewWanted = true;
+        syncViewActions();
+        m_splitter->setSizes({250, 560, 470});
+        m_preview->renderNow();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/library-and-preview.png"), "PNG");
+
+        m_previewWanted = false;
+        m_library->hide();
+        m_library->setRootPath(QString());
+        setMarkdownMode(false);
+        m_editor->clear();
+        setCurrentFile(QString(), DocumentIo::Format::Odt);
+        applyDocumentDefaults();
+        applyTheme();
+        syncViewActions();
         resize(1024, 1400);
         setChromeVisible(true);
         QApplication::processEvents();
