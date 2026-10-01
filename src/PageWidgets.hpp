@@ -29,6 +29,12 @@ public:
     // classic look (about 20 % of the width each side, 52 px at the top).
     void setContinuousInset(bool on, const QMarginsF &documentMargins);
 
+    // Continuous view only: cap the text column at this many pixels (e.g.
+    // ~66 characters of the body font) and centre it, instead of the default
+    // 60 %-of-the-window column. 0 = no cap (default).
+    void setMaxColumnWidth(qreal px);
+    qreal maxColumnWidth() const { return m_maxColumn; }
+
     // View zoom (View > Fit Page to Width). The document keeps its true-size
     // layout, so lines and pages break exactly as they print; only painting
     // and pointer positions are scaled. The widget must be sized to the zoomed
@@ -67,6 +73,7 @@ private:
     QSizeF m_pageSize; // invalid until set
     bool m_continuousInset = false;
     QMarginsF m_documentMargins;
+    qreal m_maxColumn = 0.0;
     qreal m_zoom = 1.0;
     // QTextEdit's own caret blink state is private, so zoomed painting runs
     // its own blink.

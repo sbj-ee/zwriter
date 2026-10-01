@@ -12,6 +12,8 @@
 #include <QTextDocument>
 #include <QTextDocumentFragment>
 #include <QPainter>
+#include <QScrollBar>
+#include <QStyle>
 #include <QVBoxLayout>
 
 void PageTextEdit::setFixedPageSize(const QSizeF &size)
@@ -74,20 +76,48 @@ void PageTextEdit::setContinuousInset(bool on, const QMarginsF &documentMargins)
     updateInset();
 }
 
+void PageTextEdit::setMaxColumnWidth(qreal px)
+{
+    m_maxColumn = qMax(0.0, px);
+    updateInset();
+}
+
 void PageTextEdit::updateInset()
 {
     if (!m_continuousInset) {
         setViewportMargins(0, 0, 0, 0);
         return;
     }
-    const qreal side = width() * 0.20 + 4.0;
-    const int left = qMax(0, qRound(side - m_documentMargins.left()));
-    const int right = qMax(0, qRound(side - m_documentMargins.right()));
+    int left = 0;
+    int right = 0;
+    if (m_maxColumn > 0.0) {
+        // Centred column of at most m_maxColumn px, with a little air at the
+        // sides when the window is narrower than that.
+        const int bar = style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, verticalScrollBar());
+        const qreal avail = width() - 2.0 * frameWidth() - bar;
+        const qreal minSide = qMax(24.0, width() * 0.05);
+        const qreal column = qMax(80.0, qMin(m_maxColumn, avail - 2.0 * minSide));
+        const qreal side = qMax(0.0, (avail - column) / 2.0);
+        left = qMax(0, qRound(side - m_documentMargins.left()));
+        right = qMax(0, qRound(avail - column - side - m_documentMargins.right()));
+    } else {
+        const qreal side = width() * 0.20 + 4.0;
+        left = qMax(0, qRound(side - m_documentMargins.left()));
+        right = qMax(0, qRound(side - m_documentMargins.right()));
+    }
     const int top = qMax(0, qRound(52.0 - m_documentMargins.top()));
     const int bottom = qMax(0, qRound(52.0 - m_documentMargins.bottom()));
     const QMargins want(left, top, right, bottom);
     if (viewportMargins() != want) {
         setViewportMargins(want);
+    }
+    // Continuous layout wraps at the viewport width. QTextEdit only re-applies
+    // that on its own resize, so after the document's page size was cleared
+    // (switching away from Full Page) or the inset changed, put it back here;
+    // otherwise the text is laid out 0 px wide until the next window resize.
+    if (!m_pageSize.isValid() && document()
+        && !qFuzzyCompare(document()->pageSize().width(), qreal(viewport()->width()))) {
+        document()->setPageSize(QSizeF(viewport()->width(), -1));
     }
 }
 

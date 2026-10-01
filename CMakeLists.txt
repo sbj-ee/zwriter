@@ -65,8 +65,12 @@ add_executable(zwriter
   src/HeaderFooterDialog.hpp
   src/SpellChecker.cpp
   src/SpellChecker.hpp
-  src/SpellHighlighter.cpp
-  src/SpellHighlighter.hpp
+  src/WritingHighlighter.cpp
+  src/WritingHighlighter.hpp
+  src/MarkdownSyntax.cpp
+  src/MarkdownSyntax.hpp
+  src/FocusRange.cpp
+  src/FocusRange.hpp
   src/PageWidgets.cpp
   src/PageWidgets.hpp
   src/PrintLayout.cpp
@@ -79,6 +83,7 @@ add_executable(zwriter
   src/AlignmentActions.hpp
   src/icons.qrc
   src/ui.qrc
+  src/fonts.qrc
 )
 
 target_link_libraries(zwriter PRIVATE Qt6::Widgets Qt6::PrintSupport Qt6::Network)
@@ -241,6 +246,29 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(alignment_test PRIVATE Qt6::Widgets)
   add_test(NAME alignment COMMAND alignment_test)
   set_tests_properties(alignment PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
+
+  # Markdown mode: byte-faithful round-trip (open, edit, save), the Markdown
+  # scanner / highlighter, and focus-mode sentence boundaries.
+  add_executable(markdown_test
+    tests/markdown_test.cpp
+    src/DocumentIo.cpp
+    src/DocumentIo.hpp
+    src/Alignment.cpp
+    src/Alignment.hpp
+    src/MarkdownSyntax.cpp
+    src/MarkdownSyntax.hpp
+    src/WritingHighlighter.cpp
+    src/WritingHighlighter.hpp
+    src/FocusRange.cpp
+    src/FocusRange.hpp
+    src/Theme.cpp
+    src/Theme.hpp
+    src/fonts.qrc
+  )
+  target_include_directories(markdown_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(markdown_test PRIVATE Qt6::Gui)
+  add_test(NAME markdown COMMAND markdown_test)
+  set_tests_properties(markdown PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.

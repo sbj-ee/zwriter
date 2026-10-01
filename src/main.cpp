@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFileOpenEvent>
+#include <QFontDatabase>
 #include <QIcon>
 #include <QProcess>
 #include <QTimer>
@@ -47,6 +48,20 @@ private:
     MainWindow *m_window;
 };
 
+// iA Writer Duo / Mono, embedded from third_party/iA-Fonts (src/fonts.qrc).
+// Registered for this process only; nothing is installed on the system.
+void registerBundledFonts()
+{
+    for (const char *name : {"iAWriterDuoS-Regular", "iAWriterDuoS-Bold", "iAWriterDuoS-Italic",
+                             "iAWriterDuoS-BoldItalic", "iAWriterMonoS-Regular", "iAWriterMonoS-Bold",
+                             "iAWriterMonoS-Italic", "iAWriterMonoS-BoldItalic"}) {
+        const QString path = QStringLiteral(":/fonts/%1.ttf").arg(QLatin1String(name));
+        if (QFontDatabase::addApplicationFont(path) < 0) {
+            qWarning("zwriter: could not load bundled font %s", qPrintable(path));
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -60,8 +75,8 @@ int main(int argc, char *argv[])
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             std::printf("zwriter %s — distraction-free writing\n\n"
                         "Usage: zwriter [FILE...]\n\n"
-                        "  FILE...              open ODT, TXT or RTF documents (first in this window,\n"
-                        "                       each further one in its own window)\n"
+                        "  FILE...              open ODT, TXT, RTF or Markdown documents (first in this\n"
+                        "                       window, each further one in its own window)\n"
                         "  -v, --version        print the version and exit\n"
                         "  -h, --help           print this help and exit\n"
                         "  --capture-screenshots DIR\n"
@@ -82,6 +97,7 @@ int main(int argc, char *argv[])
     // uses to pick the dock/taskbar icon and hover name.
     QGuiApplication::setDesktopFileName(QStringLiteral("zwriter"));
     QApplication::setWindowIcon(appIcon());
+    registerBundledFonts();
 
     // Command line: `zwriter [--capture-screenshots DIR] [FILE...]`. The desktop
     // entry runs `zwriter %F`, so this is how a file manager hands us documents.

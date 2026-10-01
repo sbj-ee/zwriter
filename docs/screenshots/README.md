@@ -14,3 +14,6 @@ Captured from the real MainWindow via `./build/zwriter --capture-screenshots doc
 | `full-page.png` | Full Page view — A4 · 12 pt density · Lorem body · header + opt-in footer page number (page guides on) |
 | `full-page-multipage.png` | Full Page view, two true-size A4 sheets stacked on the desk; Chapter Two starts on page 2 after a manual page break (Ctrl+Enter); header + `Page {page} of {pages}` footer. Window made taller (1024×2440), page size not scaled |
 | `spell-check.png` | Spell check on — red underlines on intentional misspellings (Hunspell en_US) |
+| `markdown-mode.png` | Markdown mode (`.md`) — inline styling with greyed markers, iA Writer Duo, ~66-character column, chrome hidden |
+| `markdown-chrome.png` | Markdown mode with chrome revealed — no formatting toolbar, Format menu hidden, slim status bar |
+| `markdown-focus-dark.png` | Markdown mode, Dark room theme, focus mode on sentence scope |

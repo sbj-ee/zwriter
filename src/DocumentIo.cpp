@@ -11,6 +11,9 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextDocumentWriter>
+#include <QSaveFile>
+#include <QStringDecoder>
+#include <QVariant>
 
 #include <memory>
 #include <QList>
@@ -1697,6 +1700,9 @@ Format formatFromPath(const QString &path)
     if (ext == QLatin1String("rtf")) {
         return Format::Rtf;
     }
+    if (ext == QLatin1String("md") || ext == QLatin1String("markdown")) {
+        return Format::Markdown;
+    }
     return Format::Unknown;
 }
 
@@ -1709,6 +1715,8 @@ QString formatName(Format format)
         return QStringLiteral("txt");
     case Format::Rtf:
         return QStringLiteral("rtf");
+    case Format::Markdown:
+        return QStringLiteral("md");
     case Format::Unknown:
         break;
     }
@@ -1723,6 +1731,7 @@ QByteArray writerFormat(Format format)
     case Format::Txt:
         return QByteArrayLiteral("plaintext");
     case Format::Rtf:
+    case Format::Markdown:
         return QByteArray(); // custom writer
     case Format::Unknown:
         break;
@@ -1736,6 +1745,7 @@ QString openFilter()
         "OpenDocument Text (*.odt);;"
         "Plain Text (*.txt);;"
         "Rich Text Format (*.rtf);;"
+        "Markdown (*.md *.markdown);;"
         "All Files (*)");
 }
 
@@ -1745,7 +1755,8 @@ QString saveFilter()
     return QStringLiteral(
         "OpenDocument Text (*.odt);;"
         "Plain Text (*.txt);;"
-        "Rich Text Format (*.rtf)");
+        "Rich Text Format (*.rtf);;"
+        "Markdown (*.md)");
 }
 
 Format formatFromFilter(const QString &selectedFilter, const QString &pathHint)
@@ -1760,8 +1771,84 @@ Format formatFromFilter(const QString &selectedFilter, const QString &pathHint)
     if (f.contains(QLatin1String("*.rtf")) || f.contains(QLatin1String("rich text"))) {
         return Format::Rtf;
     }
+    if (f.contains(QLatin1String("*.md")) || f.contains(QLatin1String("markdown"))) {
+        return Format::Markdown;
+    }
     const Format fromPath = formatFromPath(pathHint);
     return fromPath == Format::Unknown ? Format::Odt : fromPath;
+}
+
+namespace {
+
+// Kept on the QTextDocument between load() and save() of a Markdown file.
+constexpr const char *kMarkdownEolProperty = "zwriter_markdownEol"; // "\n" or "\r\n"
+constexpr const char *kMarkdownBomProperty = "zwriter_markdownBom"; // bool
+constexpr const char *kMarkdownLossyProperty = "zwriter_markdownLossy"; // bool
+
+void loadMarkdownBytes(QTextDocument *doc, const QByteArray &bytes)
+{
+    QByteArray body = bytes;
+    const bool bom = body.startsWith("\xEF\xBB\xBF");
+    if (bom) {
+        body.remove(0, 3);
+    }
+    QStringDecoder decode(QStringDecoder::Utf8);
+    QString text = decode(body);
+    const bool invalidUtf8 = decode.hasError();
+    // One line-ending style per file, taken from its first line break.
+    const qsizetype firstLf = text.indexOf(QLatin1Char('\n'));
+    const bool crlf = firstLf > 0 && text.at(firstLf - 1) == QLatin1Char('\r');
+    // Lone CRs, or LF and CRLF mixed, come back in the file's one style;
+    // invalid UTF-8 comes back as U+FFFD.
+    const qsizetype crlfCount = text.count(QStringLiteral("\r\n"));
+    const bool mixed = (crlf && crlfCount != text.count(QLatin1Char('\n')))
+        || text.count(QLatin1Char('\r')) != crlfCount || (!crlf && crlfCount > 0);
+    const bool lossy = invalidUtf8 || mixed;
+    if (crlf) {
+        text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    }
+    doc->setPlainText(text);
+    doc->setProperty(kMarkdownLossyProperty, lossy);
+    doc->setProperty(kMarkdownEolProperty, crlf ? QStringLiteral("\r\n") : QStringLiteral("\n"));
+    doc->setProperty(kMarkdownBomProperty, bom);
+    doc->clearUndoRedoStacks();
+    doc->setModified(false);
+}
+
+} // namespace
+
+void resetMarkdownFileFormat(QTextDocument *doc)
+{
+    if (doc) {
+        doc->setProperty(kMarkdownEolProperty, QStringLiteral("\n"));
+        doc->setProperty(kMarkdownBomProperty, false);
+        doc->setProperty(kMarkdownLossyProperty, false);
+    }
+}
+
+bool markdownLoadWasLossy(const QTextDocument *doc)
+{
+    return doc && doc->property(kMarkdownLossyProperty).toBool();
+}
+
+QString markdownText(const QTextDocument *doc)
+{
+    if (!doc) {
+        return QString();
+    }
+    QString eol = doc->property(kMarkdownEolProperty).toString();
+    if (eol.isEmpty()) {
+        eol = QStringLiteral("\n");
+    }
+    // toRawText(), not toPlainText(): the latter turns no-break spaces into
+    // ordinary spaces, which would change the file.
+    QString text = doc->toRawText();
+    text.remove(QChar(0xFDD0)); // frame markers / objects (only from rich
+    text.remove(QChar(0xFDD1)); // documents saved as Markdown)
+    text.remove(QChar::ObjectReplacementCharacter);
+    text.replace(QChar::ParagraphSeparator, eol);
+    text.replace(QChar::LineSeparator, eol);
+    return text;
 }
 
 bool load(QTextDocument *doc, const QString &path, QString *error)
@@ -1784,6 +1871,11 @@ bool load(QTextDocument *doc, const QString &path, QString *error)
     }
     const QByteArray bytes = file.readAll();
     file.close();
+
+    if (fmt == Format::Markdown) {
+        loadMarkdownBytes(doc, bytes);
+        return true;
+    }
 
     if (fmt == Format::Rtf
         || QString::fromUtf8(bytes.left(5)).startsWith(QLatin1String("{\\rtf"))) {
@@ -1830,6 +1922,27 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
     }
     if (format == Format::Txt) {
         return saveWithWriter(doc, path, QByteArrayLiteral("plaintext"), error);
+    }
+    if (format == Format::Markdown) {
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly)) {
+            if (error) {
+                *error = QStringLiteral("Could not write %1.").arg(path);
+            }
+            return false;
+        }
+        QByteArray data;
+        if (doc->property(kMarkdownBomProperty).toBool()) {
+            data = QByteArrayLiteral("\xEF\xBB\xBF");
+        }
+        data += markdownText(doc).toUtf8();
+        if (file.write(data) != data.size() || !file.commit()) {
+            if (error) {
+                *error = QStringLiteral("Could not write %1.").arg(path);
+            }
+            return false;
+        }
+        return true;
     }
     if (format == Format::Rtf) {
         // Basic RTF: paragraphs, character formatting, lists and tables.

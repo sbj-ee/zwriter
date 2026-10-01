@@ -34,7 +34,7 @@ class QFileDialog;
 class UpdateChecker;
 namespace Alignment { class Actions; }
 class SpellChecker;
-class SpellHighlighter;
+class WritingHighlighter;
 
 class MainWindow : public QMainWindow
 {
@@ -67,6 +67,7 @@ private slots:
     void editPastePlain();
     void clearFormatting();
     void fileNew();
+    void fileNewMarkdown();
     void applyHeading();
     void onFontFamilyChosen(const QFont &font);
     void onFontSizeChosen(int pointSize);
@@ -121,7 +122,18 @@ private slots:
 private:
     void applyTheme();
     void applyDocumentDefaults();
-    QFont defaultDocumentFont() const;
+    QFont defaultDocumentFont() const; // the current mode's body font
+    QFont richDocumentFont() const;    // ODT/TXT/RTF: Courier-class 12 pt
+    QFont markdownFont() const;        // Markdown mode: iA Writer Duo
+    // Markdown mode (.md / .markdown): plain-text editing with inline styling,
+    // iA-style view defaults; rich formatting, tables, page breaks, headers/
+    // footers and Full Page are off. Decided per document when it is opened
+    // or created.
+    void setMarkdownMode(bool on);
+    void applyMarkdownBlockFormat();
+    void syncRichActions();
+    void updateColumnCap();
+    void startNewDocument(bool markdown);
     void setChromeVisible(bool visible);
     void setChromePinned(bool pinned);
     void loadWindowIcon();
@@ -266,8 +278,12 @@ private:
     TypewriterSounds *m_keySounds = nullptr;
     UpdateChecker *m_updateChecker = nullptr;
     SpellChecker *m_spellChecker = nullptr;
-    SpellHighlighter *m_spellHighlighter = nullptr;
+    WritingHighlighter *m_highlighter = nullptr; // spell check + Markdown styling
     QAction *m_checkUpdatesAction = nullptr;
+    QAction *m_newMarkdownAction = nullptr;
+    QAction *m_insertTableAction = nullptr;
+    QAction *m_pageBreakAction = nullptr;
+    QAction *m_headerFooterAction = nullptr;
     QMenu *m_helpMenu = nullptr;
     QAction *m_tableInsertRowAction = nullptr;
     QAction *m_tableInsertColAction = nullptr;
@@ -292,5 +308,12 @@ private:
     bool m_smartQuotes = false;       // default OFF
     bool m_spellCheck = true;         // default ON
     bool m_centering = false;         // re-entrancy guard for scroll
+    bool m_markdownMode = false;      // current document is Markdown
+    // While in Markdown mode m_fullPageView / m_hideAwayPinned hold Markdown's
+    // view (continuous, hide-away chrome); the ODT-mode preferences wait here
+    // and are what view/fullPageView and view/chromePinned keep storing.
+    bool m_odtFullPageView = true;
+    bool m_odtChromePinned = true;
+    bool m_markdownChromePinned = false; // markdown/chromePinned, default hide-away
     QString m_themeId = QStringLiteral("paper"); // paper (default) | dark | inverse
 };
