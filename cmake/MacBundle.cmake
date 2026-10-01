@@ -57,6 +57,10 @@ file(GLOB _sounds "${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/*.wav")
 target_sources(zwriter PRIVATE ${_dicts} ${_sounds})
 set_source_files_properties(${_dicts} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/hunspell)
 set_source_files_properties(${_sounds} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/assets/sounds)
+# iA Writer fonts are embedded in the binary (src/fonts.qrc); ship their SIL OFL licence.
+set(_font_license "${CMAKE_CURRENT_SOURCE_DIR}/third_party/iA-Fonts/Duo/LICENSE.md")
+target_sources(zwriter PRIVATE "${_font_license}")
+set_source_files_properties("${_font_license}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources/fonts)
 
 # --- Deployment (runs at install time, i.e. inside `cpack -G DragNDrop`) ---
 get_target_property(_qmake Qt6::qmake IMPORTED_LOCATION)

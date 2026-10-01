@@ -1,0 +1,14 @@
+<RCC>
+    <!-- iA Writer Duo / Mono (SIL OFL 1.1, third_party/iA-Fonts), registered in main.cpp -->
+    <qresource prefix="/fonts">
+        <file alias="iAWriterDuoS-Regular.ttf">../third_party/iA-Fonts/Duo/iAWriterDuoS-Regular.ttf</file>
+        <file alias="iAWriterDuoS-Bold.ttf">../third_party/iA-Fonts/Duo/iAWriterDuoS-Bold.ttf</file>
+        <file alias="iAWriterDuoS-Italic.ttf">../third_party/iA-Fonts/Duo/iAWriterDuoS-Italic.ttf</file>
+        <file alias="iAWriterDuoS-BoldItalic.ttf">../third_party/iA-Fonts/Duo/iAWriterDuoS-BoldItalic.ttf</file>
+        <file alias="iAWriterMonoS-Regular.ttf">../third_party/iA-Fonts/Mono/iAWriterMonoS-Regular.ttf</file>
+        <file alias="iAWriterMonoS-Bold.ttf">../third_party/iA-Fonts/Mono/iAWriterMonoS-Bold.ttf</file>
+        <file alias="iAWriterMonoS-Italic.ttf">../third_party/iA-Fonts/Mono/iAWriterMonoS-Italic.ttf</file>
+        <file alias="iAWriterMonoS-BoldItalic.ttf">../third_party/iA-Fonts/Mono/iAWriterMonoS-BoldItalic.ttf</file>
+        <file alias="LICENSE.md">../third_party/iA-Fonts/Duo/LICENSE.md</file>
+    </qresource>
+</RCC>

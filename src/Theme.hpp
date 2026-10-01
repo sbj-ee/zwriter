@@ -32,6 +32,23 @@ struct ThemeColors
     QColor desk;       // behind the page in full-page view
     QColor selBg;
     QColor selFg;
+    // Focus mode: ink for the text outside the current sentence / paragraph.
+    QColor focusDim;
+    // Markdown mode inline styling: the markup itself (#, *, `, [](), >, list
+    // bullets, URLs) recedes; code, link text and quotes get their own ink.
+    QColor markup;
+    QColor code;
+    QColor link;
+    QColor quote;
+};
+
+// Per-view tweaks to the application stylesheet.
+struct StyleOptions
+{
+    // CSS font-family list for the editor; empty = the Courier-class default.
+    QString editorFontFamilies;
+    // Markdown mode: a quieter, thinner status bar that blends into the page.
+    bool slimStatusBar = false;
 };
 
 namespace Theme {
@@ -42,6 +59,7 @@ ThemeColors colors(const QString &themeId);
 // Complete application stylesheet for the given palette.
 //   fullPage    - page sits centred on a desk (true) or fills the window (false)
 //   bodyPt      - editor font size in points
-QString styleSheet(const ThemeColors &c, bool fullPage, int bodyPt);
+QString styleSheet(const ThemeColors &c, bool fullPage, int bodyPt,
+                   const StyleOptions &options = StyleOptions());
 
 } // namespace Theme

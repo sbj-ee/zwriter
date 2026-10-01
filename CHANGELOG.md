@@ -3,6 +3,51 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [Unreleased]
+
+Markdown document mode in the spirit of iA Writer (version number not bumped yet).
+
+### Markdown mode
+- `.md` and `.markdown` files open in a new Markdown mode and are saved back byte for byte: line
+  endings (LF or CRLF), a UTF-8 BOM, tabs, trailing spaces and a missing final newline are kept, and
+  nothing else is written into the file. An edit changes only the text you typed. Files with mixed
+  or lone-CR line endings or invalid UTF-8 still open, with a status-bar note that saving will
+  normalise them. Before, `.md` files opened as plain text.
+- File → New Markdown Document (`Ctrl+Alt+N`).
+- Markdown is styled inline: headings, bold, italic, code spans, fenced code blocks, links, URLs,
+  lists, task boxes, block quotes and rules. The markers stay in the text and are greyed out.
+  Colours come from the theme. Spell check skips code, URLs and markup.
+- The Format menu, formatting toolbar, font controls, tables, page breaks, page numbers,
+  headers/footers and Full Page view are switched off in Markdown mode. Chrome is hidden by default
+  (its pinned state is remembered separately from ODT mode) and the status bar is slimmer.
+- Text is set in iA Writer Duo in a centred column of about 66 characters with ~150 % line height.
+  None of this is saved into the file.
+- The Linux desktop entry registers `text/markdown`; the macOS app declares `.md` / `.markdown`.
+- Save As between Markdown and ODT/TXT/RTF writes the new file and reopens it in the matching mode.
+
+### Fonts
+- iA Writer Duo and iA Writer Mono (static cuts, SIL OFL 1.1, by Information Architects, from
+  github.com/iaolo/iA-Fonts) are bundled and embedded, so they appear in the font picker. The license
+  is shipped with the packages and credited in About and the README. ODT documents keep the
+  Courier-class default.
+
+### Focus mode
+- Sentence scope uses Unicode sentence boundaries (`QTextBoundaryFinder`), so `?`, `!`, closing
+  quotes and non-Latin sentence punctuation end a sentence correctly.
+- Each theme has its own dim colour for the out-of-focus text (Inverse is a little brighter than
+  before, so dimmed text stays readable on black).
+
+### Fixes
+- Continuous view could lay text out with zero width (blank page) after switching from Full Page
+  view until the window was resized.
+
+### Internal
+- Spell check and Markdown styling share one highlighter (`WritingHighlighter`, replacing
+  `SpellHighlighter`).
+- New `markdown_test`: byte-identical round trips, edit-then-save, undo-to-original, the Markdown
+  scanner, highlighter, sentence boundaries, theme colours and font registration.
+- Screenshots regenerated, including three Markdown-mode shots.
+
 ## [1.1.5] — 2026-09-26
 
 Fit Page to Width: zoom the Full Page view to the window.

@@ -50,22 +50,24 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 
 ### Implemented now
 
+- **Markdown document mode** (iA Writer-style) — `.md` / `.markdown` files open as plain text and save back **byte for byte**: nothing is reflowed, re-encoded or normalised (line endings, UTF-8 BOM, tabs, trailing spaces and a missing final newline are all kept; checked by `tests/markdown_test`). File → **New Markdown Document** (`Ctrl+Alt+N`) starts one. In this mode zwriter is a calm plain-text editor: the formatting toolbar never appears, the Format menu, B/I/U, styles, alignment, lists, tables, page breaks, page numbers, headers/footers, the font controls and Full Page view are switched off, chrome is hidden by default (Esc pins it; remembered separately from ODT mode), the status bar is slimmer, and the text sits in a centred column of about **66 characters** in **iA Writer Duo** at ~150 % line height. Markdown is **styled inline as you type** — headings, bold, italic, `code` spans and fenced code blocks, links and URLs, lists and task boxes, block quotes and rules — with the `#`, `*`, `` ` ``, `>` and bracket markers greyed out but left in the text. Colours follow the theme. Spell check skips code, URLs and markup. Shift+Enter makes a new line (there are no soft line breaks in a text file). ODT, TXT and RTF documents behave exactly as before
 - **Quiet formatting toolbar** (auto-hide optional; shown by default): font family + size, **B / I / U**, **align left / center / right / justify** (drawn icons that follow the theme; the checked one follows the paragraph at the cursor), and a paragraph-style dropdown (Body / Heading 1–3). Everything else — lists, tables, clear formatting — is in the Format menu
 - **Paper and ink** (default), **Dark room** or **Inverse** theme — the whole window follows the theme (warm light chrome with a paper page, calm charcoal, or a true black page with white text for maximum contrast); View → Theme (persisted in QSettings). Slim scrollbars, roomy menus, window size and position remembered
 - **Full Page view** (default **on**) — centered paper page on a desk background at **true physical size** (mm → DIPs via logical DPI); **multi-page**: the paper grows as you write, pages are stacked with a visible break and real top/bottom margins, the window follows the caret onto the next page, and the status bar shows **Page N of M** — what you see matches print and PDF; shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF use the same page metrics; View → Full Page (Ctrl+Shift+P); off = continuous strip
 - **Fit Page to Width** (View → Fit Page to Width, `Ctrl+Shift+W`, default off) — in Full Page view, zooms the page so it fills the window width and follows the window as you resize it. Only the view is scaled: lines and pages break exactly as they print, and the document is not changed
-- **Default body face: typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Courier` → `Courier Prime` → `Nimbus Mono PS` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
+- **Bundled iA Writer fonts** — iA Writer **Duo** (Markdown-mode default) and **Mono** are embedded in the app and appear in the font picker; see [Font credits](#font-credits)
+- **Default body face (ODT / TXT / RTF): typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Courier` → `Courier Prime` → `Nimbus Mono PS` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
 - **Five menus, nothing extra**: **File** (New / Open / Recent / Save / Export PDF / Print / Page Setup / Properties / Quit), **Edit** (Undo–Redo, Cut/Copy/Paste, Paste as Plain Text, Find / Replace), **Format** (B/I/U, Paragraph Style, Align, Lists, Insert Table, Table rows/columns, Insert Page Break, Page Numbers, Header & Footer, Clear Formatting), **View** (Full Page, Fit Page to Width, Page Guides, Typewriter Scroll, Focus Mode, Key Sounds, Spell Check, Smart Quotes, Theme, Always Show Toolbar, Full Screen), **Help**
 - **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
-- **Native save default: ODT**; also open/save **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1). **What ODT round-trips:** text including repeated spaces, tabs and line breaks; font family/size; bold/italic/underline; Heading 1–3 (saved as `text:h` with an outline level, so they reopen as headings in zwriter and LibreOffice); paragraph alignment (left / center / right / justify as `fo:text-align`; from LibreOffice files also `start` / `end` and alignment inherited from named styles such as Title or Text Body in styles.xml); bulleted/numbered/nested lists (nested levels keep their own numbering/bullet style, also from LibreOffice files); tables incl. merged cells; blank paragraphs; manual page breaks; header/footer text and document properties (meta.xml; header, footer, page size and margins are also written as an ODF master page in styles.xml, so LibreOffice shows them). After one save, further save/open cycles give the same document again (checked by `tests/odt_roundtrip_test`). **What does not:** text/highlight colours (dropped, so text follows the theme), images, footnotes, links, custom paragraph spacing/indents, and per-table styling — a reopened table always gets zwriter's standard border/padding, so custom table borders are lost. Opening a file never marks it modified
-- **Open from anywhere**: `zwriter FILE…` on the command line (`zwriter --version`, `zwriter --help`), or *Open With → zwriter* / double-click in a file manager (the desktop entry registers ODT, plain text and RTF). The first file opens in the running window, each further file in its own window. Files with an unrecognised extension (`.md`, `.conf`, …) open as plain text and are saved back as plain text — never rewritten as ODT
+- **Native save default: ODT**; also open/save **Markdown** (byte-faithful), **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1). **What ODT round-trips:** text including repeated spaces, tabs and line breaks; font family/size; bold/italic/underline; Heading 1–3 (saved as `text:h` with an outline level, so they reopen as headings in zwriter and LibreOffice); paragraph alignment (left / center / right / justify as `fo:text-align`; from LibreOffice files also `start` / `end` and alignment inherited from named styles such as Title or Text Body in styles.xml); bulleted/numbered/nested lists (nested levels keep their own numbering/bullet style, also from LibreOffice files); tables incl. merged cells; blank paragraphs; manual page breaks; header/footer text and document properties (meta.xml; header, footer, page size and margins are also written as an ODF master page in styles.xml, so LibreOffice shows them). After one save, further save/open cycles give the same document again (checked by `tests/odt_roundtrip_test`). **What does not:** text/highlight colours (dropped, so text follows the theme), images, footnotes, links, custom paragraph spacing/indents, and per-table styling — a reopened table always gets zwriter's standard border/padding, so custom table borders are lost. Opening a file never marks it modified
+- **Open from anywhere**: `zwriter FILE…` on the command line (`zwriter --version`, `zwriter --help`), or *Open With → zwriter* / double-click in a file manager (the desktop entry registers ODT, Markdown, plain text and RTF; the macOS app declares `.md` / `.markdown`). The first file opens in the running window, each further file in its own window. Files with an unrecognised extension (`.conf`, …) open as plain text and are saved back as plain text — never rewritten as ODT
 - **Export PDF…** (export-only — not a native edit/save format) via `QPrinter` PdfFormat
 - **Print options** (lean): native OS print dialog, page setup (paper / orientation / margins; default **A4**), print preview; paper size persisted in QSettings
 - **Page guides** toggle (Ctrl+Alt+G) — simple column margin guides, not a Word ruler
 - **Bottom status bar** with live **word count**, **character count**, and **reading time** (~N min at 225 WPM)
 - **Document Properties** (Author, Created, Last edit); in-memory always; **ODT meta.xml** round-trip best-effort
 - **Typewriter scrolling** (default **on**) — caret stays vertically centered while typing/navigating
-- **Focus mode** — dim everything except the current paragraph or sentence (scope in View → Focus Scope)
+- **Focus mode** — dim everything except the current paragraph or sentence (scope in View → Focus Scope). Sentences are found with Unicode sentence boundaries (`QTextBoundaryFinder`), so `?`, `!`, quotes and non-Latin punctuation work; each theme has its own dim colour
 - **Find / Replace** — keyboard-first bar (Ctrl+F / Ctrl+H); next/prev, replace, replace all; optional match case
 - **Recent files** — File → Open Recent; persisted via QSettings; stale paths cleared
 - **Smart quotes / dashes** (default **off**) — curly quotes and en/em dashes from ASCII while typing
@@ -88,6 +90,8 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it. Headings are written as `text:h` the same way (a patch of `content.xml`); without `zip` they save as styled paragraphs and reopen as body text
 - macOS app is ad-hoc signed only — no Developer ID signature or notarization yet, so the first launch needs right-click → Open (see Install)
 - Status extras (pages / paragraphs) — later
+- Markdown mode: setext headings (`Title` over `===`), indented code blocks, reference-style links, HTML and tables are not styled (they are kept as typed). A file with mixed or lone-CR line endings, or invalid UTF-8, is opened but saved with normalised line endings / replacement characters; zwriter says so in the status bar when it opens such a file. Saving a Markdown document as ODT/TXT/RTF (or the reverse) through Save As writes the new file and reopens it in the matching mode. The ~66-character column applies to Markdown mode; ODT's continuous view keeps its existing width
+- Focus mode's sentence scope follows Unicode rules, so an abbreviation such as "Dr. Smith" still counts as a sentence end
 - Mouse-drag selection does not auto-scroll past the window edge in Full Page view (scroll, then shift-click); no widow/orphan control or keep-with-next
 
 ## v1 IN
@@ -102,7 +106,7 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 - **Print** + page setup + print preview (lean; no Word-style advanced print UI)
 - **Page guides** toggle
 - **Document Properties** (author / created / last edit; ODT metadata best-effort)
-- **ODT** native default save; **TXT** + basic **RTF** open/save
+- **ODT** native default save; **Markdown** (byte-faithful) + **TXT** + basic **RTF** open/save
 - **Optional typewriter key sounds** (toggle, default **off**; bundled `assets/sounds/key-1..6.wav` + `space.wav` + `return.wav`, synthesized by `tools/gen_typewriter_sounds.py`; Qt Multimedia / QSoundEffect)
 - **Typewriter icon** branding
 - **Typewriter scrolling** (toggle, default **on**)
@@ -143,16 +147,20 @@ Full Page view with two true-size A4 sheets and a manual page break (more in
 
 ![Full Page view, two A4 pages with a manual page break](docs/screenshots/full-page-multipage.png)
 
+Markdown mode — inline styling, greyed markers, iA Writer Duo in a ~66-character column:
+
+![Markdown mode](docs/screenshots/markdown-mode.png)
+
 ## Formats
 
 | Role | Formats |
 |---|---|
 | **Native default save** | ODT (OpenDocument Text) |
-| **Also open / save** | TXT, basic RTF (best-effort) |
+| **Also open / save** | Markdown (`.md`, `.markdown` — saved byte for byte), TXT, basic RTF (best-effort) |
 | **Export only** | PDF |
 | **Not in v1** | DOCX, proprietary `.zwriter` |
 
-ODT open uses `unzip` to read `content.xml` / `meta.xml` (Linux + macOS). Prefer ODT for fidelity; RTF is readable interchange.
+Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file. ODT open uses `unzip` to read `content.xml` / `meta.xml` (Linux + macOS). Prefer ODT for fidelity; RTF is readable interchange.
 
 ## Version bumps
 
@@ -246,6 +254,7 @@ at build time.
 | `Ctrl+Shift+B` / `Ctrl+Shift+N` | Bulleted / numbered list |
 | `Ctrl+\` | Clear formatting |
 | `Ctrl+N` | New document |
+| `Ctrl+Alt+N` | New Markdown document |
 | `Ctrl+Shift+V` | Paste as plain text |
 | `Ctrl+Alt+G` | Toggle page guides |
 | `Ctrl+Enter` | Insert page break |
@@ -258,10 +267,22 @@ at build time.
 | `Ctrl+Shift+K` | Toggle typewriter key sounds (default off; also View → Typewriter Key Sounds) |
 | `Ctrl+Shift+I` | Insert table… |
 | `Tab` / `Shift+Tab` | Next / previous table cell |
+| `Shift+Enter` | Line break inside a paragraph (in Markdown mode: a new line) |
 
 ## License
 
 MIT — Copyright (c) 2026 Stephen B. Johnson. See [LICENSE](LICENSE).
+
+## Font credits
+
+zwriter bundles **iA Writer Duo** and **iA Writer Mono** (static "S" cuts: Regular, Bold, Italic,
+Bold Italic) by [Information Architects Inc.](https://ia.net/topics/a-typographic-christmas), from
+[github.com/iaolo/iA-Fonts](https://github.com/iaolo/iA-Fonts). They are derived from IBM Plex Mono
+and licensed under the **SIL Open Font License 1.1**, with the Reserved Font Name "iA Writer". The
+font files are unmodified; the license is in
+[`third_party/iA-Fonts/Duo/LICENSE.md`](third_party/iA-Fonts/Duo/LICENSE.md) (same text in `Mono/`),
+is embedded in the app, and is installed as `share/doc/zwriter/iA-Writer-Fonts-OFL.md` (Linux) or
+`zwriter.app/Contents/Resources/fonts/` (macOS). The OFL covers the fonts only; zwriter itself is MIT.
 
 ## Icon
 

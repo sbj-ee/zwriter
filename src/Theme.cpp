@@ -31,6 +31,11 @@ ThemeColors colors(const QString &themeId)
         c.desk        = QColor("#d3cdc1");
         c.selBg       = QColor("#bcd4ec");
         c.selFg       = QColor("#000000");
+        c.focusDim    = QColor("#b0b0b0");
+        c.markup      = QColor("#a39b8e");
+        c.code        = QColor("#7a4e2a");
+        c.link        = QColor("#2f6a99");
+        c.quote       = QColor("#5f5a52");
     } else if (inverse) {
         // Inverse video: a true black sheet with white ink, maximum contrast.
         c.windowBg    = QColor("#000000");
@@ -55,6 +60,11 @@ ThemeColors colors(const QString &themeId)
         c.desk        = QColor("#0b0b0b");
         c.selBg       = QColor("#ffffff");
         c.selFg       = QColor("#000000");
+        c.focusDim    = QColor("#6a6a6a");
+        c.markup      = QColor("#8a8a8a");
+        c.code        = QColor("#ffd27f");
+        c.link        = QColor("#8ab4f8");
+        c.quote       = QColor("#cfcfcf");
     } else {
         // Calm charcoal.
         c.windowBg    = QColor("#1b1c1f");
@@ -77,11 +87,16 @@ ThemeColors colors(const QString &themeId)
         c.desk        = QColor("#141517");
         c.selBg       = QColor("#2f5580");
         c.selFg       = QColor("#ffffff");
+        c.focusDim    = QColor("#5a5a5a");
+        c.markup      = QColor("#757880");
+        c.code        = QColor("#d8b88f");
+        c.link        = QColor("#6fa8dc");
+        c.quote       = QColor("#aeaba5");
     }
     return c;
 }
 
-QString styleSheet(const ThemeColors &c, bool fullPage, int bodyPt)
+QString styleSheet(const ThemeColors &c, bool fullPage, int bodyPt, const StyleOptions &options)
 {
     QString css = QStringLiteral(R"CSS(
 QMainWindow { background-color: @windowBg; }
@@ -93,7 +108,7 @@ QTextEdit {
   color: @pageFg;
   selection-background-color: @selBg;
   selection-color: @selFg;
-  font-family: 'Courier New', 'Courier', 'Courier Prime', 'Nimbus Mono PS', 'Liberation Mono', 'Noto Sans Mono', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace;
+  font-family: @editorFamilies;
   font-size: @bodyPt;
   padding: @editorPad;
 }
@@ -299,6 +314,19 @@ QDialog QTableWidget, QDialog QTableView, QDialog QListView, QDialog QTreeView {
 QDialog QHeaderView::section { background-color: @barBg; color: @fg; border: none; padding: 5px 8px; }
 )CSS");
 
+    if (options.slimStatusBar) {
+        // Markdown mode: the counter sits on the page colour with no rule above
+        // it, in small muted type -- present when revealed, never loud.
+        css += QStringLiteral(R"CSS(
+QStatusBar { background-color: @pageBg; border-top: none; font-size: 8pt; min-height: 16px; }
+QStatusBar QLabel { color: @muted; padding: 0px 14px 2px 14px; }
+)CSS");
+    }
+    const QString families = options.editorFontFamilies.isEmpty()
+        ? QStringLiteral("'Courier New', 'Courier', 'Courier Prime', 'Nimbus Mono PS', 'Liberation Mono', "
+                         "'Noto Sans Mono', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace")
+        : options.editorFontFamilies;
+
     // The continuous view's reading column comes from PageTextEdit's viewport
     // inset (the page margins stay in the document in both views).
     const QString pad = QStringLiteral("0px");
@@ -318,6 +346,7 @@ QDialog QHeaderView::section { background-color: @barBg; color: @fg; border: non
         {"@selBg", hex(c.selBg)},         {"@selFg", hex(c.selFg)},
         {"@bodyPt", QString::number(bodyPt) + QStringLiteral("pt")},
         {"@editorPad", pad},
+        {"@editorFamilies", families},
         {"@notFoundBg", c.id == QLatin1String("paper") ? QStringLiteral("#f7dcd8") : QStringLiteral("#4a1f1f")},
     };
     for (const auto &t : tokens) {

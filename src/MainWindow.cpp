@@ -3,9 +3,10 @@
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
 #include "FindReplaceBar.hpp"
+#include "FocusRange.hpp"
 #include "HeaderFooterDialog.hpp"
 #include "SpellChecker.hpp"
-#include "SpellHighlighter.hpp"
+#include "WritingHighlighter.hpp"
 #include "InsertTableDialog.hpp"
 #include "PageWidgets.hpp"
 #include "PrintLayout.hpp"
@@ -29,6 +30,7 @@
 #include <QFont>
 #include <QFontComboBox>
 #include <QFontInfo>
+#include <QFontMetricsF>
 #include <QIcon>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
@@ -92,12 +94,19 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <memory>
+
 namespace {
 // Reading-time assumption: average adult silent reading ~225 WPM.
 constexpr int kReadingWpm = 225;
 constexpr int kMaxRecentFiles = 8;
 // Typewriter body density on A4 (~pica / 10 CPI). User can enlarge via the picker.
 constexpr int kDefaultBodyPointSize = 12;
+// Markdown mode (iA-style): iA Writer Duo at 13 pt, a column of about 66
+// characters, 150 % line height.
+constexpr int kMarkdownBodyPointSize = 13;
+constexpr int kMarkdownColumnChars = 66;
+constexpr qreal kMarkdownLineHeightPercent = 150.0;
 
 // Where the caret sits visually: (block number, wrapped line within block).
 // Used to hear the carriage return when typing soft-wraps onto a new line.
@@ -216,7 +225,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_updateChecker = new UpdateChecker(this);
     m_spellChecker = new SpellChecker(this);
     m_spellChecker->setEnabled(m_spellCheck);
-    m_spellHighlighter = new SpellHighlighter(m_editor->document(), m_spellChecker);
+    m_highlighter = new WritingHighlighter(m_editor->document());
+    m_highlighter->setMisspelledFunction([this](const QString &word) {
+        return m_spellChecker && m_spellChecker->isEnabled() && m_spellChecker->isAvailable()
+            && !m_spellChecker->isCorrect(word);
+    });
     m_editor->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_editor, &QWidget::customContextMenuRequested,
             this, &MainWindow::showEditorContextMenu);
@@ -323,6 +336,9 @@ void MainWindow::loadSettings()
     m_spellCheck = s.value(QStringLiteral("view/spellCheck"), true).toBool();
     m_fullPageView = s.value(QStringLiteral("view/fullPageView"), true).toBool();
     m_fitPageWidth = s.value(QStringLiteral("view/fitPageWidth"), false).toBool();
+    m_odtFullPageView = m_fullPageView;
+    m_odtChromePinned = m_hideAwayPinned;
+    m_markdownChromePinned = s.value(QStringLiteral("markdown/chromePinned"), false).toBool();
     m_themeId = s.value(QStringLiteral("theme/id"), QStringLiteral("paper")).toString();
     if (m_themeId != QLatin1String("dark") && m_themeId != QLatin1String("inverse")) {
         m_themeId = QStringLiteral("paper");
@@ -338,13 +354,17 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("view/focusMode"), m_focusMode);
     s.setValue(QStringLiteral("view/focusSentence"), m_focusSentence);
     s.setValue(QStringLiteral("view/smartQuotes"), m_smartQuotes);
-    s.setValue(QStringLiteral("view/chromePinned"), m_hideAwayPinned);
+    // Markdown mode overrides these two for its documents; the stored values
+    // stay the ODT-mode preferences.
+    s.setValue(QStringLiteral("view/chromePinned"), m_markdownMode ? m_odtChromePinned : m_hideAwayPinned);
+    s.setValue(QStringLiteral("markdown/chromePinned"),
+               m_markdownMode ? m_hideAwayPinned : m_markdownChromePinned);
     s.setValue(QStringLiteral("window/geometry"), saveGeometry());
     if (m_keySounds) {
         s.setValue(QStringLiteral("view/keySounds"), m_keySounds->isEnabled());
     }
     s.setValue(QStringLiteral("view/spellCheck"), m_spellCheck);
-    s.setValue(QStringLiteral("view/fullPageView"), m_fullPageView);
+    s.setValue(QStringLiteral("view/fullPageView"), m_markdownMode ? m_odtFullPageView : m_fullPageView);
     s.setValue(QStringLiteral("view/fitPageWidth"), m_fitPageWidth);
     s.setValue(QStringLiteral("theme/id"), m_themeId);
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
@@ -417,6 +437,12 @@ void MainWindow::buildFileMenu()
     newAct->setShortcut(QKeySequence::New);
     connect(newAct, &QAction::triggered, this, &MainWindow::fileNew);
 
+    m_newMarkdownAction = m_fileMenu->addAction(QStringLiteral("New &Markdown Document"));
+    m_newMarkdownAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_N));
+    m_newMarkdownAction->setToolTip(QStringLiteral(
+        "Start a plain-text Markdown document with iA-style view defaults (Ctrl+Alt+N)"));
+    connect(m_newMarkdownAction, &QAction::triggered, this, &MainWindow::fileNewMarkdown);
+
     auto *openAct = m_fileMenu->addAction(QStringLiteral("&Open…"));
     openAct->setShortcut(QKeySequence::Open);
     connect(openAct, &QAction::triggered, this, &MainWindow::fileOpen);
@@ -470,8 +496,8 @@ void MainWindow::buildFileMenu()
     quitAct->setShortcut(QKeySequence::Quit);
     connect(quitAct, &QAction::triggered, this, &QWidget::close);
 
-    for (QAction *a : {newAct, openAct, saveAct, saveAsAct, exportAct, printAct, propsAct,
-                       quitAct}) {
+    for (QAction *a : {newAct, m_newMarkdownAction, openAct, saveAct, saveAsAct, exportAct, printAct,
+                       propsAct, quitAct}) {
         addAction(a);
     }
 }
@@ -672,6 +698,7 @@ void MainWindow::buildFormatMenu()
     m_formatMenu->addSeparator();
 
     auto *tableAct = m_formatMenu->addAction(QStringLiteral("Insert Tabl&e…"));
+    m_insertTableAction = tableAct;
     tableAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
     tableAct->setToolTip(QStringLiteral("Insert a table (Ctrl+Shift+I)"));
     connect(tableAct, &QAction::triggered, this, &MainWindow::insertTable);
@@ -683,6 +710,7 @@ void MainWindow::buildFormatMenu()
     tableMenu->addAction(m_tableRemoveColAction);
 
     auto *pageBreakAct = m_formatMenu->addAction(QStringLiteral("Insert Page Brea&k"));
+    m_pageBreakAction = pageBreakAct;
     pageBreakAct->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_Return),
                                 QKeySequence(Qt::CTRL | Qt::Key_Enter)});
     pageBreakAct->setToolTip(QStringLiteral(
@@ -697,6 +725,7 @@ void MainWindow::buildFormatMenu()
     connect(m_pageNumbersAction, &QAction::triggered, this, &MainWindow::togglePageNumbers);
 
     auto *hfAct = m_formatMenu->addAction(QStringLiteral("&Header && Footer…"));
+    m_headerFooterAction = hfAct;
     hfAct->setToolTip(QStringLiteral("Edit page header and footer (page numbers via {page} / {pages})"));
     connect(hfAct, &QAction::triggered, this, &MainWindow::editHeaderFooter);
     m_formatMenu->addSeparator();
@@ -840,7 +869,7 @@ QTextTable *MainWindow::currentTable() const
 
 void MainWindow::updateTableActions()
 {
-    const bool inTable = currentTable() != nullptr;
+    const bool inTable = !m_markdownMode && currentTable() != nullptr;
     for (QAction *a : {m_tableInsertRowAction, m_tableInsertColAction,
                        m_tableRemoveRowAction, m_tableRemoveColAction}) {
         if (a) {
@@ -1138,6 +1167,10 @@ void MainWindow::syncViewActions()
     if (m_fullPageViewAction) {
         const QSignalBlocker b(m_fullPageViewAction);
         m_fullPageViewAction->setChecked(m_fullPageView);
+        m_fullPageViewAction->setEnabled(!m_markdownMode); // Markdown is a continuous strip
+    }
+    if (m_pageGuidesAction) {
+        m_pageGuidesAction->setEnabled(!m_markdownMode);
     }
     if (m_fitPageWidthAction) {
         const QSignalBlocker b(m_fitPageWidthAction);
@@ -1268,6 +1301,24 @@ bool MainWindow::isPaperTheme() const
 
 QFont MainWindow::defaultDocumentFont() const
 {
+    return m_markdownMode ? markdownFont() : richDocumentFont();
+}
+
+QFont MainWindow::markdownFont() const
+{
+    // iA Writer Duo (bundled, registered in main.cpp), then Mono, then the
+    // Courier-class faces should the bundled fonts fail to load.
+    QFont font;
+    QStringList families{QStringLiteral("iA Writer Duo S"), QStringLiteral("iA Writer Mono S")};
+    families += DocumentIo::defaultFontFamilies();
+    font.setFamilies(families);
+    font.setPointSize(kMarkdownBodyPointSize);
+    font.setStyleHint(QFont::TypeWriter);
+    return font;
+}
+
+QFont MainWindow::richDocumentFont() const
+{
     // Shipping default: Courier, 12 pt (falls back through Courier-class monospace
     // faces; user can switch via toolbar).
     QFont font;
@@ -1286,7 +1337,11 @@ void MainWindow::applyDocumentDefaults()
     const QFont font = defaultDocumentFont();
     m_editor->document()->setDefaultFont(font);
     QTextCharFormat fmt;
-    fmt.setFont(font);
+    // Markdown text carries no character formats at all (it follows the
+    // document font, and nothing but the text is saved).
+    if (!m_markdownMode) {
+        fmt.setFont(font);
+    }
     // No explicit foreground: text follows the theme's colour (so switching
     // Paper <-> Dark recolours existing text) and exports/prints as plain black.
     m_editor->setCurrentCharFormat(fmt);
@@ -1296,7 +1351,7 @@ void MainWindow::applyDocumentDefaults()
     }
     if (m_fontSizeSpin) {
         const QSignalBlocker b(m_fontSizeSpin);
-        m_fontSizeSpin->setValue(kDefaultBodyPointSize);
+        m_fontSizeSpin->setValue(font.pointSize() > 0 ? font.pointSize() : kDefaultBodyPointSize);
     }
 }
 
@@ -1336,7 +1391,19 @@ void MainWindow::applyTheme()
     const QScopedValueRollback guard(m_suppressDirty, true);
     const bool wasModified = m_editor && m_editor->document()->isModified();
     const ThemeColors c = Theme::colors(m_themeId);
-    setStyleSheet(Theme::styleSheet(c, m_fullPageView, kDefaultBodyPointSize));
+    StyleOptions style;
+    if (m_markdownMode) {
+        style.editorFontFamilies = QStringLiteral(
+            "'iA Writer Duo S', 'iA Writer Mono S', 'Courier New', 'Liberation Mono', monospace");
+        style.slimStatusBar = true;
+    }
+    setStyleSheet(Theme::styleSheet(c, m_fullPageView,
+                                    m_markdownMode ? kMarkdownBodyPointSize : kDefaultBodyPointSize,
+                                    style));
+    if (m_highlighter) {
+        m_highlighter->setColors(c);
+    }
+    updateColumnCap();
 
     // Links in dialogs (About) use the accent colour, not default blue.
     QPalette pal = QApplication::palette();
@@ -1369,7 +1436,8 @@ void MainWindow::setChromeVisible(bool visible)
     m_chromeVisible = visible;
     statusBar()->setVisible(visible);
     if (m_formatBar) {
-        m_formatBar->setVisible(visible);
+        // Markdown mode has no rich formatting: the toolbar never shows.
+        m_formatBar->setVisible(visible && !m_markdownMode);
     }
     if (menuBar()) {
         menuBar()->setVisible(visible);
@@ -1430,15 +1498,25 @@ void MainWindow::updateStats()
     const QString text = m_editor->toPlainText();
     const int chars = text.length();
 
+    // A word is a run of non-space characters. In Markdown mode a run with no
+    // letter or digit (#, -, *, >, ```) is markup, not a word.
     int words = 0;
     bool inWord = false;
+    bool hasAlnum = false;
     for (const QChar c : text) {
         if (c.isSpace()) {
+            if (inWord && (hasAlnum || !m_markdownMode)) {
+                ++words;
+            }
             inWord = false;
-        } else if (!inWord) {
+            hasAlnum = false;
+        } else {
             inWord = true;
-            ++words;
+            hasAlnum = hasAlnum || c.isLetterOrNumber();
         }
+    }
+    if (inWord && (hasAlnum || !m_markdownMode)) {
+        ++words;
     }
 
     // ~N min at kReadingWpm (documented assumption).
@@ -1590,8 +1668,8 @@ void MainWindow::toggleSpellCheck()
     if (m_spellChecker) {
         m_spellChecker->setEnabled(m_spellCheck);
     }
-    if (m_spellHighlighter) {
-        m_spellHighlighter->refreshAll();
+    if (m_highlighter) {
+        m_highlighter->refreshAll();
     }
     saveSettings();
 }
@@ -1636,8 +1714,8 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
                 QObject::connect(act, &QAction::triggered, m_editor, [this, cursor, s]() mutable {
                     QTextCursor c(cursor);
                     c.insertText(s);
-                    if (m_spellHighlighter) {
-                        m_spellHighlighter->refreshAll();
+                    if (m_highlighter) {
+                        m_highlighter->refreshAll();
                     }
                 });
                 toInsert.append(act);
@@ -1651,8 +1729,8 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
                 if (m_spellChecker) {
                     m_spellChecker->ignoreWord(word);
                 }
-                if (m_spellHighlighter) {
-                    m_spellHighlighter->refreshAll();
+                if (m_highlighter) {
+                    m_highlighter->refreshAll();
                 }
             });
             toInsert.append(ignoreAct);
@@ -1661,8 +1739,8 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
                 if (m_spellChecker) {
                     m_spellChecker->addToUserDictionary(word);
                 }
-                if (m_spellHighlighter) {
-                    m_spellHighlighter->refreshAll();
+                if (m_highlighter) {
+                    m_highlighter->refreshAll();
                 }
             });
             toInsert.append(addAct);
@@ -1728,45 +1806,13 @@ void MainWindow::centerCaret()
 
 QPair<int, int> MainWindow::focusRange() const
 {
-    QTextCursor cursor = m_editor->textCursor();
+    const QTextCursor cursor = m_editor->textCursor();
+    const QTextBlock block = cursor.block();
     if (m_focusSentence) {
-        QTextCursor start = cursor;
-        QTextCursor end = cursor;
-        // Walk back to previous sentence end (. ! ? or block start).
-        QTextDocument *doc = m_editor->document();
-        int pos = cursor.position();
-        int s = pos;
-        while (s > 0) {
-            const QChar prev = doc->characterAt(s - 1);
-            if (prev == QLatin1Char('.') || prev == QLatin1Char('!')
-                || prev == QLatin1Char('?') || prev == QChar::ParagraphSeparator
-                || prev == QChar::LineSeparator) {
-                break;
-            }
-            --s;
-        }
-        // Skip leading whitespace after the break.
-        while (s < doc->characterCount() - 1 && doc->characterAt(s).isSpace()
-               && doc->characterAt(s) != QChar::ParagraphSeparator) {
-            ++s;
-        }
-        int e = pos;
-        const int last = doc->characterCount() - 1;
-        while (e < last) {
-            const QChar c = doc->characterAt(e);
-            if (c == QLatin1Char('.') || c == QLatin1Char('!') || c == QLatin1Char('?')) {
-                ++e;
-                break;
-            }
-            if (c == QChar::ParagraphSeparator || c == QChar::LineSeparator) {
-                break;
-            }
-            ++e;
-        }
-        return {s, e};
+        // Unicode sentence boundaries (QTextBoundaryFinder) within the paragraph.
+        const QPair<int, int> r = FocusRange::sentenceRange(block.text(), cursor.positionInBlock());
+        return {block.position() + r.first, block.position() + r.second};
     }
-
-    QTextBlock block = cursor.block();
     return {block.position(), block.position() + block.length() - 1};
 }
 
@@ -1790,8 +1836,7 @@ void MainWindow::updateFocusHighlight()
     QList<QTextEdit::ExtraSelection> extras;
 
     QTextCharFormat dimFmt;
-    dimFmt.setForeground(isPaperTheme() ? QColor(QStringLiteral("#b0b0b0"))
-                                        : QColor(QStringLiteral("#5a5a5a")));
+    dimFmt.setForeground(Theme::colors(m_themeId).focusDim);
 
     if (range.first > 0) {
         QTextEdit::ExtraSelection before;
@@ -2118,23 +2163,133 @@ void MainWindow::applyList(int style, bool on)
 
 void MainWindow::fileNew()
 {
+    startNewDocument(false);
+}
+
+void MainWindow::fileNewMarkdown()
+{
+    startNewDocument(true);
+}
+
+void MainWindow::startNewDocument(bool markdown)
+{
     if (!maybeSave()) {
         return;
     }
     m_editor->clear();
+    DocumentIo::resetMarkdownFileFormat(m_editor->document()); // LF, no BOM
     m_meta = DocumentMeta{};
     m_meta.ensureDefaults();
     forgetPageNumberState();
+    setMarkdownMode(markdown);
     applyDocumentDefaults();
     applyFullPageView(); // clear() resets the page margins/size
+    if (markdown) {
+        applyMarkdownBlockFormat();
+    }
     m_editor->document()->clearUndoRedoStacks();
     m_editor->document()->setModified(false);
-    setCurrentFile(QString(), DocumentIo::Format::Odt); // clean: no '*'
+    setCurrentFile(QString(), markdown ? DocumentIo::Format::Markdown
+                                       : DocumentIo::Format::Odt); // clean: no '*'
     syncViewActions();
     updateStats();
     syncFormatActions();
     updateFocusHighlight();
     m_editor->setFocus();
+}
+
+void MainWindow::setMarkdownMode(bool on)
+{
+    if (m_markdownMode == on) {
+        return;
+    }
+    if (on) {
+        m_odtFullPageView = m_fullPageView;
+        m_odtChromePinned = m_hideAwayPinned;
+        m_fullPageView = false;                  // continuous strip
+        m_hideAwayPinned = m_markdownChromePinned; // hide-away chrome by default
+    } else {
+        m_markdownChromePinned = m_hideAwayPinned;
+        m_fullPageView = m_odtFullPageView;
+        m_hideAwayPinned = m_odtChromePinned;
+    }
+    m_markdownMode = on;
+
+    // Switching modes restyles the view; it is not an edit.
+    const QScopedValueRollback guard(m_suppressDirty, true);
+    const bool wasModified = m_editor->document()->isModified();
+    m_editor->setAcceptRichText(!on); // Markdown: paste and drop plain text only
+    if (m_highlighter) {
+        m_highlighter->setMarkdownEnabled(on);
+    }
+    syncRichActions();
+    applyDocumentDefaults();
+    applyTheme();
+    applyFullPageView();
+    if (m_hideTimer) {
+        m_hideTimer->stop();
+    }
+    setChromeVisible(m_hideAwayPinned);
+    syncViewActions();
+    m_editor->document()->setModified(wasModified);
+}
+
+void MainWindow::applyMarkdownBlockFormat()
+{
+    // 150 % leading on every paragraph. Enter and plain-text paste copy the
+    // current block's format, so new lines keep it. Layout only: callers clear
+    // the undo stack afterwards, and the text (all that is saved) is unchanged.
+    QTextDocument *doc = m_editor->document();
+    const QScopedValueRollback guard(m_suppressDirty, true);
+    const bool wasModified = doc->isModified();
+    QTextBlockFormat fmt;
+    fmt.setLineHeight(kMarkdownLineHeightPercent, QTextBlockFormat::ProportionalHeight);
+    QTextCursor all(doc);
+    all.select(QTextCursor::Document);
+    all.mergeBlockFormat(fmt);
+    doc->setModified(wasModified);
+}
+
+void MainWindow::syncRichActions()
+{
+    const bool rich = !m_markdownMode;
+    for (QAction *a : {m_boldAction, m_italicAction, m_underlineAction, m_paragraphAction,
+                       m_h1Action, m_h2Action, m_h3Action, m_bulletListAction, m_numberListAction,
+                       m_clearFormatAction, m_insertTableAction, m_pageBreakAction,
+                       m_pageNumbersAction, m_headerFooterAction}) {
+        if (a) {
+            a->setEnabled(rich);
+        }
+    }
+    if (m_alignActions) {
+        for (QAction *a : m_alignActions->actions()) {
+            a->setEnabled(rich);
+        }
+    }
+    for (QWidget *w : {static_cast<QWidget *>(m_fontCombo), static_cast<QWidget *>(m_fontSizeSpin),
+                       static_cast<QWidget *>(m_styleCombo)}) {
+        if (w) {
+            w->setEnabled(rich);
+        }
+    }
+    if (m_formatMenu) {
+        m_formatMenu->menuAction()->setVisible(rich); // nothing in it applies to Markdown
+    }
+    updateTableActions();
+}
+
+void MainWindow::updateColumnCap()
+{
+    if (!m_editor) {
+        return;
+    }
+    if (!m_markdownMode) {
+        m_editor->setMaxColumnWidth(0); // ODT/TXT/RTF keep the 60 % column
+        return;
+    }
+    const QFontMetricsF fm(markdownFont(), m_editor);
+    m_editor->setMaxColumnWidth(
+        fm.horizontalAdvance(QString(kMarkdownColumnChars, QLatin1Char('n'))));
 }
 
 void MainWindow::toggleBold()
@@ -2337,8 +2492,25 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
     m_meta.ensureDefaults();
     m_meta.touchEdited();
 
+    // Saving to the other family (Markdown <-> ODT/TXT/RTF) switches the
+    // window to that file's mode: save, then reopen what was written.
+    const bool changesMode = (format == DocumentIo::Format::Markdown) != m_markdownMode;
+    QTextDocument *doc = m_editor->document();
+    std::unique_ptr<QTextDocument> plainCopy;
+    if (changesMode && m_markdownMode) {
+        // Markdown text into a rich format: drop Markdown mode's line spacing
+        // and give it the rich default font.
+        plainCopy.reset(doc->clone());
+        QTextCursor all(plainCopy.get());
+        all.select(QTextCursor::Document);
+        all.setBlockFormat(QTextBlockFormat());
+        all.setCharFormat(QTextCharFormat());
+        plainCopy->setDefaultFont(richDocumentFont());
+        doc = plainCopy.get();
+    }
+
     QString error;
-    if (!DocumentIo::save(m_editor->document(), path, format, &error)) {
+    if (!DocumentIo::save(doc, path, format, &error)) {
         QMessageBox::warning(this, QStringLiteral("Save failed"), error);
         return false;
     }
@@ -2352,7 +2524,7 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
             page.marginsMm = layout.margins(QPageLayout::Millimeter);
             page.landscape = layout.orientation() == QPageLayout::Landscape;
         }
-        const QFont body = m_editor->document()->defaultFont();
+        const QFont body = doc->defaultFont();
         if (!body.family().isEmpty()) {
             page.fontFamily = body.family();
         }
@@ -2366,6 +2538,16 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
         }
     }
 
+    if (changesMode) {
+        if (openPath(path)) {
+            statusBar()->showMessage(
+                format == DocumentIo::Format::Markdown
+                    ? QStringLiteral("Saved as Markdown and reopened in Markdown mode")
+                    : QStringLiteral("Saved and reopened as %1").arg(DocumentIo::formatName(format).toUpper()),
+                5000);
+        }
+        return true;
+    }
     setCurrentFile(path, format);
     return true;
 }
@@ -2383,6 +2565,10 @@ bool MainWindow::openPath(const QString &path)
         // back as plain text — never silently rewritten as an ODT zip.
         fmt = DocumentIo::Format::Txt;
     }
+    const bool markdown = fmt == DocumentIo::Format::Markdown;
+    if (!markdown) {
+        DocumentIo::resetMarkdownFileFormat(m_editor->document());
+    }
     m_meta = DocumentMeta{};
     m_meta.ensureDefaults();
     if (fmt == DocumentIo::Format::Odt) {
@@ -2393,11 +2579,15 @@ bool MainWindow::openPath(const QString &path)
     {
         // Everything below is part of opening, not an edit.
         const QScopedValueRollback guard(m_suppressDirty, true);
+        setMarkdownMode(markdown);
         // Keep shipping default for new typing; loaded spans keep their own faces.
         m_editor->document()->setDefaultFont(defaultDocumentFont());
         // Loading replaces the whole document, which resets its page margins/size:
         // put the page layout back.
         applyFullPageView();
+        if (markdown) {
+            applyMarkdownBlockFormat();
+        }
     }
     // Show the top of the document, caret at the start (loading leaves it at the end).
     m_editor->moveCursor(QTextCursor::Start);
@@ -2413,6 +2603,12 @@ bool MainWindow::openPath(const QString &path)
     syncFormatActions();
     updateFocusHighlight();
     m_editor->document()->setModified(false);
+    if (markdown && DocumentIo::markdownLoadWasLossy(m_editor->document())) {
+        statusBar()->showMessage(
+            QStringLiteral("Note: this file mixes line endings or is not valid UTF-8; "
+                           "saving will normalise it"),
+            8000);
+    }
     return true;
 }
 
@@ -2536,7 +2732,9 @@ QString MainWindow::runSaveDocumentDialog(DocumentIo::Format *outFormat)
     // New documents start as ODT (the native format); an existing file keeps
     // its own format. The type last used for some other file doesn't carry over.
     QString filter = QStringLiteral("OpenDocument Text (*.odt)");
-    if (!m_currentPath.isEmpty()) {
+    if (m_markdownMode) {
+        filter = QStringLiteral("Markdown (*.md)");
+    } else if (!m_currentPath.isEmpty()) {
         const DocumentIo::Format cur = m_currentFormat;
         if (cur == DocumentIo::Format::Txt) {
             filter = QStringLiteral("Plain Text (*.txt)");
@@ -2588,7 +2786,8 @@ QString MainWindow::runOpenDocumentDialog()
     dlg.setAcceptMode(QFileDialog::AcceptOpen);
     dlg.setFileMode(QFileDialog::ExistingFile);
     dlg.setNameFilters(DocumentIo::openFilter().split(QStringLiteral(";;")));
-    dlg.selectNameFilter(QStringLiteral("OpenDocument Text (*.odt)"));
+    dlg.selectNameFilter(m_markdownMode ? QStringLiteral("Markdown (*.md *.markdown)")
+                                        : QStringLiteral("OpenDocument Text (*.odt)"));
     dlg.setDirectory(documentsStartDir());
 
     if (dlg.exec() != QDialog::Accepted) {
@@ -2753,6 +2952,10 @@ void MainWindow::printPreview(QPrinter *printer)
 
 void MainWindow::toggleFullPageView()
 {
+    if (m_markdownMode) {
+        syncViewActions(); // Markdown documents are always a continuous strip
+        return;
+    }
     m_fullPageView = m_fullPageViewAction && m_fullPageViewAction->isChecked();
     applyTheme();
     applyFullPageView();
@@ -2874,9 +3077,17 @@ void MainWindow::clearDocumentPageMetrics()
     // is an undoable document edit to Qt, so a view toggle would cost an undo
     // step (and Ctrl+Z would revert the layout, not the text). The continuous
     // view gets its reading column from the editor's viewport inset instead.
-    const QMarginsF m = pageMarginsPx();
-    setRootFrameMargins(m.left(), m.top(), m.right(), m.bottom(), 0);
-    m_editor->setContinuousInset(true, m);
+    if (m_markdownMode) {
+        // Markdown has no pages: the reading column comes from the viewport
+        // inset alone (PageTextEdit::setMaxColumnWidth), so the root frame
+        // carries no page margins.
+        setRootFrameMargins(0, 0, 0, 0, 0);
+        m_editor->setContinuousInset(true, QMarginsF());
+    } else {
+        const QMarginsF m = pageMarginsPx();
+        setRootFrameMargins(m.left(), m.top(), m.right(), m.bottom(), 0);
+        m_editor->setContinuousInset(true, m);
+    }
     refreshPageCount();
 }
 
@@ -3382,6 +3593,8 @@ void MainWindow::helpAbout()
             "<p>Distraction-free writing for Linux amd64 and Apple Silicon.</p>"
             "<p>Sibling to zedit — not a fork. Kinship to FocusWriter.</p>"
             "<p>MIT License — Copyright © 2026 Stephen B. Johnson</p>"
+            "<p>Markdown mode uses the iA Writer Duo and Mono fonts — © Information Architects "
+            "Inc., based on IBM Plex — under the SIL Open Font License 1.1.</p>"
             "<p><a href=\"https://github.com/sbj-ee/zwriter\">github.com/sbj-ee/zwriter</a></p>"
         ).arg(QString::fromUtf8(zwriter::kVersionString)));
 }
@@ -3457,8 +3670,8 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     if (m_spellChecker) {
         m_spellChecker->setEnabled(false);
     }
-    if (m_spellHighlighter) {
-        m_spellHighlighter->refreshAll();
+    if (m_highlighter) {
+        m_highlighter->refreshAll();
     }
     applyTheme();
     applyFullPageView();
@@ -3520,6 +3733,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     QApplication::processEvents();
     grab().save(dir + QStringLiteral("/find-bar.png"), "PNG");
     hideFindBar();
+    statusBar()->clearMessage(); // "Wrapped to the top" would linger in later shots
 
     // Table demo shot.
     {
@@ -3709,8 +3923,8 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         applyTheme();
         applyFullPageView();
         syncViewActions();
-        if (m_spellHighlighter) {
-            m_spellHighlighter->refreshAll();
+        if (m_highlighter) {
+            m_highlighter->refreshAll();
         }
         updateStats();
         QApplication::processEvents();
@@ -3721,9 +3935,82 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         if (m_spellChecker) {
             m_spellChecker->setEnabled(false);
         }
-        if (m_spellHighlighter) {
-            m_spellHighlighter->refreshAll();
+        if (m_highlighter) {
+            m_highlighter->refreshAll();
         }
+    }
+
+    // Markdown mode: iA-style continuous column (iA Writer Duo, ~66 characters,
+    // 150 % leading), inline styling with the markup kept visible, hide-away
+    // chrome; then the chrome revealed (slim status bar), then sentence focus
+    // in the Dark room theme.
+    {
+        m_focusMode = false;
+        updateFocusHighlight();
+        hideFindBar();
+        resize(1024, 760);
+        statusBar()->clearMessage(); // e.g. the find bar's "Wrapped to the top"
+        m_editor->clear();
+        setMarkdownMode(true);
+        m_hideAwayPinned = false;
+        DocumentIo::resetMarkdownFileFormat(m_editor->document());
+        m_editor->setPlainText(QStringLiteral(
+            "# The Quiet Draft\n"
+            "\n"
+            "Write first, *polish* later. Markdown stays **visible**: the markup recedes into a "
+            "soft grey so the words come forward. Nothing is hidden and nothing is converted.\n"
+            "\n"
+            "## Notes for chapter two\n"
+            "\n"
+            "- Keep the harbor scene short\n"
+            "- [x] Move the letter to page one\n"
+            "- Check the `draft-2.md` outline\n"
+            "\n"
+            "> The best way out is always through.\n"
+            "\n"
+            "See [the style notes](https://example.com/style) before the next pass.\n"
+            "\n"
+            "```text\n"
+            "Fenced code keeps its own colour.\n"
+            "```\n"));
+        applyFullPageView(); // setPlainText() reset the root-frame margins
+        applyMarkdownBlockFormat();
+        m_editor->document()->clearUndoRedoStacks();
+        QTextCursor caret(m_editor->document()->findBlockByNumber(2));
+        caret.setPosition(caret.block().position() + 45);
+        m_editor->setTextCursor(caret);
+        setChromeVisible(false);
+        updateStats();
+        QApplication::processEvents();
+        centerCaret();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/markdown-mode.png"), "PNG");
+
+        setChromeVisible(true);
+        updateStats();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/markdown-chrome.png"), "PNG");
+        setChromeVisible(false);
+
+        m_themeId = QStringLiteral("dark");
+        applyTheme();
+        m_focusMode = true;
+        m_focusSentence = true;
+        updateFocusHighlight();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/markdown-focus-dark.png"), "PNG");
+
+        m_themeId = QStringLiteral("paper");
+        m_focusMode = false;
+        m_focusSentence = false;
+        updateFocusHighlight();
+        setMarkdownMode(false);
+        m_editor->clear();
+        applyDocumentDefaults();
+        applyTheme();
+        resize(1024, 1400);
+        setChromeVisible(true);
+        QApplication::processEvents();
     }
 
     // 4) About dialog grab.
@@ -3862,6 +4149,18 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             return true;
         }
 #endif
+        // Markdown is plain text: Shift+Enter starts a new line like Enter
+        // instead of inserting a hidden line separator.
+        if (m_markdownMode && (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter)
+            && chord == Qt::ShiftModifier) {
+            QTextCursor c = m_editor->textCursor();
+            c.insertBlock();
+            m_editor->setTextCursor(c);
+            if (m_keySounds && m_keySounds->isEnabled()) {
+                m_keySounds->playReturn();
+            }
+            return true;
+        }
         // Tab / Shift+Tab move between table cells (Tab in the last cell adds a row).
         if (((ke->key() == Qt::Key_Tab && !chord)
              || (ke->key() == Qt::Key_Backtab && (chord & ~Qt::ShiftModifier) == Qt::NoModifier))

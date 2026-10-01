@@ -51,6 +51,12 @@ if(UNIX AND NOT APPLE)
   install(FILES ${CMAKE_SOURCE_DIR}/assets/icons/zwriter.svg
           DESTINATION share/icons/hicolor/scalable/apps
           COMPONENT zwriter)
+  # The iA Writer fonts are embedded in the binary; their SIL OFL licence
+  # travels with the package.
+  install(FILES ${CMAKE_SOURCE_DIR}/third_party/iA-Fonts/Duo/LICENSE.md
+          DESTINATION share/doc/zwriter
+          RENAME iA-Writer-Fonts-OFL.md
+          COMPONENT zwriter)
   install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/
           DESTINATION share/zwriter/assets
           COMPONENT zwriter
