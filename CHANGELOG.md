@@ -5,7 +5,8 @@ the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
 ## [Unreleased]
 
-Markdown document mode in the spirit of iA Writer (version number not bumped yet).
+Markdown document mode in the spirit of iA Writer, with a live preview and a library sidebar
+(version number not bumped yet).
 
 ### Markdown mode
 - `.md` and `.markdown` files open in a new Markdown mode and are saved back byte for byte: line
@@ -24,6 +25,26 @@ Markdown document mode in the spirit of iA Writer (version number not bumped yet
   None of this is saved into the file.
 - The Linux desktop entry registers `text/markdown`; the macOS app declares `.md` / `.markdown`.
 - Save As between Markdown and ODT/TXT/RTF writes the new file and reopens it in the matching mode.
+
+### Markdown preview
+- View → Markdown Preview (`Ctrl+Alt+P`, default off) shows the document rendered in a read-only
+  pane beside the editor, using Qt's Markdown renderer (`QTextDocument::setMarkdown`, GitHub
+  dialect). It is available in Markdown mode only; ODT, TXT and RTF documents never show it.
+- The preview re-renders about 300 ms after the last edit, not on every keystroke, and a hidden
+  preview does no work at all. It follows the editor's scroll position proportionally.
+- It takes its colours from the theme (page colours, and the code, link and quote inks of the
+  editor's inline styling) and is set in iA Writer Duo. Web and mail links open in the browser;
+  relative images load from the document's folder.
+- The choice is remembered (`markdown/previewVisible`).
+
+### Library sidebar
+- View → Library Sidebar (`Ctrl+Shift+L`, default off) lists the folders and the `.md` / `.txt`
+  files under a folder you pick (View → Choose Library Folder…, or the `…` button). Other files and
+  hidden entries are left out.
+- Clicking a file opens it, after the usual unsaved-changes prompt; cancelling keeps the current
+  document. The open document is highlighted in the tree.
+- The folder and whether the sidebar is shown are remembered (`library/rootPath`,
+  `library/visible`).
 
 ### Fonts
 - iA Writer Duo and iA Writer Mono (static cuts, SIL OFL 1.1, by Information Architects, from
@@ -47,6 +68,11 @@ Markdown document mode in the spirit of iA Writer (version number not bumped yet
 - New `markdown_test`: byte-identical round trips, edit-then-save, undo-to-original, the Markdown
   scanner, highlighter, sentence boundaries, theme colours and font registration.
 - Screenshots regenerated, including three Markdown-mode shots.
+- New `PreviewPane` and `LibrarySidebar` widgets; `MainWindow` only places them in a splitter
+  (library | page | preview) and wires the View actions. New `panes_test`: preview debounce,
+  render, theme colours and scroll sync; library file filter and click-to-open; settings keys.
+  Four new screenshots (`markdown-preview`, `markdown-preview-dark`, `library-sidebar`,
+  `library-and-preview`); the existing ones are pixel-identical.
 
 ## [1.1.5] — 2026-09-26
 
