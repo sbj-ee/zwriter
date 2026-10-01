@@ -17,3 +17,7 @@ Captured from the real MainWindow via `./build/zwriter --capture-screenshots doc
 | `markdown-mode.png` | Markdown mode (`.md`) — inline styling with greyed markers, iA Writer Duo, ~66-character column, chrome hidden |
 | `markdown-chrome.png` | Markdown mode with chrome revealed — no formatting toolbar, Format menu hidden, slim status bar |
 | `markdown-focus-dark.png` | Markdown mode, Dark room theme, focus mode on sentence scope |
+| `markdown-preview.png` | Markdown mode with View → Markdown Preview (`Ctrl+Alt+P`) — editor and rendered preview side by side (QTextDocument::setMarkdown), Paper theme |
+| `markdown-preview-dark.png` | The same in the Dark room theme — the preview follows the theme (page colours, code / link / quote inks) |
+| `library-sidebar.png` | View → Library Sidebar (`Ctrl+Shift+L`) — a demo library folder; only folders and `.md` / `.txt` files are listed (its `.odt`, `.png` and `.docx` files are hidden); the open document is highlighted |
+| `library-and-preview.png` | Library sidebar, editor and preview together |

@@ -81,6 +81,10 @@ add_executable(zwriter
   src/Alignment.hpp
   src/AlignmentActions.cpp
   src/AlignmentActions.hpp
+  src/PreviewPane.cpp
+  src/PreviewPane.hpp
+  src/LibrarySidebar.cpp
+  src/LibrarySidebar.hpp
   src/icons.qrc
   src/ui.qrc
   src/fonts.qrc
@@ -269,6 +273,22 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(markdown_test PRIVATE Qt6::Gui)
   add_test(NAME markdown COMMAND markdown_test)
   set_tests_properties(markdown PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+  # Markdown preview pane (debounce, render, theme, scroll sync) and library
+  # sidebar (file filter, click-to-open), plus their QSettings keys.
+  add_executable(panes_test
+    tests/panes_test.cpp
+    src/PreviewPane.cpp
+    src/PreviewPane.hpp
+    src/LibrarySidebar.cpp
+    src/LibrarySidebar.hpp
+    src/Theme.cpp
+    src/Theme.hpp
+  )
+  target_include_directories(panes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(panes_test PRIVATE Qt6::Widgets)
+  add_test(NAME panes COMMAND panes_test)
+  set_tests_properties(panes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.
