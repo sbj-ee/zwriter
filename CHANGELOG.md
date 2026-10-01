@@ -3,10 +3,10 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [Unreleased]
+## [1.2.0] — 2026-10-01
 
-Markdown document mode in the spirit of iA Writer, with a live preview and a library sidebar
-(version number not bumped yet).
+iA Writer-style writing: a Markdown document mode with inline styling and the iA Writer fonts
+(phase 1, #1), plus a live Markdown preview and a library sidebar (phase 2, #2).
 
 ### Markdown mode
 - `.md` and `.markdown` files open in a new Markdown mode and are saved back byte for byte: line
