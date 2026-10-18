@@ -122,6 +122,24 @@ private slots:
         QCOMPARE(parsed->keyIdHex(), QStringLiteral("32960BBA77B36F1F"));
     }
 
+    void realReleaseSignatureVerifies()
+    {
+        // zterminal's published v1.6.0 SHA256SUMS, signed by the release key zwriter embeds:
+        // fails if the compiled key is wrong or mistyped.
+        setUpdateSigningPublicKeyForTests(QString());
+        const auto key = MinisignPublicKey::parse(updateSigningPublicKey());
+        QVERIFY(key);
+        const QByteArray sums = data(QStringLiteral("release-key/SHA256SUMS"));
+        const QByteArray sig = data(QStringLiteral("release-key/SHA256SUMS.minisig"));
+        QVERIFY(!sums.isEmpty());
+        const MinisignResult r = verifyMinisign(sums, sig, *key);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.trustedComment, QStringLiteral("zterminal v1.6.0 SHA256SUMS"));
+        QByteArray evil = sums;
+        evil[0] = evil[0] == 'a' ? 'b' : 'a';
+        QVERIFY(!verifyMinisign(evil, sig, *key).ok);
+    }
+
     void badPublicKeys()
     {
         QVERIFY(!MinisignPublicKey::parse(QString()));

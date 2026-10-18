@@ -6,3 +6,8 @@ Fixtures made with the real `minisign` 0.12 and a throwaway **test** key
     minisign -S -l -s test.key -m SHA256SUMS.legacy -t "legacy test"   # "Ed" (not prehashed)
 
 They prove zwriter's verifier reads minisign's own output. Not the release key.
+
+`release-key/` is the public `SHA256SUMS` and `SHA256SUMS.minisig` of zterminal's v1.6.0 release,
+signed with the real release key (a public file, copied unchanged from that release; the
+signature covers those exact bytes, so the zterminal file names stay). It proves the key
+compiled into zwriter is the one that makes real release signatures verify.
