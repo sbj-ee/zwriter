@@ -11,10 +11,27 @@ WritingHighlighter::WritingHighlighter(QTextDocument *document)
     setColors(Theme::colors(QStringLiteral("paper")));
 }
 
+void WritingHighlighter::rehighlightKeepingModified()
+{
+    // QSyntaxHighlighter::rehighlight() runs inside an edit block, so Qt flips
+    // the document's modified flag (and emits textChanged) although only
+    // formats changed. Restyling is not an edit: put the flag back, or an
+    // untouched document asks "Save changes?" on close after e.g. a spell
+    // check toggle.
+    QTextDocument *doc = document();
+    const bool wasModified = doc && doc->isModified();
+    m_rehighlighting = true;
+    rehighlight();
+    m_rehighlighting = false;
+    if (doc && doc->isModified() != wasModified) {
+        doc->setModified(wasModified);
+    }
+}
+
 void WritingHighlighter::setMisspelledFunction(MisspelledFn fn)
 {
     m_misspelled = std::move(fn);
-    rehighlight();
+    rehighlightKeepingModified();
 }
 
 void WritingHighlighter::setMarkdownEnabled(bool on)
@@ -23,7 +40,7 @@ void WritingHighlighter::setMarkdownEnabled(bool on)
         return;
     }
     m_markdown = on;
-    rehighlight();
+    rehighlightKeepingModified();
 }
 
 void WritingHighlighter::setColors(const ThemeColors &colors)
@@ -37,13 +54,13 @@ void WritingHighlighter::setColors(const ThemeColors &colors)
     m_link = colors.link;
     m_quote = colors.quote;
     if (m_markdown) {
-        rehighlight();
+        rehighlightKeepingModified();
     }
 }
 
 void WritingHighlighter::refreshAll()
 {
-    rehighlight();
+    rehighlightKeepingModified();
 }
 
 void WritingHighlighter::highlightBlock(const QString &text)

@@ -69,7 +69,7 @@ int main(int argc, char *argv[])
     // Answer --version / --help before touching Qt's GUI: no window, no display needed.
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
-            std::printf("zwriter %s\n", zwriter::kVersionString);
+            std::printf("zwriter %s\n", zwriter::versionLabel().c_str());
             return 0;
         }
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
