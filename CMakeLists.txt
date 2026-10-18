@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.2.0 LANGUAGES CXX)
+project(zwriter VERSION 1.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,6 +33,32 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport Network)
 find_package(Qt6 COMPONENTS Multimedia QUIET)
+
+# Short git commit baked into the build (title bar: "zwriter <ver> (<commit>)").
+# Order: -DZWRITER_GIT_COMMIT=..., then $ZWRITER_GIT_COMMIT, then
+# `git rev-parse --short=7 HEAD` of this checkout, else "unknown" (a source
+# tarball). Resolved at configure time; re-run cmake after new commits.
+if(NOT ZWRITER_GIT_COMMIT AND DEFINED ENV{ZWRITER_GIT_COMMIT})
+  set(ZWRITER_GIT_COMMIT "$ENV{ZWRITER_GIT_COMMIT}")
+endif()
+if(NOT ZWRITER_GIT_COMMIT)
+  find_package(Git QUIET)
+  if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" rev-parse --short=7 HEAD
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      OUTPUT_VARIABLE ZWRITER_GIT_COMMIT
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    # Re-configure when HEAD moves so the commit does not go stale.
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/.git/HEAD")
+  endif()
+endif()
+if(NOT ZWRITER_GIT_COMMIT)
+  set(ZWRITER_GIT_COMMIT "unknown")
+endif()
+message(STATUS "zwriter ${PROJECT_VERSION} (${ZWRITER_GIT_COMMIT})")
 
 # Generated version header from project() VERSION — do not edit by hand.
 set(ZWRITER_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -289,6 +315,41 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(panes_test PRIVATE Qt6::Widgets)
   add_test(NAME panes COMMAND panes_test)
   set_tests_properties(panes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
+endif()
+
+# Library folder chooser, empty-library hint, bounded behaviour on a huge
+# library, and the "zwriter <ver> (<commit>)" label.
+if(TARGET Qt6::Widgets)
+  add_executable(library_test
+    tests/library_test.cpp
+    src/LibrarySidebar.cpp
+    src/LibrarySidebar.hpp
+    src/Theme.cpp
+    src/Theme.hpp
+  )
+  target_include_directories(library_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ZWRITER_GENERATED_DIR})
+  target_link_libraries(library_test PRIVATE Qt6::Widgets)
+  add_test(NAME library COMMAND library_test)
+  set_tests_properties(library PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
+endif()
+
+# Whole-window tests: the real MainWindow, offscreen. Built from the same
+# sources and settings as the zwriter target (minus main.cpp), so it can never
+# drift from the shipped binary.
+if(TARGET Qt6::Widgets)
+  get_target_property(_zw_srcs zwriter SOURCES)
+  list(FILTER _zw_srcs EXCLUDE REGEX "(^|/)main\\.cpp$")
+  add_executable(mainwindow_test tests/mainwindow_test.cpp ${_zw_srcs})
+  foreach(_prop COMPILE_DEFINITIONS INCLUDE_DIRECTORIES LINK_LIBRARIES LINK_DIRECTORIES)
+    get_target_property(_val zwriter ${_prop})
+    if(_val)
+      set_property(TARGET mainwindow_test PROPERTY ${_prop} ${_val})
+    endif()
+  endforeach()
+  add_test(NAME mainwindow COMMAND mainwindow_test)
+  set_tests_properties(mainwindow PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion"
+    TIMEOUT 300)
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.

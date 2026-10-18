@@ -3,13 +3,16 @@
 #include "Theme.hpp"
 
 #include <QElapsedTimer>
+#include <QPointer>
 #include <QString>
 #include <QStringList>
 #include <QWidget>
 
+class QFileDialog;
 class QFileSystemModel;
 class QLabel;
 class QModelIndex;
+class QPushButton;
 class QToolButton;
 class QTreeView;
 
@@ -35,9 +38,18 @@ public:
 
     void applyTheme(const ThemeColors &colors);
 
-    // Asks for a folder (QFileDialog) and makes it the root; emits
-    // rootPathChosen() when the user picked one.
+    // Opens the folder chooser (non-blocking, window-modal on the main
+    // window) and makes the pick the root; emits rootPathChosen() when the
+    // user picked one. Calling it again just raises the open dialog.
     void chooseRootFolder();
+
+    // The chooser chooseRootFolder() opens: a Qt (non-native) folder dialog
+    // parented to this widget's top-level window. Native GTK dialogs get no
+    // transient parent under Wayland and can open BEHIND the window, leaving
+    // the app looking frozen behind a modal dialog nobody can see.
+    QFileDialog *createFolderDialog();
+    QFileDialog *folderDialog() const;
+    QPushButton *chooseButton() const { return m_hintButton; }
 
     QSize sizeHint() const override;
 
@@ -71,6 +83,9 @@ private:
     QLabel *m_title = nullptr;
     QLabel *m_hint = nullptr;
     QToolButton *m_chooseButton = nullptr;
+    QPushButton *m_hintButton = nullptr;
+    QPointer<QFileDialog> m_folderDialog;
+    QWidget *m_hintBox = nullptr;
     QString m_rootPath;
     QString m_lastActivated;
     QElapsedTimer m_activateClock;

@@ -8,6 +8,8 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QPointer>
+#include <QPushButton>
 #include <QSettings>
 #include <QToolButton>
 #include <QTreeView>
@@ -40,11 +42,23 @@ LibrarySidebar::LibrarySidebar(QWidget *parent)
     headerLayout->addWidget(m_chooseButton);
     layout->addWidget(header);
 
-    m_hint = new QLabel(QStringLiteral("Choose a folder of .md and .txt files (…)"), this);
+    // Shown instead of the tree while no library folder is set.
+    m_hintBox = new QWidget(this);
+    m_hintBox->setObjectName(QStringLiteral("libraryHintBox"));
+    auto *hintLayout = new QVBoxLayout(m_hintBox);
+    hintLayout->setContentsMargins(12, 4, 12, 4);
+    hintLayout->setSpacing(8);
+    m_hint = new QLabel(QStringLiteral("Choose a library folder of .md and .txt files."), m_hintBox);
     m_hint->setObjectName(QStringLiteral("libraryHint"));
     m_hint->setWordWrap(true);
-    m_hint->setContentsMargins(12, 4, 12, 4);
-    layout->addWidget(m_hint);
+    hintLayout->addWidget(m_hint);
+    m_hintButton = new QPushButton(QStringLiteral("Choose Folder…"), m_hintBox);
+    m_hintButton->setObjectName(QStringLiteral("libraryChooseFolder"));
+    m_hintButton->setCursor(Qt::PointingHandCursor);
+    connect(m_hintButton, &QPushButton::clicked, this, &LibrarySidebar::chooseRootFolder);
+    hintLayout->addWidget(m_hintButton, 0, Qt::AlignLeft);
+    hintLayout->addStretch(1);
+    layout->addWidget(m_hintBox, 1);
 
     m_model = new QFileSystemModel(this);
     // Folders always; files only when they match nameFilters(). No hidden
@@ -105,7 +119,7 @@ void LibrarySidebar::setRootPath(const QString &path)
         m_view->setRootIndex(m_model->setRootPath(QString()));
     }
     m_view->setVisible(usable);
-    m_hint->setVisible(!usable);
+    m_hintBox->setVisible(!usable);
     updateHeader();
 }
 
@@ -134,6 +148,8 @@ void LibrarySidebar::applyTheme(const ThemeColors &c)
         "#libraryHeader { background-color: %1; }"
         "#libraryTitle { color: %2; font-size: 9pt; font-weight: 600; }"
         "#libraryHint { color: %3; font-size: 9pt; }"
+        "#libraryChooseFolder { color: %2; background-color: %4; border: none; border-radius: 4px;"
+        " padding: 4px 12px; }"
         "#libraryChoose { color: %2; border: none; border-radius: 4px; padding: 1px 6px; }"
         "#libraryChoose:hover { background-color: %4; }"
         "QTreeView#libraryTree { background-color: %1; color: %2; border: none;"
@@ -145,16 +161,47 @@ void LibrarySidebar::applyTheme(const ThemeColors &c)
                            c.accentSoft.name(), c.accentFg.name()));
 }
 
+QFileDialog *LibrarySidebar::folderDialog() const
+{
+    return m_folderDialog.data();
+}
+
+QFileDialog *LibrarySidebar::createFolderDialog()
+{
+    // window(): the main window, not this child widget, is the dialog's parent.
+    auto *dlg = new QFileDialog(window(), QStringLiteral("Choose Library Folder"),
+                                m_rootPath.isEmpty() ? QDir::homePath() : m_rootPath);
+    dlg->setObjectName(QStringLiteral("libraryFolderDialog"));
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+    dlg->setFileMode(QFileDialog::Directory);
+    dlg->setOption(QFileDialog::ShowDirsOnly, true);
+    dlg->setOption(QFileDialog::DontUseNativeDialog, true);
+    dlg->setWindowModality(Qt::WindowModal);
+    return dlg;
+}
+
 void LibrarySidebar::chooseRootFolder()
 {
-    const QString start = m_rootPath.isEmpty() ? QDir::homePath() : m_rootPath;
-    const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("Choose Library Folder"),
-                                                          start);
-    if (dir.isEmpty()) {
+    if (m_folderDialog) {
+        m_folderDialog->show();
+        m_folderDialog->raise();
+        m_folderDialog->activateWindow();
         return;
     }
-    setRootPath(dir);
-    emit rootPathChosen(m_rootPath);
+    QFileDialog *dlg = createFolderDialog();
+    m_folderDialog = dlg;
+    connect(dlg, &QFileDialog::fileSelected, this, [this](const QString &dir) {
+        if (dir.isEmpty()) {
+            return;
+        }
+        setRootPath(dir);
+        emit rootPathChosen(m_rootPath);
+    });
+    // open() rather than exec(): the event loop keeps running, and the dialog
+    // is shown, raised and activated so it is never left behind the window.
+    dlg->open();
+    dlg->raise();
+    dlg->activateWindow();
 }
 
 QString LibrarySidebar::rootPathKey()
