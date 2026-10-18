@@ -17,6 +17,11 @@ QByteArray data(const QString &name)
     QFile f(QStringLiteral(ZWRITER_TEST_DATA "/minisign/") + name);
     return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
 }
+
+// zterminal's release public key (key ID 32960BBA77B36F1F). Not zwriter's release key: it is here
+// only because tests/data/minisign/release-key/ holds the real signature zterminal's pipeline
+// published, which this key verifies.
+constexpr const char kZterminalReleasePublicKey[] = "RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9";
 } // namespace
 
 class TstMinisign : public QObject
@@ -119,15 +124,18 @@ private slots:
         QString error;
         const auto parsed = MinisignPublicKey::parse(key, &error);
         QVERIFY2(parsed.has_value(), qPrintable(error));
-        QCOMPARE(parsed->keyIdHex(), QStringLiteral("32960BBA77B36F1F"));
+        QCOMPARE(parsed->keyIdHex(), QStringLiteral("DBC46B23C3AF0EF3"));
+        // zwriter's own key, not zterminal's.
+        QCOMPARE(key, QStringLiteral("RWTzDq/DI2vE2xMeF01QWTxP2lwwlxGL9M1UxQE4EFV5kVmTF84wwyi2"));
+        QVERIFY(parsed->keyIdHex() != QStringLiteral("32960BBA77B36F1F"));
     }
 
-    void realReleaseSignatureVerifies()
+    void realPublishedSignatureVerifies()
     {
-        // zterminal's published v1.6.0 SHA256SUMS, signed by the release key zwriter embeds:
-        // fails if the compiled key is wrong or mistyped.
-        setUpdateSigningPublicKeyForTests(QString());
-        const auto key = MinisignPublicKey::parse(updateSigningPublicKey());
+        // zterminal's published v1.6.0 SHA256SUMS: a real signature made by real minisign with a
+        // real release key, checked against that key's public half (a constant above, not the key
+        // compiled into zwriter). Proves the verifier reads real-world minisign output end to end.
+        const auto key = MinisignPublicKey::parse(QString::fromLatin1(kZterminalReleasePublicKey));
         QVERIFY(key);
         const QByteArray sums = data(QStringLiteral("release-key/SHA256SUMS"));
         const QByteArray sig = data(QStringLiteral("release-key/SHA256SUMS.minisig"));
@@ -138,6 +146,11 @@ private slots:
         QByteArray evil = sums;
         evil[0] = evil[0] == 'a' ? 'b' : 'a';
         QVERIFY(!verifyMinisign(evil, sig, *key).ok);
+        // ... and zwriter's own release key does not accept it.
+        setUpdateSigningPublicKeyForTests(QString());
+        const auto own = MinisignPublicKey::parse(updateSigningPublicKey());
+        QVERIFY(own);
+        QVERIFY(!verifyMinisign(sums, sig, *own).ok);
     }
 
     void badPublicKeys()

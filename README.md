@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.3.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.3.1** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -57,7 +57,7 @@ When a newer release exists, a dialog shows its notes with **Install / Later / S
 
 Nothing is installed unless the release's `SHA256SUMS` carries a valid
 [minisign](https://jedisct1.github.io/minisign/) signature (`SHA256SUMS.minisig`) made with the
-release key built into the app (`src/UpdateSigningKey.cpp`, key ID `32960BBA77B36F1F`), and the
+release key built into the app (`src/UpdateSigningKey.cpp`, key ID `DBC46B23C3AF0EF3`, zwriter's own), and the
 package matches the signed checksum. A release without the signature is refused with a message,
 never installed.
 
@@ -72,7 +72,7 @@ never installed.
 - **macOS:** the same checks for `zwriter-<ver>-Darwin.dmg`, then opens the disk image for a
   drag-to-Applications install (no automated replace; quit and reopen zwriter afterwards).
 - Releases are signed by `.github/workflows/release.yml`; see [docs/RELEASING.md](docs/RELEASING.md).
-  1.2.1 and earlier were not signed: install the first signed release (1.3.0 or later) by hand once;
+  1.2.1 and earlier were not signed: install the first signed release (1.3.1 or later) by hand once;
   updates after that are verified in-app.
 
 ### Implemented now
@@ -207,7 +207,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.3.0 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.3.1 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:

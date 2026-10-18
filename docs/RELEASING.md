@@ -19,22 +19,25 @@ The in-app updater (Help → Check for Updates) installs only releases whose `SH
 verifies against the minisign public key compiled into the app, so a compromised GitHub
 release alone cannot push malware to users.
 
-zwriter uses the **same release key as zterminal** (key ID `32960BBA77B36F1F`; its public key is
-in `src/UpdateSigningKey.cpp`). The secret key stays on Stephen's own machine and in zterminal's
-repository secrets; it was never handled in this repository's development. To let this
-repository's release workflow sign with it, once:
+zwriter has its **own release key**: key ID `DBC46B23C3AF0EF3` (public key below), generated
+with `minisign -G` in October 2026. Its public half is in `src/UpdateSigningKey.cpp`. The secret
+key lives only on the maintainer's machine (`~/.minisign/minisign.key`) and, with its password, in
+the two repository secrets `MINISIGN_SECRET_KEY` and `MINISIGN_PASSWORD` that `release.yml`
+uses; it is never committed or pasted into a chat. To set or replace the secrets (the owner only):
 
 ```sh
-gh secret set MINISIGN_SECRET_KEY -R sbj-ee/zwriter < zterminal-release.key
+gh secret set MINISIGN_SECRET_KEY -R sbj-ee/zwriter < ~/.minisign/minisign.key
 gh secret set MINISIGN_PASSWORD   -R sbj-ee/zwriter    # paste the password when asked
 ```
 
-To use a separate key for zwriter instead, generate one on your own machine (not in CI, not
-on a shared box), `minisign -G -p zwriter-release.pub -s zwriter-release.key`, set the two
-secrets from that key, paste the second line of the `.pub` file (it starts with `RW`) into
-`kUpdateSigningPublicKey` in `src/UpdateSigningKey.cpp`, update the key ID expected by
-`tests/minisign_test.cpp`, replace `tests/data/minisign/release-key/` with a `SHA256SUMS` and
-`.minisig` signed by the new key, and release.
+To change the key: generate one on your own machine (not in CI, not on a shared box),
+`minisign -G -p zwriter-release.pub -s zwriter-release.key`, set the two secrets from that key,
+paste the second line of the `.pub` file (it starts with `RW`) into `kUpdateSigningPublicKey` in
+`src/UpdateSigningKey.cpp`, update the key ID in this file, the README and
+`tests/minisign_test.cpp` (`compiledReleaseKeyIsValid`), and release.
+`tests/data/minisign/release-key/` is a real signature by a *different* key (zterminal's, whose
+public key is a constant in the test); it only proves the verifier reads real minisign output
+and does not need to change.
 
 Keep the secret key and its password in a password manager plus an offline backup. If it is
 lost, installed copies cannot verify later releases (install the next one by hand); if it
@@ -44,7 +47,7 @@ users to install that release by hand.
 ## Checking a release by hand
 
 ```sh
-minisign -Vm SHA256SUMS -P RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9
+minisign -Vm SHA256SUMS -P RWTzDq/DI2vE2xMeF01QWTxP2lwwlxGL9M1UxQE4EFV5kVmTF84wwyi2
 sha256sum -c --ignore-missing SHA256SUMS          # Linux
 shasum -a 256 -c --ignore-missing SHA256SUMS      # macOS
 ```
@@ -54,8 +57,8 @@ package matches it.
 
 ## Transition
 
-Releases up to 1.2.1 have no `SHA256SUMS` or signature and the app before 1.3.0 cannot
-install updates itself. Install the first signed release (1.3.0 or later) by hand, verifying it
+Releases up to 1.2.1 have no `SHA256SUMS` or signature and the app before 1.3.1 cannot
+install updates itself. Install the first signed release (1.3.1 or later) by hand, verifying it
 with `minisign -Vm` as above; updates after that are checked in the app. A release that
 lacks `SHA256SUMS.minisig` is never installed by the app: it says so and points at the
 release page.
