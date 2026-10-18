@@ -3,6 +3,8 @@
 // Generated from CMake project(zwriter VERSION ...) — do not edit by hand.
 // Bump version only in the top-level CMakeLists.txt `project()` call.
 
+#include <string>
+
 namespace zwriter {
 
 inline constexpr int kVersionMajor = @PROJECT_VERSION_MAJOR@;
@@ -11,5 +13,21 @@ inline constexpr int kVersionPatch = @PROJECT_VERSION_PATCH@;
 
 // Full "MAJOR.MINOR.PATCH" string, same as PROJECT_VERSION / CPack.
 inline constexpr const char kVersionString[] = "@PROJECT_VERSION@";
+
+// Short git commit of the build ("unknown" outside a git checkout); set by
+// CMake (ZWRITER_GIT_COMMIT).
+inline constexpr const char kGitCommit[] = "@ZWRITER_GIT_COMMIT@";
+
+// "1.2.1 (abc1234)" -- the commit is left out when it is unknown.
+inline std::string versionLabel()
+{
+    std::string out = kVersionString;
+    if (std::string(kGitCommit) != "unknown" && kGitCommit[0] != '\0') {
+        out += " (";
+        out += kGitCommit;
+        out += ")";
+    }
+    return out;
+}
 
 } // namespace zwriter

@@ -235,7 +235,14 @@ MainWindow::MainWindow(QWidget *parent)
         m_library->setRootPath(lib.rootPath);
         m_library->setVisible(lib.visible);
     }
-    connect(m_library, &LibrarySidebar::rootPathChosen, this, [this]() { saveLibrarySettings(); });
+    connect(m_library, &LibrarySidebar::rootPathChosen, this, [this]() {
+        if (!m_library->isVisibleTo(this)) {
+            m_library->setVisible(true);
+        }
+        m_library->setCurrentFile(m_currentPath);
+        saveLibrarySettings();
+        syncViewActions();
+    });
     connect(m_library, &LibrarySidebar::fileActivated, this, [this](const QString &path) {
         if (m_currentPath.isEmpty() || QFileInfo(path) != QFileInfo(m_currentPath)) {
             openExternalFile(path); // unsaved-changes prompt, then open
@@ -310,7 +317,15 @@ MainWindow::MainWindow(QWidget *parent)
         updatePageLabel();
     });
     connect(m_editor, &QTextEdit::textChanged, this, &MainWindow::scheduleStatusUpdate);
-    connect(m_editor, &QTextEdit::textChanged, this, &MainWindow::markDirty);
+    // "Unsaved changes" follows the document's modified flag, NOT textChanged:
+    // QSyntaxHighlighter::rehighlight() (spell check on/off, a word added to
+    // the dictionary, colours) emits textChanged without touching the text, and
+    // that used to make an untouched document ask "Save changes?" on close.
+    connect(m_editor->document(), &QTextDocument::modificationChanged, this, [this](bool modified) {
+        if (modified && !(m_highlighter && m_highlighter->isRehighlighting())) {
+            markDirty();
+        }
+    });
     // Key sounds fire from the editor keyPress eventFilter (typing + Return),
     // not textChanged — avoids clicks on paste/programmatic edits/nav side-effects.
     connect(m_editor, &QTextEdit::cursorPositionChanged, this, &MainWindow::onCursorMoved);
@@ -1274,9 +1289,8 @@ void MainWindow::toggleLibrary()
 {
     const bool show = !m_library->isVisibleTo(this);
     m_library->setVisible(show);
-    if (show && m_library->rootPath().isEmpty()) {
-        m_library->chooseRootFolder(); // cancelled: the pane says how to pick one
-    }
+    // No folder yet: the pane shows a hint and a "Choose Folder…" button
+    // instead of popping a dialog the user did not ask for.
     if (show) {
         m_library->setCurrentFile(m_currentPath);
     }
@@ -1286,10 +1300,9 @@ void MainWindow::toggleLibrary()
 
 void MainWindow::chooseLibraryFolder()
 {
-    m_library->chooseRootFolder(); // saves through rootPathChosen
-    if (!m_library->isVisibleTo(this) && !m_library->rootPath().isEmpty()) {
-        toggleLibrary();
-    }
+    // Non-blocking; once a folder is picked rootPathChosen saves it and shows
+    // the sidebar.
+    m_library->chooseRootFolder();
 }
 
 void MainWindow::saveLibrarySettings() const
@@ -1665,9 +1678,12 @@ void MainWindow::updateWindowTitle()
     } else {
         name = QStringLiteral("untitled");
     }
-    setWindowTitle(QStringLiteral("%1%2 — zwriter")
+    // "notes.odt — zwriter 1.2.1 (abc1234)": the version and commit tell
+    // which build is running.
+    setWindowTitle(QStringLiteral("%1%2 — zwriter %3")
                        .arg(m_dirty ? QStringLiteral("*") : QString())
-                       .arg(name));
+                       .arg(name)
+                       .arg(QString::fromStdString(zwriter::versionLabel())));
 }
 
 void MainWindow::setCurrentFile(const QString &path, DocumentIo::Format format)
@@ -1675,6 +1691,9 @@ void MainWindow::setCurrentFile(const QString &path, DocumentIo::Format format)
     m_currentPath = path;
     m_currentFormat = format == DocumentIo::Format::Unknown ? DocumentIo::Format::Odt : format;
     m_dirty = false;
+    // Opened, created or just saved: the document is the saved state. (Save did
+    // not clear it, so the next edit never re-fired modificationChanged.)
+    m_editor->document()->setModified(false);
     updateWindowTitle();
     if (!path.isEmpty()) {
         addToRecentFiles(path);
@@ -3710,7 +3729,7 @@ void MainWindow::helpAbout()
             "<p>Markdown mode uses the iA Writer Duo and Mono fonts — © Information Architects "
             "Inc., based on IBM Plex — under the SIL Open Font License 1.1.</p>"
             "<p><a href=\"https://github.com/sbj-ee/zwriter\">github.com/sbj-ee/zwriter</a></p>"
-        ).arg(QString::fromUtf8(zwriter::kVersionString)));
+        ).arg(QString::fromStdString(zwriter::versionLabel())));
 }
 
 void MainWindow::helpCheckUpdates()

@@ -72,7 +72,7 @@ never installed.
 - **macOS:** the same checks for `zwriter-<ver>-Darwin.dmg`, then opens the disk image for a
   drag-to-Applications install (no automated replace; quit and reopen zwriter afterwards).
 - Releases are signed by `.github/workflows/release.yml`; see [docs/RELEASING.md](docs/RELEASING.md).
-  1.2.0 and earlier were not signed: install the first signed release (1.3.0 or later) by hand once;
+  1.2.1 and earlier were not signed: install the first signed release (1.3.0 or later) by hand once;
   updates after that are verified in-app.
 
 ### Implemented now
@@ -295,7 +295,7 @@ at build time.
 | `Ctrl+N` | New document |
 | `Ctrl+Alt+N` | New Markdown document |
 | `Ctrl+Alt+P` | Toggle Markdown preview (Markdown documents; default off) |
-| `Ctrl+Shift+L` | Toggle library sidebar (default off; asks for a folder the first time) |
+| `Ctrl+Shift+L` | Toggle library sidebar (default off; with no folder yet it shows a "Choose Folder…" button) |
 | `Ctrl+Shift+V` | Paste as plain text |
 | `Ctrl+Alt+G` | Toggle page guides |
 | `Ctrl+Enter` | Insert page break |

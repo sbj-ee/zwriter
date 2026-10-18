@@ -32,10 +32,16 @@ public:
     void setColors(const ThemeColors &colors);
     void refreshAll();
 
+    // True while a whole-document restyle runs; the modified flag Qt flips in
+    // that window is not an edit.
+    bool isRehighlighting() const { return m_rehighlighting; }
+
 protected:
     void highlightBlock(const QString &text) override;
 
 private:
+    void rehighlightKeepingModified();
+    bool m_rehighlighting = false;
     void highlightMarkdown(const QString &text, QList<quint16> *flags);
     void highlightSpelling(const QString &text, const QList<quint16> *flags);
 

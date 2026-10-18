@@ -20,7 +20,7 @@ In-app updates, the same flow zterminal has: download, verify, install, offer a 
 - A quiet check a few seconds after start, at most once a day. Help → Check for Updates at Startup
   turns it off (`updates/checkOnStartup`).
 - Releases are now built, signed and published by `.github/workflows/release.yml` when a `vX.Y.Z` tag
-  is pushed; `docs/RELEASING.md` has the one-time signing-key setup. Releases up to 1.2.0 were not
+  is pushed; `docs/RELEASING.md` has the one-time signing-key setup. Releases up to 1.2.1 were not
   signed, so install 1.3.0 by hand once; updates after that are verified in the app.
 - New dependency: libsodium (Ed25519 and BLAKE2b for the signature check). The `.deb` depends on
   `libsodium23`; the `.dmg` bundles libsodium.
@@ -28,6 +28,43 @@ In-app updates, the same flow zterminal has: download, verify, install, offer a 
   `update_test` (version compare, release JSON, checksum, daily limit and skip rules, the download and
   verify chain, and the whole check → install → restart flow against a mock GitHub on a local
   socket; no network, no apt).
+
+## [1.2.1] — 2026-10-18
+
+Fixes for the library sidebar and for a false "Save changes?" prompt, and the title bar now
+says which build is running.
+
+### Fixed
+- **View → Library no longer looks like a hang.** With no library folder set it used to pop a
+  GTK folder dialog straight away; under Wayland/GNOME that native dialog can open *behind* the
+  window, and because it is modal the app looked frozen with no way to reach it. Now the sidebar
+  opens first with a "Choose a library folder" hint and a **Choose Folder…** button. The chooser
+  (that button, the "…" button, or View → Choose Library Folder…) is a Qt folder dialog parented
+  to the main window, window-modal, raised and activated when it opens, and it no longer blocks
+  the event loop. Picking a folder shows the sidebar and remembers the folder.
+- **An untouched document no longer asks "Save changes?"** The prompt followed
+  `QTextEdit::textChanged`, which `QSyntaxHighlighter::rehighlight()` also fires, and Qt marks
+  the document modified while it re-styles. Anything that restyled the text (Spell Check on/off,
+  adding a word to the dictionary, Markdown colours) therefore made an unedited document look
+  edited. Unsaved changes now follow the document's modified flag, and highlighter restyling
+  puts the flag back. Save also now clears the flag (it used to stay set after saving).
+- The library sidebar was checked against a 220,000-file library with 16,000 folders and symlink
+  loops: it lists lazily, never stalls the UI and sits at 0 % CPU when idle. No scan problem
+  was found, so none was changed.
+
+### Changed
+- The title bar and About box show the version and commit: `notes.odt — zwriter 1.2.1 (abc1234)`.
+  The commit is baked in at configure time (`-DZWRITER_GIT_COMMIT=…`, the `ZWRITER_GIT_COMMIT`
+  environment variable, or `git rev-parse --short=7 HEAD`); builds outside a git checkout show
+  the version alone. `zwriter --version` prints it too. The .deb and .dmg pick it up from the
+  CMake build as before.
+
+### Tests
+- `library_test`: the empty-library hint and button, the chooser's parent/modality, pick/cancel
+  behaviour, a big library with symlink loops (no event-loop stall, idle CPU), the version label.
+- `mainwindow_test` (the real window, offscreen): every file type opens clean and closes without
+  a prompt, also after resizes, theme/view toggles and Library; a real edit still prompts; Save
+  clears the state; the title carries version and commit.
 
 ## [1.2.0] — 2026-10-01
 

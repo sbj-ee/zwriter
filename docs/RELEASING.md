@@ -54,7 +54,7 @@ package matches it.
 
 ## Transition
 
-Releases up to 1.2.0 have no `SHA256SUMS` or signature and the app before 1.3.0 cannot
+Releases up to 1.2.1 have no `SHA256SUMS` or signature and the app before 1.3.0 cannot
 install updates itself. Install the first signed release (1.3.0 or later) by hand, verifying it
 with `minisign -Vm` as above; updates after that are checked in the app. A release that
 lacks `SHA256SUMS.minisig` is never installed by the app: it says so and points at the
