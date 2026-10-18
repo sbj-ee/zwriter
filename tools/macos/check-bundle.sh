@@ -34,6 +34,11 @@ for need in Contents/Resources/zwriter.icns Contents/Resources/hunspell/en_US.af
             Contents/PlugIns/platforms/libqcocoa.dylib; do
   [[ -e "$app/$need" ]] || { echo "MISSING $need"; hits=$((hits + 1)); }
 done
+# libsodium must be bundled (it verifies the update signature).
+if ! find "$app/Contents/Frameworks" -maxdepth 1 -name 'libsodium*.dylib' | grep -q .; then
+  echo "MISSING Contents/Frameworks/libsodium*.dylib"
+  hits=$((hits + 1))
+fi
 if (( hits > 0 )); then
   echo "check-bundle: FAILED ($hits problem(s))" >&2
   exit 1

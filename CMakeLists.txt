@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.2.0 LANGUAGES CXX)
+project(zwriter VERSION 1.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,6 +34,11 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport Network)
 find_package(Qt6 COMPONENTS Multimedia QUIET)
 
+# libsodium: Ed25519 + BLAKE2b to verify the minisign signature on a release's
+# SHA256SUMS before the in-app updater installs anything (src/Minisign.cpp).
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.18)
+
 # Generated version header from project() VERSION — do not edit by hand.
 set(ZWRITER_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${ZWRITER_GENERATED_DIR}")
@@ -42,6 +47,28 @@ configure_file(
   "${ZWRITER_GENERATED_DIR}/version.hpp"
   @ONLY
 )
+
+# The in-app updater (check, download, verify, install, restart prompt), a
+# library so the tests link exactly what the app runs.
+add_library(zwriter_update STATIC
+  src/Minisign.cpp
+  src/Minisign.hpp
+  src/Update.cpp
+  src/Update.hpp
+  src/UpdateChecker.cpp
+  src/UpdateChecker.hpp
+  src/UpdateDialog.cpp
+  src/UpdateDialog.hpp
+  src/UpdateHost.hpp
+  src/UpdateManager.cpp
+  src/UpdateManager.hpp
+  src/UpdateSigningKey.cpp
+)
+target_include_directories(zwriter_update PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${ZWRITER_GENERATED_DIR}
+)
+target_link_libraries(zwriter_update PUBLIC Qt6::Widgets Qt6::Network PkgConfig::SODIUM)
 
 add_executable(zwriter
   src/main.cpp
@@ -57,8 +84,6 @@ add_executable(zwriter
   src/TypewriterSounds.hpp
   src/FindReplaceBar.cpp
   src/FindReplaceBar.hpp
-  src/UpdateChecker.cpp
-  src/UpdateChecker.hpp
   src/InsertTableDialog.cpp
   src/InsertTableDialog.hpp
   src/HeaderFooterDialog.cpp
@@ -90,7 +115,7 @@ add_executable(zwriter
   src/fonts.qrc
 )
 
-target_link_libraries(zwriter PRIVATE Qt6::Widgets Qt6::PrintSupport Qt6::Network)
+target_link_libraries(zwriter PRIVATE Qt6::Widgets Qt6::PrintSupport Qt6::Network zwriter_update)
 target_include_directories(zwriter PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${ZWRITER_GENERATED_DIR}
@@ -193,6 +218,21 @@ else()
   message(STATUS "zwriter: Hunspell not found — spell check stubs as no-op")
 endif()
 
+# Development-only environment overrides (ZWRITER_UPDATE_URL points the update
+# check at a local test server). On by default only for Debug builds; release
+# packages never read them.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(_zw_dev_overrides_default ON)
+else()
+  set(_zw_dev_overrides_default OFF)
+endif()
+option(ZWRITER_DEV_OVERRIDES "Honour development environment overrides such as ZWRITER_UPDATE_URL (debug builds only)"
+       ${_zw_dev_overrides_default})
+if(ZWRITER_DEV_OVERRIDES)
+  target_compile_definitions(zwriter_update PUBLIC ZWRITER_DEV_OVERRIDES)
+  message(STATUS "zwriter: ZWRITER_DEV_OVERRIDES=ON (environment overrides compiled in; not for release packages)")
+endif()
+
 # macOS: zwriter.app bundle (Info.plist, icon, bundled dictionary/sounds,
 # macdeployqt at install time).
 if(APPLE)
@@ -289,6 +329,23 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(panes_test PRIVATE Qt6::Widgets)
   add_test(NAME panes COMMAND panes_test)
   set_tests_properties(panes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
+
+  # Updater: version compare, release JSON, checksum, minisign (fixtures made
+  # with the real minisign tool and a throwaway key), and the whole flow
+  # (check -> dialog -> download -> verify -> install -> restart prompt)
+  # against a mock GitHub on a local socket. No network, no apt, no sudo.
+  find_package(Qt6 REQUIRED COMPONENTS Test)
+  foreach(_t minisign_test update_test)
+    add_executable(${_t} tests/${_t}.cpp)
+    target_link_libraries(${_t} PRIVATE zwriter_update Qt6::Test)
+    target_compile_definitions(${_t} PRIVATE
+      ZWRITER_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
+      ZWRITER_EXPECTED_VERSION="${PROJECT_VERSION}")
+    add_test(NAME ${_t} COMMAND ${_t})
+    set_tests_properties(${_t} PROPERTIES
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-${_t}"
+      TIMEOUT 120)
+  endforeach()
 endif()
 
 # Packaging (.deb / .dmg) — owns install() rules + CPack.

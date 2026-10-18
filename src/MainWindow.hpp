@@ -3,6 +3,8 @@
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
 
+#include "UpdateHost.hpp"
+
 #include <QMainWindow>
 #include <QString>
 #include <QPair>
@@ -31,7 +33,6 @@ class TypewriterSounds;
 class FindReplaceBar;
 class QTextTable;
 class QFileDialog;
-class UpdateChecker;
 namespace Alignment { class Actions; }
 class SpellChecker;
 class WritingHighlighter;
@@ -39,7 +40,7 @@ class PreviewPane;
 class LibrarySidebar;
 class QSplitter;
 
-class MainWindow : public QMainWindow
+class MainWindow : public QMainWindow, public zwriter::UpdateHost
 {
     Q_OBJECT
 
@@ -50,6 +51,11 @@ public:
     // event). Asks about unsaved changes first; unrecognised extensions open as
     // plain text and are saved back as plain text.
     void openExternalFile(const QString &path);
+
+    // zwriter::UpdateHost (the in-app updater's view of this window).
+    bool hasUnsavedChanges() const override { return m_dirty; }
+    QStringList restartArguments() const override;
+    bool closeForRestart() override { return close(); }
 
     // Docs/CI helper: write a few PNGs then quit the app.
     void captureDemoScreenshots(const QString &dir);
@@ -116,9 +122,6 @@ private slots:
     void tableRemoveColumn();
     void helpAbout();
     void helpCheckUpdates();
-    void onUpdateAvailable(const QString &tag, const QString &url);
-    void onUpToDate();
-    void onUpdateCheckFailed(const QString &reason);
     void printPreview(QPrinter *printer);
     void hideAwayIdle();
     void syncFormatActions();
@@ -283,10 +286,10 @@ private:
     QAction *m_alwaysShowChromeAction = nullptr;
     QAction *m_keySoundsAction = nullptr;
     TypewriterSounds *m_keySounds = nullptr;
-    UpdateChecker *m_updateChecker = nullptr;
     SpellChecker *m_spellChecker = nullptr;
     WritingHighlighter *m_highlighter = nullptr; // spell check + Markdown styling
     QAction *m_checkUpdatesAction = nullptr;
+    QAction *m_checkUpdatesAtStartupAction = nullptr;
     QAction *m_newMarkdownAction = nullptr;
     QAction *m_insertTableAction = nullptr;
     QAction *m_pageBreakAction = nullptr;
