@@ -2,14 +2,17 @@
 // Not secret. Release builds refuse to install an update unless
 // SHA256SUMS.minisig verifies against this key.
 //
-// Release key ID 32960BBA77B36F1F (minisign -G, October 2026). To rotate it, see
-// docs/RELEASING.md, "Signing key".
+// Release key ID DBC46B23C3AF0EF3 (minisign -G on the maintainer's machine,
+// October 2026): zwriter's own release key. The matching secret key lives only on
+// the maintainer's machine and in this repository's MINISIGN_SECRET_KEY /
+// MINISIGN_PASSWORD Actions secrets. To rotate it, see docs/RELEASING.md,
+// "Signing key".
 #include "Update.hpp"
 
 namespace zwriter {
 
 namespace {
-constexpr const char kUpdateSigningPublicKey[] = "RWQfb7N3uguWMhJ7jsE/Z0hZ7pDWHQ9OEeWSBTlN/R5bxQ8HWSMxp/l9";
+constexpr const char kUpdateSigningPublicKey[] = "RWTzDq/DI2vE2xMeF01QWTxP2lwwlxGL9M1UxQE4EFV5kVmTF84wwyi2";
 
 QString &testKey()
 {

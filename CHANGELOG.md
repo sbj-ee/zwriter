@@ -3,6 +3,16 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.3.1] — unreleased
+
+- **zwriter's own release key.** The updater now trusts minisign key `DBC46B23C3AF0EF3` (zwriter's
+  own, replacing the zterminal key `32960BBA77B36F1F` that 1.3.0 embedded), the key that
+  `release.yml` signs with. 1.3.0 was never tagged or released. The real-signature test (a
+  published zterminal `SHA256SUMS`) now pins zterminal's key as a constant in the test instead of
+  reading the embedded key, so it still proves real-minisign interoperability; the embedded
+  key's ID and bytes are pinned by their own test. Docs name the new key. No other behaviour
+  change.
+
 ## [1.3.0] — unreleased
 
 In-app updates, the same flow zterminal has: download, verify, install, offer a restart.
