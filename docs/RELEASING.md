@@ -10,6 +10,8 @@
    key in `src/UpdateSigningKey.cpp` at the tagged commit, and creates the GitHub Release.
    Without the signing secrets, or with no public key in the source, the publish job stops
    and nothing is released.
+   Do not also create the release by hand: the workflow does it, and a release without
+   `SHA256SUMS.minisig` can never be installed by the in-app updater.
 
 ## Signing key
 
@@ -30,7 +32,9 @@ gh secret set MINISIGN_PASSWORD   -R sbj-ee/zwriter    # paste the password when
 To use a separate key for zwriter instead, generate one on your own machine (not in CI, not
 on a shared box), `minisign -G -p zwriter-release.pub -s zwriter-release.key`, set the two
 secrets from that key, paste the second line of the `.pub` file (it starts with `RW`) into
-`kUpdateSigningPublicKey` in `src/UpdateSigningKey.cpp`, and release.
+`kUpdateSigningPublicKey` in `src/UpdateSigningKey.cpp`, update the key ID expected by
+`tests/minisign_test.cpp`, replace `tests/data/minisign/release-key/` with a `SHA256SUMS` and
+`.minisig` signed by the new key, and release.
 
 Keep the secret key and its password in a password manager plus an offline backup. If it is
 lost, installed copies cannot verify later releases (install the next one by hand); if it
