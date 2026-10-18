@@ -3,6 +3,32 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.3.0] — unreleased
+
+In-app updates, the same flow zterminal has: download, verify, install, offer a restart.
+
+- Help → Check for Updates now downloads and installs the new release instead of only opening its
+  page. It shows the release notes with Install / Later / Skip This Version. Linux: the `.deb` is
+  installed with `pkexec apt install` (a system password prompt, no terminal). macOS: the verified
+  `.dmg` is opened for a drag-to-Applications install.
+- Nothing is installed unless the release's `SHA256SUMS` has a valid minisign signature
+  (`SHA256SUMS.minisig`) from the release key built into the app and the package matches it; a
+  release without the signature is refused with a message. The package is copied to a private folder
+  and its SHA-256 re-checked right before it is handed to apt.
+- A Restart prompt follows an install (it warns about unsaved changes, and the usual "Save changes?"
+  question still comes first); the restart reopens the same document.
+- A quiet check a few seconds after start, at most once a day. Help → Check for Updates at Startup
+  turns it off (`updates/checkOnStartup`).
+- Releases are now built, signed and published by `.github/workflows/release.yml` when a `vX.Y.Z` tag
+  is pushed; `docs/RELEASING.md` has the one-time signing-key setup. Releases up to 1.2.1 were not
+  signed, so install 1.3.0 by hand once; updates after that are verified in the app.
+- New dependency: libsodium (Ed25519 and BLAKE2b for the signature check). The `.deb` depends on
+  `libsodium23`; the `.dmg` bundles libsodium.
+- Tests: `minisign_test` (fixtures from the real `minisign` tool, tampering and malformed files) and
+  `update_test` (version compare, release JSON, checksum, daily limit and skip rules, the download and
+  verify chain, and the whole check → install → restart flow against a mock GitHub on a local
+  socket; no network, no apt).
+
 ## [1.2.1] — 2026-10-18
 
 Fixes for the library sidebar and for a false "Save changes?" prompt, and the title bar now

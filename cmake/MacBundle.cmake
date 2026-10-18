@@ -3,7 +3,7 @@
 #   - Info.plist from cmake/Info.plist.in (versions from PROJECT_VERSION)
 #   - zwriter.icns generated from assets/icons/*.png with iconutil
 #   - Contents/Resources: hunspell/en_US.{aff,dic}, assets/sounds, assets/icons
-# Qt frameworks/plugins and libhunspell are copied in at install time by
+# Qt frameworks/plugins, libhunspell and libsodium are copied in at install time by
 # macdeployqt (cmake/MacDeploy.cmake.in, run by `cpack -G DragNDrop`).
 
 set(ZWRITER_BUNDLE_ID "ee.sbj.zwriter")
@@ -73,6 +73,11 @@ if(HUNSPELL_LIBRARY)
   if(IS_ABSOLUTE "${_hl}")
     get_filename_component(ZWRITER_HUNSPELL_LIBDIR "${_hl}" DIRECTORY)
   endif()
+endif()
+# libsodium (update-signature check): macdeployqt copies it into Frameworks too.
+set(ZWRITER_SODIUM_LIBDIR "")
+if(SODIUM_LIBRARY_DIRS)
+  list(GET SODIUM_LIBRARY_DIRS 0 ZWRITER_SODIUM_LIBDIR)
 endif()
 set(ZWRITER_CHECK_BUNDLE "${CMAKE_CURRENT_SOURCE_DIR}/tools/macos/check-bundle.sh")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MacDeploy.cmake.in"

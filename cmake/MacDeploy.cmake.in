@@ -17,6 +17,9 @@ set(_libpath)
 if(NOT "@ZWRITER_HUNSPELL_LIBDIR@" STREQUAL "")
   set(_libpath "-libpath=@ZWRITER_HUNSPELL_LIBDIR@")
 endif()
+if(NOT "@ZWRITER_SODIUM_LIBDIR@" STREQUAL "")
+  list(APPEND _libpath "-libpath=@ZWRITER_SODIUM_LIBDIR@")
+endif()
 _run("@ZWRITER_MACDEPLOYQT@" "${_app}" -always-overwrite -verbose=1 ${_libpath})
 
 # Remove any LC_RPATH that points outside the bundle (Homebrew / build tree),

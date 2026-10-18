@@ -14,7 +14,7 @@
 #include "PrintLayout.hpp"
 #include "PropertiesDialog.hpp"
 #include "TypewriterSounds.hpp"
-#include "UpdateChecker.hpp"
+#include "UpdateManager.hpp"
 #include "version.hpp"
 
 #include <QApplication>
@@ -268,7 +268,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_keySounds = new TypewriterSounds(this);
     m_keySounds->setEnabled(
         QSettings().value(QStringLiteral("view/keySounds"), false).toBool());
-    m_updateChecker = new UpdateChecker(this);
     m_spellChecker = new SpellChecker(this);
     m_spellChecker->setEnabled(m_spellCheck);
     m_highlighter = new WritingHighlighter(m_editor->document());
@@ -279,12 +278,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_editor->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_editor, &QWidget::customContextMenuRequested,
             this, &MainWindow::showEditorContextMenu);
-    connect(m_updateChecker, &UpdateChecker::updateAvailable, this,
-            &MainWindow::onUpdateAvailable);
-    connect(m_updateChecker, &UpdateChecker::upToDate, this,
-            &MainWindow::onUpToDate);
-    connect(m_updateChecker, &UpdateChecker::checkFailed, this,
-            &MainWindow::onUpdateCheckFailed);
 
     m_pageLabel = new QLabel(this);
     statusBar()->addPermanentWidget(m_pageLabel);
@@ -1108,6 +1101,12 @@ void MainWindow::buildHelpMenu()
 
     m_checkUpdatesAction = m_helpMenu->addAction(QStringLiteral("Check for &Updates…"));
     connect(m_checkUpdatesAction, &QAction::triggered, this, &MainWindow::helpCheckUpdates);
+
+    m_checkUpdatesAtStartupAction = m_helpMenu->addAction(QStringLiteral("Check for Updates at &Startup"));
+    m_checkUpdatesAtStartupAction->setCheckable(true);
+    m_checkUpdatesAtStartupAction->setChecked(zwriter::UpdateManager::checkAtStartupEnabled());
+    connect(m_checkUpdatesAtStartupAction, &QAction::toggled, this,
+            [](bool on) { zwriter::UpdateManager::setCheckAtStartupEnabled(on); });
 }
 
 void MainWindow::rebuildRecentMenu()
@@ -3735,59 +3734,17 @@ void MainWindow::helpAbout()
 
 void MainWindow::helpCheckUpdates()
 {
-    if (!m_updateChecker || m_updateChecker->isChecking()) {
-        return;
-    }
-    if (m_checkUpdatesAction) {
-        m_checkUpdatesAction->setEnabled(false);
-        m_checkUpdatesAction->setText(QStringLiteral("Checking…"));
-    }
-    statusBar()->showMessage(QStringLiteral("Checking for updates…"), 3000);
+    // Check, offer, download, verify, install and restart prompt live in
+    // UpdateManager (the same flow as zterminal's).
     setChromeVisible(true);
-    m_updateChecker->checkForUpdates(QString::fromUtf8(zwriter::kVersionString));
+    zwriter::UpdateManager::instance().setHost(this);
+    zwriter::UpdateManager::instance().checkNow(this);
 }
 
-void MainWindow::onUpdateAvailable(const QString &tag, const QString &url)
+QStringList MainWindow::restartArguments() const
 {
-    if (m_checkUpdatesAction) {
-        m_checkUpdatesAction->setEnabled(true);
-        m_checkUpdatesAction->setText(QStringLiteral("Check for &Updates…"));
-    }
-    setChromeVisible(true);
-    statusBar()->showMessage(QStringLiteral("Update available: %1").arg(tag), 8000);
-    const auto ret = QMessageBox::information(
-        this,
-        QStringLiteral("Update available"),
-        QStringLiteral("Update available: %1\n\nOpen the release page in your browser?").arg(tag),
-        QMessageBox::Open | QMessageBox::Cancel,
-        QMessageBox::Open);
-    if (ret == QMessageBox::Open && !url.isEmpty()) {
-        QDesktopServices::openUrl(QUrl(url));
-    }
+    return m_currentPath.isEmpty() ? QStringList() : QStringList{QFileInfo(m_currentPath).absoluteFilePath()};
 }
-
-void MainWindow::onUpToDate()
-{
-    if (m_checkUpdatesAction) {
-        m_checkUpdatesAction->setEnabled(true);
-        m_checkUpdatesAction->setText(QStringLiteral("Check for &Updates…"));
-    }
-    statusBar()->showMessage(QStringLiteral("zwriter is up to date."), 4000);
-}
-
-void MainWindow::onUpdateCheckFailed(const QString &reason)
-{
-    if (m_checkUpdatesAction) {
-        m_checkUpdatesAction->setEnabled(true);
-        m_checkUpdatesAction->setText(QStringLiteral("Check for &Updates…"));
-    }
-    // Checks only run from Help > Check for Updates, so say why it failed.
-    setChromeVisible(true);
-    statusBar()->showMessage(QStringLiteral("Update check failed: %1").arg(reason), 10000);
-    QMessageBox::warning(this, QStringLiteral("Check for Updates"),
-                         QStringLiteral("Couldn't check for updates.\n\n%1").arg(reason));
-}
-
 
 void MainWindow::captureDemoScreenshots(const QString &dir)
 {

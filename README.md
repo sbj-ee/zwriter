@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.2.1** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.3.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -47,6 +47,33 @@ if you want it:
 ```bash
 ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 ```
+
+### Updates
+
+Help → **Check for Updates** asks GitHub for the latest release; a quiet check also runs a few
+seconds after start, at most once a day (Help → **Check for Updates at Startup** turns it off).
+When a newer release exists, a dialog shows its notes with **Install / Later / Skip This Version**
+(a skipped version is not offered again by the automatic check; a manual check still offers it).
+
+Nothing is installed unless the release's `SHA256SUMS` carries a valid
+[minisign](https://jedisct1.github.io/minisign/) signature (`SHA256SUMS.minisig`) made with the
+release key built into the app (`src/UpdateSigningKey.cpp`, key ID `32960BBA77B36F1F`), and the
+package matches the signed checksum. A release without the signature is refused with a message,
+never installed.
+
+- **Linux:** downloads `SHA256SUMS`, the signature (checked before anything else is fetched), then
+  `zwriter-<ver>-Linux-amd64.deb`; copies the verified package to a private folder, re-checks its
+  SHA-256 and runs `/usr/bin/pkexec /usr/bin/apt install -y` on it (the system asks for your
+  password). Only a `.deb` install in `/usr/bin/zwriter` is replaced this way; a build-tree or
+  `/usr/local` copy gets the verified package path and the `sudo apt install` command instead.
+  Afterwards a **Restart** prompt appears; it warns when the open document has unsaved changes,
+  and zwriter's usual "Save changes?" question still comes first (Cancel keeps zwriter running).
+  The restart reopens the same document.
+- **macOS:** the same checks for `zwriter-<ver>-Darwin.dmg`, then opens the disk image for a
+  drag-to-Applications install (no automated replace; quit and reopen zwriter afterwards).
+- Releases are signed by `.github/workflows/release.yml`; see [docs/RELEASING.md](docs/RELEASING.md).
+  1.2.1 and earlier were not signed: install the first signed release (1.3.0 or later) by hand once;
+  updates after that are verified in-app.
 
 ### Implemented now
 
@@ -81,7 +108,7 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 - **Paragraph alignment** — Format → Align or the toolbar: Align Left (`Ctrl+L`), Center (`Ctrl+E`), Align Right (`Ctrl+R`), Justify (`Ctrl+J`); `Cmd` on macOS. Applies to the paragraph at the cursor or every paragraph a selection touches, as one undo step; choosing the alignment a paragraph already has changes nothing (no undo step, no unsaved-changes mark). Enter in an empty centered line keeps the centering. Saved to ODT (`fo:text-align`) and RTF (`\ql \qc \qr \qj`), and honoured in Full Page view, print, Print Preview and PDF; the last line of a justified paragraph stays ragged, as in other word processors
 - **Manual page break** (Format → Insert Page Break, `Ctrl+Enter`): splits the paragraph and starts a new page; Backspace at the start of the new page removes it. Saved to ODT (`fo:break-before="page"`) and honoured in Full Page view, print and PDF
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
-- **Help** menu: About zwriter (shows PROJECT_VERSION) + Check for Updates (GitHub releases/latest)
+- **Help** menu: About zwriter (shows PROJECT_VERSION), Check for Updates and Check for Updates at Startup — see [Updates](#updates)
 - CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg` with a self-contained, ad-hoc signed `zwriter.app`; CI fails if anything in it still references `/opt/homebrew` or `/usr/local`)
 
 ### Still roadmap / known limits
@@ -116,7 +143,7 @@ ln -s /Applications/zwriter.app/Contents/MacOS/zwriter /usr/local/bin/zw
 - **Find and replace** (Ctrl+F / Ctrl+H)
 - **Recent files** menu (QSettings)
 - **Smart quotes / dashes** (toggle, default **off**)
-- **Help → About** + **Check for Updates** (GitHub latest release)
+- **Help → About** + **Check for Updates** (downloads, verifies and installs; see [Updates](#updates))
 - **Tables** (insert, edit cells, add/remove row/column; ODT round-trip)
 - **Header & Footer** + opt-in page numbers (`{page}` / `{pages}`; off by default)
 - **Spell check** (Hunspell en_US; toggle; context suggestions)
@@ -180,7 +207,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.2.1 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.3.0 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:
@@ -196,7 +223,7 @@ Intel Mac.
 ```bash
 sudo apt-get update
 sudo apt-get install -y qt6-base-dev cmake ninja-build g++ unzip zip \
-  libhunspell-dev hunspell-en-us
+  libhunspell-dev hunspell-en-us libsodium-dev pkg-config
 # optional, for live key sounds:
 # sudo apt-get install -y qt6-multimedia-dev
 
@@ -204,7 +231,9 @@ cmake -B build -G Ninja
 cmake --build build
 ./build/zwriter
 
-# ODT round-trip test (needs unzip + zip; add -DZWRITER_BUILD_TESTS=OFF to skip):
+# Tests: ODT round-trip (needs unzip + zip), regressions, Markdown, panes and the updater
+# (minisign + the whole update flow against a local mock GitHub; no network). Add
+# -DZWRITER_BUILD_TESTS=OFF to skip:
 ctest --test-dir build --output-on-failure
 
 # package .deb (optional):
@@ -229,13 +258,13 @@ The short `zw` command comes from the `.deb`; running out of the build tree ther
 ### macOS (Apple Silicon)
 
 ```bash
-brew install qt cmake ninja hunspell
+brew install qt cmake ninja hunspell libsodium pkg-config
 cmake -B build -G Ninja -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 cmake --build build
 open build/zwriter.app
 
 # package .dmg (optional): installs zwriter.app into CPack's staging dir, runs
-# macdeployqt (Qt frameworks + plugins, libhunspell), removes rpaths that point
+# macdeployqt (Qt frameworks + plugins, libhunspell, libsodium), removes rpaths that point
 # outside the bundle, ad-hoc signs, and runs tools/macos/check-bundle.sh
 cd build && cpack -G DragNDrop
 ```

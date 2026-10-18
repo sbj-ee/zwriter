@@ -1,4 +1,5 @@
 #include "MainWindow.hpp"
+#include "UpdateManager.hpp"
 #include "version.hpp"
 
 #include <QApplication>
@@ -121,6 +122,13 @@ int main(int argc, char *argv[])
     }
     window.show();
     app.installEventFilter(new FileOpenFilter(&window));
+
+    if (captureDir.isEmpty()) {
+        // A quiet check a few seconds after start (at most once a day; Help menu
+        // turns it off).
+        zwriter::UpdateManager::instance().setHost(&window);
+        zwriter::UpdateManager::instance().scheduleStartupCheck(&window);
+    }
 
     if (captureDir.isEmpty() && !files.isEmpty()) {
         // First file opens in this window (after the event loop starts, so any
