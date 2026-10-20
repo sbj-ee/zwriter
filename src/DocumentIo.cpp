@@ -5,6 +5,9 @@
 #include <QStringView>
 
 #include <QDir>
+#include <cctype>
+#include <QImage>
+#include <QBuffer>
 #include <QFile>
 #include <QHash>
 #include <QIODevice>
@@ -86,7 +89,7 @@ constexpr char16_t kRtfBlankParagraphMark = 0xE000; // same as kBlankParagraphMa
 // large font sizes (headings), tables, page breaks and Unicode text. Font,
 // colour and style tables, document info and every other destination are
 // skipped. Body font and size follow zwriter's defaults.
-QString rtfToHtml(const QByteArray &rtf)
+QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = nullptr)
 {
     struct State {
         bool skip = false;
@@ -96,7 +99,16 @@ QString rtfToHtml(const QByteArray &rtf)
         int halfPoints = 24;
         int uc = 1; // chars to skip after \uN
         char align = 'l'; // paragraph alignment: \ql \qc \qr \qj (reset by \pard)
+        bool pict = false; // inside a \pict group: text is hex picture data
     };
+    // The picture being read (\pict ... hex ... }).
+    struct Pict {
+        QByteArray type; // "png" / "jpeg" / other (ignored)
+        int picw = 0, pich = 0, wgoal = 0, hgoal = 0, scalex = 100, scaley = 100;
+        QByteArray hex;
+        int level = 0; // stack depth of the \pict group
+    } pict;
+    int pictureCount = 0;
     struct Inline {
         bool bold = false;
         bool italic = false;
@@ -109,7 +121,7 @@ QString rtfToHtml(const QByteArray &rtf)
         }
     };
     static const QSet<QByteArray> skipDestinations = {
-        "fonttbl", "colortbl", "stylesheet", "info", "pict", "header", "headerl",
+        "fonttbl", "colortbl", "stylesheet", "info", "nonshppict", "header", "headerl",
         "headerr", "headerf", "footer", "footerl", "footerr", "footerf", "footnote",
         "listtable", "listoverridetable", "rsidtbl", "generator", "xmlnstbl",
         "themedata", "colorschememapping", "datastore", "latentstyles", "pgdsctbl",
@@ -253,6 +265,24 @@ QString rtfToHtml(const QByteArray &rtf)
             continue;
         }
         if (c == '}') {
+            if (pict.level > 0 && int(stack.size()) == pict.level) {
+                const QByteArray data = QByteArray::fromHex(pict.hex);
+                const QImage img = QImage::fromData(data);
+                if ((pict.type == "png" || pict.type == "jpeg") && !img.isNull() && pictures
+                    && !stack.at(stack.size() - 2).skip) {
+                    const QString name = QStringLiteral("rtf-picture-%1.%2")
+                                             .arg(++pictureCount)
+                                             .arg(QString::fromLatin1(pict.type));
+                    pictures->insert(name, data);
+                    const qreal w = pict.wgoal > 0 ? pict.wgoal / 15.0 * pict.scalex / 100.0 : img.width();
+                    const qreal h = pict.hgoal > 0 ? pict.hgoal / 15.0 * pict.scaley / 100.0 : img.height();
+                    closeSpan();
+                    para += QStringLiteral("<img src=\"%1\" width=\"%2\" height=\"%3\" />")
+                                .arg(name).arg(qRound(w)).arg(qRound(h));
+                    paraHasText = true;
+                }
+                pict = Pict{};
+            }
             if (stack.size() > 1) {
                 stack.removeLast();
             }
@@ -263,6 +293,16 @@ QString rtfToHtml(const QByteArray &rtf)
         }
         if (c == '\r' || c == '\n') {
             ++i;
+            continue;
+        }
+        if (c != '\\' && stack.last().pict && !stack.last().skip) {
+            while (i < n && rtf.at(i) != '\\' && rtf.at(i) != '{' && rtf.at(i) != '}') {
+                const char t = rtf.at(i++);
+                if (isxdigit(static_cast<unsigned char>(t))) {
+                    pict.hex += t;
+                }
+            }
+            groupStart = false;
             continue;
         }
         if (c != '\\') {
@@ -360,7 +400,37 @@ QString rtfToHtml(const QByteArray &rtf)
             continue;
         }
         skipChars = 0;
+        if (word == "shppict") {
+            st.skip = false; // {\*\shppict{\pict ...}}: Word's picture, keep it
+            continue;
+        }
         if (st.skip) {
+            continue;
+        }
+        if (word == "pict" && pict.level == 0) {
+            pict = Pict{};
+            pict.level = int(stack.size());
+            st.pict = true;
+            continue;
+        }
+        if (st.pict) {
+            if (word == "pngblip") {
+                pict.type = "png";
+            } else if (word == "jpegblip") {
+                pict.type = "jpeg";
+            } else if (word == "picw") {
+                pict.picw = param;
+            } else if (word == "pich") {
+                pict.pich = param;
+            } else if (word == "picwgoal") {
+                pict.wgoal = param;
+            } else if (word == "pichgoal") {
+                pict.hgoal = param;
+            } else if (word == "picscalex" && param > 0) {
+                pict.scalex = param;
+            } else if (word == "picscaley" && param > 0) {
+                pict.scaley = param;
+            }
             continue;
         }
         const bool on = !hasParam || param != 0;
@@ -459,6 +529,40 @@ QString rtfEscaped(QStringView text)
 // QTextDocument -> RTF: paragraphs with alignment, bold / italic / underline,
 // font family and size, lists (as literal bullets/numbers), page breaks and
 // tables. Readable by LibreOffice, Word, TextEdit and zwriter itself.
+// One picture as an RTF \pict group: PNG (or the original JPEG bytes) in hex,
+// with its display size in twips (15 per CSS px). Wrap is not kept in RTF.
+QString rtfPicture(const QTextDocument *doc, const QTextImageFormat &f)
+{
+    const QVariant v = doc->resource(QTextDocument::ImageResource, QUrl(f.name()));
+    QByteArray bytes = v.typeId() == QMetaType::QImage ? QByteArray() : v.toByteArray();
+    QImage img = v.typeId() == QMetaType::QImage ? v.value<QImage>() : QImage::fromData(bytes);
+    if (img.isNull()) {
+        return QString();
+    }
+    const bool jpeg = bytes.startsWith("\xFF\xD8\xFF");
+    if (!jpeg && !bytes.startsWith("\x89PNG")) {
+        bytes.clear();
+        QBuffer buf(&bytes);
+        buf.open(QIODevice::WriteOnly);
+        img.save(&buf, "PNG");
+    }
+    const qreal w = f.width() > 0 ? f.width() : img.width();
+    const qreal h = f.height() > 0 ? f.height() : img.height();
+    QString out = QStringLiteral("{\\pict%1\\picw%2\\pich%3\\picwgoal%4\\pichgoal%5\n")
+                      .arg(jpeg ? QStringLiteral("\\jpegblip") : QStringLiteral("\\pngblip"))
+                      .arg(img.width())
+                      .arg(img.height())
+                      .arg(qRound(w * 15.0))
+                      .arg(qRound(h * 15.0));
+    const QByteArray hex = bytes.toHex();
+    for (qsizetype i = 0; i < hex.size(); i += 128) {
+        out += QString::fromLatin1(hex.mid(i, 128));
+        out += QLatin1Char('\n');
+    }
+    out += QLatin1Char('}');
+    return out;
+}
+
 QString documentToRtf(const QTextDocument *doc)
 {
     const QFont base = doc->defaultFont();
@@ -514,6 +618,12 @@ QString documentToRtf(const QTextDocument *doc)
                 continue;
             }
             const QTextCharFormat cf = frag.charFormat();
+            if (cf.isImageFormat()) {
+                for (int k = 0; k < frag.length(); ++k) {
+                    out += rtfPicture(doc, cf.toImageFormat());
+                }
+                continue;
+            }
             QString ctl;
             const QStringList fams = cf.fontFamilies().toStringList();
             const QString fam = fams.isEmpty() ? baseFamily : fams.first();
@@ -2168,7 +2278,12 @@ bool load(QTextDocument *doc, const QString &path, QString *error)
 
     if (fmt == Format::Rtf
         || QString::fromUtf8(bytes.left(5)).startsWith(QLatin1String("{\\rtf"))) {
-        doc->setHtml(rtfToHtml(bytes));
+        QHash<QString, QByteArray> pictures;
+        const QString html = rtfToHtml(bytes, &pictures);
+        for (auto it = pictures.cbegin(); it != pictures.cend(); ++it) {
+            doc->addResource(QTextDocument::ImageResource, QUrl(it.key()), it.value());
+        }
+        doc->setHtml(html);
         restyleTables(doc->rootFrame());
         normaliseImportedBlocks(doc);
         doc->clearUndoRedoStacks();

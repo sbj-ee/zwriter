@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <functional>
 #include <QMarginsF>
 #include <QSizeF>
 #include <QTextEdit>
@@ -52,6 +53,12 @@ public:
     // many were inserted; problems go out through imageNote().
     int insertImagesFromMimeData(const QMimeData *source);
     bool canInsertFromMimeData(const QMimeData *source) const override;
+    // Plain-text (Markdown) mode: pictures go through this instead (MainWindow
+    // copies them next to the file and types a link). Returns true if inserted.
+    void setPlainImageHandler(std::function<bool(const QByteArray &)> handler)
+    {
+        m_plainImageHandler = std::move(handler);
+    }
 
 signals:
     // A status-bar note about a pasted / dropped picture (refused, scaled down).
@@ -84,6 +91,7 @@ private:
     QMarginsF m_documentMargins;
     qreal m_maxColumn = 0.0;
     qreal m_zoom = 1.0;
+    std::function<bool(const QByteArray &)> m_plainImageHandler;
     // QTextEdit's own caret blink state is private, so zoomed painting runs
     // its own blink.
     QTimer *m_blinkTimer = nullptr;

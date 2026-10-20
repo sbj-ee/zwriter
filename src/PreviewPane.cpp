@@ -1,6 +1,10 @@
 #include "PreviewPane.hpp"
 
 #include <QDesktopServices>
+#include <QImage>
+#include <QPixmap>
+#include <QTextFragment>
+#include <QTextImageFormat>
 #include <QScrollBar>
 #include <QSettings>
 #include <QShowEvent>
@@ -136,6 +140,43 @@ void PreviewPane::scheduleRender()
     m_debounce->start(); // restarts: renders kDebounceMs after the LAST edit
 }
 
+// Pictures (![alt](file)) at their own size, but never wider than the pane.
+void PreviewPane::fitImagesToWidth()
+{
+    QTextDocument *doc = m_browser->document();
+    const qreal avail = qMax(40.0, m_browser->viewport()->width() - 2.0 * kPreviewMargin - 4.0);
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (!frag.charFormat().isImageFormat()) {
+                continue;
+            }
+            QTextImageFormat f = frag.charFormat().toImageFormat();
+            if (f.width() > 0) {
+                continue;
+            }
+            const QVariant v = m_browser->loadResource(QTextDocument::ImageResource, QUrl(f.name()));
+            QSize natural;
+            if (v.typeId() == QMetaType::QImage) {
+                natural = v.value<QImage>().size();
+            } else if (v.typeId() == QMetaType::QPixmap) {
+                natural = v.value<QPixmap>().size();
+            } else {
+                natural = QImage::fromData(v.toByteArray()).size();
+            }
+            if (!natural.isValid() || natural.width() <= avail) {
+                continue;
+            }
+            f.setWidth(avail);
+            f.setHeight(natural.height() * avail / natural.width());
+            QTextCursor c(doc);
+            c.setPosition(frag.position());
+            c.setPosition(frag.position() + frag.length(), QTextCursor::KeepAnchor);
+            c.setCharFormat(f);
+        }
+    }
+}
+
 void PreviewPane::renderNow()
 {
     m_debounce->stop();
@@ -144,6 +185,7 @@ void PreviewPane::renderNow()
     QTextDocument *doc = m_browser->document();
     doc->setMarkdown(text, QTextDocument::MarkdownDialectGitHub);
     doc->setDocumentMargin(kPreviewMargin);
+    fitImagesToWidth();
     colourRenderedSpans();
     ++m_renderCount;
     applyScrollFraction();

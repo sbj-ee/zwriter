@@ -6,6 +6,8 @@
 //   W  text wrap (left / right float) saves to ODT graphic styles and reopens
 //   N  inserting: column cap, 4000 px limit, PNG/JPEG bytes kept, others to
 //      PNG, refusals, one undo step; Image Properties apply (size, wrap) + undo
+//   T  RTF pictures: zwriter's own round trip and a Word-shaped \\shppict file
+//   M  Markdown assets folder: names, numbering, JPEG -> .jpg, link escaping
 //   L  a LibreOffice-shaped ODT: frame sized in cm, SVG with a PNG fallback,
 //      a missing picture member
 // Run: QT_QPA_PLATFORM=offscreen ./images_test
@@ -15,6 +17,7 @@
 #include <QBuffer>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
 #include <QProcess>
@@ -96,10 +99,10 @@ void testUnits()
 void testFormats()
 {
     check(Images::formatKeepsImages(DocumentIo::Format::Odt), "F ODT keeps images");
+    check(Images::formatKeepsImages(DocumentIo::Format::Rtf), "F RTF keeps images");
     check(!Images::formatKeepsImages(DocumentIo::Format::Txt)
-              && !Images::formatKeepsImages(DocumentIo::Format::Rtf)
               && !Images::formatKeepsImages(DocumentIo::Format::Markdown),
-          "F TXT / RTF / Markdown don't (the window asks before dropping them)");
+          "F TXT / rich-to-Markdown don't (the window asks before dropping them)");
 }
 
 void testRoundTrip(const QString &dir)
@@ -306,6 +309,87 @@ void testInsert()
           "N one undo restores size and wrap");
 }
 
+void testRtf(const QString &dir)
+{
+    QTextDocument doc;
+    QTextCursor c(&doc);
+    c.insertText(QStringLiteral("RTF with pictures. "));
+    QTextImageFormat f;
+    f.setName(Images::addImageData(&doc, encoded(solid(40, 30, QColor(200, 40, 40)), "PNG")));
+    f.setWidth(80);
+    f.setHeight(60);
+    c.insertImage(f);
+    c.insertBlock();
+    const QByteArray jpeg = encoded(solid(64, 48, QColor(40, 90, 200)), "JPEG");
+    QTextImageFormat g;
+    g.setName(Images::addImageData(&doc, jpeg));
+    c.insertImage(g);
+    c.insertText(QStringLiteral(" after the photo."));
+    const QString path = dir + QStringLiteral("/pictures.rtf");
+    QString err;
+    check(DocumentIo::save(&doc, path, DocumentIo::Format::Rtf, &err), "T save RTF", err);
+    QFile file(path);
+    file.open(QIODevice::ReadOnly);
+    const QByteArray rtf = file.readAll();
+    check(rtf.contains("\\pngblip") && rtf.contains("\\jpegblip") && rtf.contains("\\picwgoal1200\\pichgoal900"),
+          "T RTF has a PNG and a JPEG \\pict with the display size in twips");
+    QTextDocument back;
+    check(DocumentIo::load(&back, path, &err), "T reopen RTF", err);
+    const QList<QTextImageFormat> imgs = Images::imageFormats(&back);
+    check(imgs.size() == 2, "T two pictures back", QString::number(imgs.size()));
+    if (imgs.size() == 2) {
+        check(std::abs(imgs[0].width() - 80) <= 1 && std::abs(imgs[0].height() - 60) <= 1, "T display size kept");
+        check(resourceImage(back, imgs[0]).pixelColor(3, 3) == QColor(200, 40, 40), "T PNG pixels kept");
+        check(back.resource(QTextDocument::ImageResource, QUrl(imgs[1].name())).toByteArray() == jpeg,
+              "T JPEG bytes kept");
+    }
+    check(back.toPlainText().contains(QLatin1String("after the photo.")), "T text kept");
+
+    // Word: {\*\shppict{\pict ... {\*\blipuid ...} hex}}{\nonshppict{\pict\wmetafile8 hex}}
+    const QByteArray png = encoded(solid(10, 10, QColor(30, 160, 90)), "PNG");
+    const QByteArray word = QByteArrayLiteral("{\\rtf1\\ansi{\\fonttbl{\\f0 Calibri;}}\\pard Before ")
+        + "{\\*\\shppict{\\pict{\\*\\picprop}\\picscalex50\\picscaley50\\picw10\\pich10\\picwgoal600\\pichgoal600\\pngblip"
+        + "{\\*\\blipuid 0123456789abcdef0123456789abcdef}\n" + png.toHex() + "}}"
+        + "{\\nonshppict{\\pict\\wmetafile8\\picw10\\pich10 0100090000}}"
+        + " after.\\par}";
+    const QString wpath = dir + QStringLiteral("/word.rtf");
+    QFile wf(wpath);
+    wf.open(QIODevice::WriteOnly);
+    wf.write(word);
+    wf.close();
+    QTextDocument wdoc;
+    check(DocumentIo::load(&wdoc, wpath, &err), "T open a Word-shaped RTF", err);
+    const QList<QTextImageFormat> wimgs = Images::imageFormats(&wdoc);
+    check(wimgs.size() == 1, "T one picture: the \\shppict PNG, not the WMF fallback", QString::number(wimgs.size()));
+    if (!wimgs.isEmpty()) {
+        check(std::abs(wimgs[0].width() - 20) <= 1, "T picwgoal 600 twips at 50 % = 20 px",
+              QString::number(wimgs[0].width()));
+        check(resourceImage(wdoc, wimgs[0]).size() == QSize(10, 10), "T blipuid group not mixed into the data");
+    }
+    check(wdoc.toPlainText().contains(QLatin1String("Before")) && wdoc.toPlainText().contains(QLatin1String("after.")),
+          "T Word text kept");
+}
+
+void testMarkdownAssets(const QString &dir)
+{
+    const QString md = dir + QStringLiteral("/My notes.md");
+    QString msg;
+    const QString a = Images::copyToMarkdownAssets(md, encoded(solid(20, 20, Qt::gray), "PNG"), &msg);
+    const QString b = Images::copyToMarkdownAssets(md, encoded(solid(20, 20, Qt::gray), "PNG"), &msg);
+    const QString c = Images::copyToMarkdownAssets(md, encoded(solid(20, 20, Qt::gray), "JPEG"), &msg);
+    check(a == QLatin1String("My notes.assets/image-001.png"), "M first picture -> My notes.assets/image-001.png", a);
+    check(b == QLatin1String("My notes.assets/image-002.png"), "M numbering continues", b);
+    check(c == QLatin1String("My notes.assets/image-003.jpg"), "M JPEG keeps .jpg", c);
+    check(QFileInfo::exists(dir + QLatin1Char('/') + a) && QFileInfo::exists(dir + QLatin1Char('/') + c),
+          "M files written next to the .md");
+    check(Images::copyToMarkdownAssets(QString(), encoded(solid(4, 4, Qt::gray), "PNG"), &msg).isEmpty()
+              && msg.contains(QLatin1String("Save")),
+          "M an unsaved Markdown file asks to be saved first", msg);
+    check(Images::copyToMarkdownAssets(md, QByteArrayLiteral("nope"), &msg).isEmpty(), "M non-image refused");
+    check(Images::markdownImageLink(a) == QLatin1String("![image-001](My%20notes.assets/image-001.png)"),
+          "M link escapes spaces", Images::markdownImageLink(a));
+}
+
 bool writeLibreOfficeImageOdt(const QString &path)
 {
     QTemporaryDir dir;
@@ -412,6 +496,8 @@ int main(int argc, char **argv)
     testRoundTrip(tmp.path());
     testWrapRoundTrip(tmp.path());
     testInsert();
+    testRtf(tmp.path());
+    testMarkdownAssets(tmp.path());
     testLibreOffice(tmp.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

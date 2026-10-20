@@ -1,7 +1,10 @@
 #include "Images.hpp"
 
 #include <QBuffer>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QTextFrame>
 #include <QTextFrameFormat>
 #include <QImage>
@@ -75,7 +78,8 @@ bool hasImages(const QTextDocument *doc)
 
 bool formatKeepsImages(DocumentIo::Format format)
 {
-    return format == DocumentIo::Format::Odt || format == DocumentIo::Format::Unknown;
+    return format == DocumentIo::Format::Odt || format == DocumentIo::Format::Rtf
+        || format == DocumentIo::Format::Unknown;
 }
 
 qreal odfLengthToPx(QStringView length)
@@ -314,6 +318,66 @@ QSize naturalSize(const QTextDocument *doc, const QString &name)
     QBuffer buf(&bytes);
     buf.open(QIODevice::ReadOnly);
     return QImageReader(&buf).size();
+}
+
+QString copyToMarkdownAssets(const QString &markdownPath, const QByteArray &data, QString *message)
+{
+    auto fail = [&](const QString &msg) {
+        if (message) {
+            *message = msg;
+        }
+        return QString();
+    };
+    if (markdownPath.isEmpty()) {
+        return fail(QStringLiteral("Save the Markdown file first: its pictures go in a folder next to it."));
+    }
+    // Same conversion rules as rich documents (scratch document, bytes only).
+    QTextDocument scratch;
+    QSize natural;
+    QString note;
+    const QString name = addInsertableImage(&scratch, data, &natural, &note);
+    if (name.isEmpty()) {
+        return fail(note);
+    }
+    const QByteArray bytes = scratch.resource(QTextDocument::ImageResource, QUrl(name)).toByteArray();
+    const QString suffix = QFileInfo(name).suffix() == QLatin1String("jpeg") ? QStringLiteral("jpg")
+                                                                             : QFileInfo(name).suffix();
+    const QFileInfo md(markdownPath);
+    const QString folderName = md.completeBaseName() + QStringLiteral(".assets");
+    QDir dir(md.absolutePath());
+    if (!dir.mkpath(folderName)) {
+        return fail(QStringLiteral("Could not create the folder %1.").arg(folderName));
+    }
+    QString file;
+    for (int n = 1; n < 100000; ++n) {
+        const QString stem = QStringLiteral("image-%1").arg(n, 3, 10, QLatin1Char('0'));
+        file = stem + QLatin1Char('.') + suffix;
+        // One number per picture, whatever its type.
+        if (QDir(dir.filePath(folderName)).entryList({stem + QStringLiteral(".*")}, QDir::Files).isEmpty()) {
+            break;
+        }
+    }
+    QSaveFile out(dir.filePath(folderName + QLatin1Char('/') + file));
+    if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size() || !out.commit()) {
+        return fail(QStringLiteral("Could not write the picture into %1.").arg(folderName));
+    }
+    if (message) {
+        *message = note;
+    }
+    return folderName + QLatin1Char('/') + file;
+}
+
+QString markdownImageLink(const QString &relativePath, const QString &alt)
+{
+    QString target = relativePath;
+    target.replace(QLatin1Char(' '), QStringLiteral("%20"));
+    target.replace(QLatin1Char('('), QStringLiteral("%28"));
+    target.replace(QLatin1Char(')'), QStringLiteral("%29"));
+    // Qt's Markdown reader drops images with empty alt text: default to the
+    // file name without its extension.
+    QString text = alt.isEmpty() ? QFileInfo(relativePath).completeBaseName() : alt;
+    text.replace(QLatin1Char('['), QStringLiteral("\\[")).replace(QLatin1Char(']'), QStringLiteral("\\]"));
+    return QStringLiteral("![%1](%2)").arg(text, target);
 }
 
 } // namespace Images
