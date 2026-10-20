@@ -189,17 +189,19 @@ Library sidebar (`Ctrl+Shift+L`): folders plus the `.md` / `.txt` files of the f
 ![Library sidebar](docs/screenshots/library-sidebar.png)
 
 Book sidebar (`Ctrl+Alt+B`, or the **Book** / **Library** buttons in the sidebar headers): a book's
-chapters in book order, kept in a plain `book.json` in the book folder (paths relative to it). Drag a
-chapter, or use Move Up / Move Down (`Alt+Up` / `Alt+Down`), to reorder; right-click → Edit
-Details… for title, status (Idea / Draft / Revised / Final), POV, tags, word target, synopsis and
-notes. **+** adds `.md` / `.txt` files (or right-click a file in the Library → Add to Book);
-Remove from Book never deletes the file, and a chapter whose file is gone stays listed as missing.
-A folder without `book.json` offers **Create Book**, which lists its `.md` / `.txt` files in name
-order. The book folder defaults to the library folder.
+chapters in book order. Each book is a subfolder of the library with its own plain `book.json`
+(chapter paths relative to it), so one library can hold several books; the picker at the top
+switches between them and **New** makes a book of an existing or new subfolder. Drag a chapter, or
+use Move Up / Move Down (`Alt+Up` / `Alt+Down`), to reorder; right-click → Edit Details… for title,
+status (Idea / Outline / Draft / Revised / Final), POV, tags, word target, synopsis and notes. **+**
+adds `.md` / `.txt` files from the book's folder (or right-click a file in the Library → Add to
+Book); files outside the book folder are refused. Remove from Book never deletes the file, and a
+chapter whose file is gone stays listed as missing. Exporting a book in book order (EPUB / PDF) is
+planned.
 
 ![Book sidebar](docs/screenshots/book-sidebar.png)
 
-![Book chapter menu](docs/screenshots/book-context-menu.png) ![Chapter details](docs/screenshots/book-chapter-details.png)
+![Book picker](docs/screenshots/book-picker.png) ![Book chapter menu](docs/screenshots/book-context-menu.png) ![Chapter details](docs/screenshots/book-chapter-details.png)
 
 ## Formats
 

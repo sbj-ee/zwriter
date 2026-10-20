@@ -65,7 +65,14 @@ public:
     const BookChapter &at(int i) const { return m_chapters.at(i); }
     void setChapter(int i, const BookChapter &c);
 
-    // Absolute path of chapter i, and whether the file is there.
+    // Chapters must live inside the book folder: a relative path with no ".."
+    // step and no drive / root. An existing book.json entry that breaks this is
+    // kept (so saving does not lose it) but treated as invalid: no absolute
+    // path, never opened, shown as outside the book.
+    static bool isInsideBook(const QString &relativePath);
+    bool isOutside(int i) const;
+    // Absolute path of chapter i (empty when outside the book), and whether the
+    // file is missing (outside counts as missing).
     QString absolutePath(int i) const;
     bool isMissing(int i) const;
     // Index of the chapter for this absolute or relative path, or -1.
@@ -74,7 +81,8 @@ public:
     QString displayTitle(int i) const;
 
     // Adds the file (absolute or relative) at the end, or at `at`. Returns the
-    // new index, or the existing index if it is already in the book.
+    // new index, the existing index if it is already in the book, or -1 if it
+    // is outside the book folder (or not a .md / .txt path).
     int add(const QString &path, int at = -1);
     // Drops the entry; the file is left alone.
     bool remove(int i);
@@ -86,11 +94,14 @@ public:
     // the end.
     void reorder(const QStringList &relativePaths);
 
-    // A fresh book for a folder: its top-level .md / .txt files, sorted by
-    // name (numbers compared as numbers), the folder name as the title.
+    // A fresh book for a folder: its .md / .txt files (subfolders included,
+    // hidden ones skipped), sorted by relative path with numbers compared as
+    // numbers, the folder name as the title.
     static BookManifest fromFolder(const QString &bookDir);
 
     QString relativePath(const QString &path) const;
+    // "2 Middle" < "10 End": digit runs compare as numbers, the rest ignoring case.
+    static bool naturalLess(const QString &a, const QString &b);
 
     QJsonObject toJson() const;
     static BookManifest fromJson(const QJsonObject &obj, const QString &bookDir);

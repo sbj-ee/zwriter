@@ -48,7 +48,9 @@
 #include <QTextListFormat>
 #include <QTextList>
 #include <QGuiApplication>
+#include <QAbstractItemView>
 #include <QComboBox>
+#include <QInputDialog>
 #include <QClipboard>
 #include <QMimeData>
 #include <QTextDocumentFragment>
@@ -244,25 +246,24 @@ MainWindow::MainWindow(QWidget *parent)
         m_library->setRootPath(lib.rootPath);
         m_library->setVisible(lib.visible);
         const BookSidebar::Settings book = BookSidebar::loadSettings();
-        m_book->setRootPath(book.rootPath.isEmpty() ? lib.rootPath : book.rootPath);
+        m_book->selectBookOnLoad(book.currentBook);
+        m_book->setRootPath(lib.rootPath); // books are subfolders of the library
         m_book->setVisible(book.visible && !lib.visible);
     }
     connect(m_library, &LibrarySidebar::switchToBook, this, [this]() { showSidebar(true); });
     connect(m_book, &BookSidebar::switchToLibrary, this, [this]() { showSidebar(false); });
     connect(m_library, &LibrarySidebar::addToBookRequested, this, [this](const QString &path) {
-        if (m_book->rootPath().isEmpty()) {
-            m_book->setRootPath(m_library->rootPath());
+        const QString err = m_book->addFileToBook(path);
+        if (!err.isEmpty()) {
+            statusBar()->showMessage(err, 6000);
+            return;
         }
-        if (!m_book->hasBook()) {
-            m_book->createBook(); // the folder's files, then the picked one if outside it
-        }
-        m_book->addChapters({path});
         showSidebar(true);
     });
-    connect(m_book, &BookSidebar::rootPathChosen, this, [this]() {
-        m_book->setCurrentFile(m_currentPath);
-        saveBookSettings();
-    });
+    connect(m_book, &BookSidebar::currentBookChanged, this, [this]() { saveBookSettings(); });
+    connect(m_book, &BookSidebar::chooseLibraryRequested, this, &MainWindow::chooseLibraryFolder);
+    connect(m_book, &BookSidebar::message, this,
+            [this](const QString &text) { statusBar()->showMessage(text, 6000); });
     connect(m_book, &BookSidebar::fileActivated, this, [this](const QString &path) {
         if (m_currentPath.isEmpty() || QFileInfo(path) != QFileInfo(m_currentPath)) {
             openExternalFile(path);
@@ -275,6 +276,7 @@ MainWindow::MainWindow(QWidget *parent)
             m_library->setVisible(true);
         }
         m_library->setCurrentFile(m_currentPath);
+        m_book->setRootPath(m_library->rootPath());
         saveLibrarySettings();
         syncViewActions();
     });
@@ -1363,17 +1365,17 @@ void MainWindow::saveLibrarySettings() const
 
 void MainWindow::saveBookSettings() const
 {
-    BookSidebar::saveSettings({m_book->rootPath(), m_book->isVisibleTo(this)});
+    BookSidebar::saveSettings({m_book->currentBook(), m_book->isVisibleTo(this)});
 }
 
 void MainWindow::showSidebar(bool book)
 {
     if (book) {
         m_library->hide();
-        if (m_book->rootPath().isEmpty() && !m_library->rootPath().isEmpty()) {
-            m_book->setRootPath(m_library->rootPath()); // a library folder is the default book
+        if (m_book->rootPath() != m_library->rootPath()) {
+            m_book->setRootPath(m_library->rootPath());
         } else {
-            m_book->reload();
+            m_book->reload(); // picks up books / edits made outside zwriter
         }
         m_book->show();
         m_book->setCurrentFile(m_currentPath);
@@ -4328,7 +4330,19 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         // e) Book sidebar (1.4.0): a demo book with book.json, chapters in book
         //    order (not name order), details per chapter, one missing file.
         {
-            const QString bookDir = demoDir.path() + QStringLiteral("/The Harbor");
+            // A library holding two books (one book.json per subfolder) and a
+            // plain folder that could become one.
+            const QString shelf = demoDir.path() + QStringLiteral("/Shelf");
+            const QString bookDir = shelf + QStringLiteral("/The Harbor");
+            QDir().mkpath(shelf + QStringLiteral("/Short Pieces"));
+            write(shelf + QStringLiteral("/Short Pieces/fog.md"), "# Fog\n\nA short piece.\n");
+            QDir().mkpath(shelf + QStringLiteral("/Salt Roads/parts"));
+            write(shelf + QStringLiteral("/Salt Roads/parts/01 Inland.md"), "# Inland\n");
+            write(shelf + QStringLiteral("/Salt Roads/parts/02 The Pass.md"), "# The Pass\n");
+            {
+                BookManifest other = BookManifest::fromFolder(shelf + QStringLiteral("/Salt Roads"));
+                other.save();
+            }
             QDir().mkpath(bookDir + QStringLiteral("/chapters"));
             const QByteArray prose =
                 "The ferry came in low and late, its lamps smeared by the rain. Mara counted the "
@@ -4354,7 +4368,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
                 {"chapters/the-letter.md", "The Letter", "Draft", "Mara",
                  "The coat holds a letter addressed to no one.", 3000},
                 {"chapters/the-lighthouse.md", "The Lighthouse", "Draft", "Ivo", "", 3000},
-                {"chapters/low-tide.md", "Low Tide", "Idea", "", "", 0},
+                {"chapters/low-tide.md", "Low Tide", "Outline", "", "", 0},
                 {"chapters/epilogue.md", "Epilogue", "Idea", "", "", 0}, // not written yet
             };
             for (const auto &r : rows) {
@@ -4377,7 +4391,8 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
             m_library->hide();
             openPath(bookDir + QStringLiteral("/chapters/the-letter.md"));
             statusBar()->clearMessage();
-            m_book->setRootPath(bookDir);
+            m_book->setRootPath(shelf);
+            m_book->selectBook(QStringLiteral("The Harbor"));
             m_book->show();
             m_book->setCurrentFile(m_currentPath);
             syncViewActions();
@@ -4404,6 +4419,30 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
                 menu->hide();
                 delete menu;
                 shot.save(dir + QStringLiteral("/book-context-menu.png"), "PNG");
+            }
+
+            // The book picker open: one entry per book subfolder.
+            {
+                QComboBox *picker = m_book->picker();
+                picker->showPopup();
+                QApplication::processEvents();
+                QWidget *popup = picker->view()->window();
+                const QPoint at = mapFromGlobal(popup->mapToGlobal(QPoint(0, 0)));
+                QPixmap shot = grab();
+                {
+                    QPainter p(&shot);
+                    p.drawPixmap(at, popup->grab());
+                }
+                picker->hidePopup();
+                shot.save(dir + QStringLiteral("/book-picker.png"), "PNG");
+            }
+
+            // New Book…: pick a subfolder (or type a new name).
+            m_book->chooseNewBook();
+            if (QInputDialog *nb = m_book->newBookDialog()) {
+                QApplication::processEvents();
+                nb->grab().save(dir + QStringLiteral("/book-new.png"), "PNG");
+                nb->reject();
             }
 
             // Edit Details… on chapter 1.

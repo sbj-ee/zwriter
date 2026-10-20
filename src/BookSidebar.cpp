@@ -7,7 +7,9 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QComboBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
@@ -39,7 +41,16 @@ BookSidebar::BookSidebar(QWidget *parent)
     m_title = new QLabel(header);
     m_title->setObjectName(QStringLiteral("bookTitle"));
     m_title->setTextFormat(Qt::PlainText);
-    hl->addWidget(m_title, 1);
+    m_title->setText(QStringLiteral("BOOK"));
+    hl->addWidget(m_title);
+    m_picker = new QComboBox(header);
+    m_picker->setObjectName(QStringLiteral("bookPicker"));
+    m_picker->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    m_picker->setMinimumContentsLength(8);
+    connect(m_picker, &QComboBox::activated, this, [this](int i) {
+        selectBook(m_picker->itemData(i).toString());
+    });
+    hl->addWidget(m_picker, 1);
     const auto tool = [header, hl](const QString &name, const QString &text, const QString &tip) {
         auto *b = new QToolButton(header);
         b->setObjectName(name);
@@ -53,11 +64,11 @@ BookSidebar::BookSidebar(QWidget *parent)
                            QStringLiteral("Show the Library sidebar instead (Ctrl+Shift+L)"));
     connect(m_libraryButton, &QToolButton::clicked, this, &BookSidebar::switchToLibrary);
     m_addButton = tool(QStringLiteral("bookAdd"), QStringLiteral("+"),
-                       QStringLiteral("Add chapters (.md / .txt) to the book"));
+                       QStringLiteral("Add chapters (.md / .txt inside the book folder)"));
     connect(m_addButton, &QToolButton::clicked, this, &BookSidebar::chooseChapterFiles);
-    m_chooseButton = tool(QStringLiteral("bookChoose"), QStringLiteral("…"),
-                          QStringLiteral("Choose the book folder"));
-    connect(m_chooseButton, &QToolButton::clicked, this, &BookSidebar::chooseRootFolder);
+    m_newButton = tool(QStringLiteral("bookNew"), QStringLiteral("New"),
+                       QStringLiteral("New book: write book.json in a subfolder of the library"));
+    connect(m_newButton, &QToolButton::clicked, this, &BookSidebar::chooseNewBook);
     layout->addWidget(header);
 
     m_hintBox = new QWidget(this);
@@ -69,15 +80,16 @@ BookSidebar::BookSidebar(QWidget *parent)
     m_hint->setObjectName(QStringLiteral("bookHint"));
     m_hint->setWordWrap(true);
     hint->addWidget(m_hint);
-    m_createButton = new QPushButton(QStringLiteral("Create Book"), m_hintBox);
+    m_createButton = new QPushButton(QStringLiteral("New Book…"), m_hintBox);
     m_createButton->setObjectName(QStringLiteral("bookCreate"));
     m_createButton->setToolTip(QStringLiteral(
-        "Write book.json in this folder, listing its .md / .txt files in name order"));
-    connect(m_createButton, &QPushButton::clicked, this, &BookSidebar::createBook);
+        "Write book.json in a subfolder, listing its .md / .txt files in name order"));
+    connect(m_createButton, &QPushButton::clicked, this, &BookSidebar::chooseNewBook);
     hint->addWidget(m_createButton, 0, Qt::AlignLeft);
-    m_chooseFolderButton = new QPushButton(QStringLiteral("Choose Folder…"), m_hintBox);
+    m_chooseFolderButton = new QPushButton(QStringLiteral("Choose Library Folder…"), m_hintBox);
     m_chooseFolderButton->setObjectName(QStringLiteral("bookChooseFolder"));
-    connect(m_chooseFolderButton, &QPushButton::clicked, this, &BookSidebar::chooseRootFolder);
+    connect(m_chooseFolderButton, &QPushButton::clicked, this,
+            &BookSidebar::chooseLibraryRequested);
     hint->addWidget(m_chooseFolderButton, 0, Qt::AlignLeft);
     hint->addStretch(1);
     layout->addWidget(m_hintBox, 1);
@@ -137,19 +149,19 @@ QSize BookSidebar::sizeHint() const
     return {240, 600};
 }
 
-QString BookSidebar::rootPathKey() { return QStringLiteral("book/rootPath"); }
+QString BookSidebar::currentBookKey() { return QStringLiteral("book/current"); }
 QString BookSidebar::visibleKey() { return QStringLiteral("book/visible"); }
 
 BookSidebar::Settings BookSidebar::loadSettings()
 {
     QSettings s;
-    return {s.value(rootPathKey()).toString(), s.value(visibleKey(), false).toBool()};
+    return {s.value(currentBookKey()).toString(), s.value(visibleKey(), false).toBool()};
 }
 
 void BookSidebar::saveSettings(const Settings &settings)
 {
     QSettings s;
-    s.setValue(rootPathKey(), settings.rootPath);
+    s.setValue(currentBookKey(), settings.currentBook);
     s.setValue(visibleKey(), settings.visible);
 }
 
@@ -161,24 +173,90 @@ int BookSidebar::currentRow() const
 void BookSidebar::setRootPath(const QString &path)
 {
     const bool usable = !path.isEmpty() && QFileInfo(path).isDir();
+    m_root = usable ? QDir::cleanPath(QFileInfo(path).absoluteFilePath()) : QString();
+    scanBooks();
+    if (!m_books.contains(m_current)) {
+        m_current = m_books.isEmpty() ? QString() : m_books.first();
+    }
+    loadCurrent();
+}
+
+void BookSidebar::scanBooks()
+{
+    m_books.clear();
+    if (!m_root.isEmpty()) {
+        const QDir root(m_root);
+        for (const QString &sub : root.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            if (BookManifest::exists(root.filePath(sub))) {
+                m_books << sub;
+            }
+        }
+        std::sort(m_books.begin(), m_books.end(), &BookManifest::naturalLess);
+    }
+    const QSignalBlocker block(m_picker);
+    m_picker->clear();
+    for (const QString &sub : m_books) {
+        BookManifest b;
+        b.load(QDir(m_root).filePath(sub));
+        m_picker->addItem(b.title().trimmed().isEmpty() ? sub : b.title(), sub);
+        m_picker->setItemData(m_picker->count() - 1, sub, Qt::ToolTipRole);
+    }
+}
+
+QStringList BookSidebar::candidateFolders() const
+{
+    QStringList out;
+    if (m_root.isEmpty()) {
+        return out;
+    }
+    for (const QString &sub : QDir(m_root).entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (!m_books.contains(sub)) {
+            out << sub;
+        }
+    }
+    std::sort(out.begin(), out.end(), &BookManifest::naturalLess);
+    return out;
+}
+
+bool BookSidebar::selectBook(const QString &subfolder)
+{
+    if (!m_books.contains(subfolder)) {
+        return false;
+    }
+    if (subfolder != m_current) {
+        m_current = subfolder;
+        loadCurrent();
+        emit currentBookChanged(m_current);
+    }
+    return true;
+}
+
+void BookSidebar::loadCurrent()
+{
     m_lastError.clear();
     m_book = BookManifest();
     m_hasBook = false;
-    if (usable) {
+    if (!m_current.isEmpty()) {
+        const QString dir = QDir(m_root).filePath(m_current);
         QString err;
-        m_hasBook = m_book.load(path, &err);
+        m_hasBook = m_book.load(dir, &err);
         if (!m_hasBook) {
-            m_book.setBookDir(path);
+            m_book.setBookDir(dir);
             m_lastError = err;
         }
     }
+    {
+        const QSignalBlocker block(m_picker);
+        m_picker->setCurrentIndex(m_picker->findData(m_current));
+    }
     rebuild();
+    setCurrentFile(m_currentFile);
 }
 
 void BookSidebar::reload()
 {
     const int row = currentRow();
-    setRootPath(rootPath());
+    setRootPath(m_root);
     if (row >= 0 && row < m_view->count()) {
         m_view->setCurrentRow(row);
     }
@@ -189,6 +267,9 @@ QString BookSidebar::itemText(int row) const
 {
     const BookChapter &c = m_book.at(row);
     const QString title = QStringLiteral("%1. %2").arg(row + 1).arg(m_book.displayTitle(row));
+    if (m_book.isOutside(row)) {
+        return title + QStringLiteral("\nOutside the book folder: ") + c.path;
+    }
     if (m_book.isMissing(row)) {
         return title + QStringLiteral("\nMissing: ") + c.path;
     }
@@ -235,35 +316,35 @@ void BookSidebar::rebuild(int selectRow)
 
 void BookSidebar::updateHeader()
 {
-    const bool folder = !m_book.bookDir().isEmpty();
-    if (m_hasBook) {
-        m_title->setText(m_book.title().isEmpty() ? QFileInfo(m_book.bookDir()).fileName()
-                                                  : m_book.title());
-    } else {
-        m_title->setText(QStringLiteral("Book"));
-    }
-    m_title->setToolTip(m_book.bookDir());
+    const bool library = !m_root.isEmpty();
+    m_picker->setVisible(!m_books.isEmpty());
+    m_title->setVisible(m_books.isEmpty());
+    m_picker->setToolTip(m_book.bookDir());
     m_addButton->setEnabled(m_hasBook);
+    m_newButton->setEnabled(library);
     m_view->setVisible(m_hasBook);
     m_footer->setVisible(m_hasBook);
     m_hintBox->setVisible(!m_hasBook);
-    m_createButton->setVisible(folder && m_lastError.isEmpty());
-    if (!folder) {
-        m_hint->setText(QStringLiteral("Choose a book folder. Its chapter order is kept in book.json."));
+    m_createButton->setVisible(library && m_lastError.isEmpty());
+    m_chooseFolderButton->setVisible(!library);
+    if (!library) {
+        m_hint->setText(QStringLiteral("Choose a library folder first. Each book is a subfolder of "
+                                       "it with its own book.json."));
     } else if (!m_lastError.isEmpty()) {
-        m_hint->setText(QStringLiteral("book.json in this folder could not be read (%1). It was left "
-                                       "as it is; fix or remove it to continue.")
-                            .arg(m_lastError));
+        m_hint->setText(QStringLiteral("%1/book.json could not be read (%2). It was left as it is; "
+                                       "fix or remove it to continue.")
+                            .arg(m_current, m_lastError));
     } else {
-        m_hint->setText(QStringLiteral("No book in %1 yet. Create Book writes book.json there with "
-                                       "the folder's .md and .txt files in name order.")
-                            .arg(QFileInfo(m_book.bookDir()).fileName()));
+        m_hint->setText(QStringLiteral("No books in %1 yet. A book is a subfolder with its own "
+                                       "book.json; New Book… writes one, listing the subfolder's "
+                                       ".md and .txt files in name order.")
+                            .arg(QFileInfo(m_root).fileName()));
     }
     if (m_hasBook) {
         int total = 0;
         int missing = 0;
         for (int i = 0; i < m_book.count(); ++i) {
-            const int w = countWordsInFile(m_book.absolutePath(i));
+            const int w = m_book.isMissing(i) ? -1 : countWordsInFile(m_book.absolutePath(i));
             if (w < 0) {
                 ++missing;
             } else {
@@ -301,13 +382,88 @@ bool BookSidebar::commit(int selectRow)
     return true;
 }
 
-bool BookSidebar::createBook()
+bool BookSidebar::createBook(const QString &subfolder)
 {
-    if (m_book.bookDir().isEmpty() || BookManifest::exists(m_book.bookDir())) {
+    const QString name = subfolder.trimmed();
+    if (m_root.isEmpty() || name.isEmpty() || name.contains(QLatin1Char('/'))
+        || name.contains(QLatin1Char('\\')) || name.startsWith(QLatin1Char('.'))) {
+        emit message(QStringLiteral("A book needs a subfolder name (no slashes)."));
         return false;
     }
-    m_book = BookManifest::fromFolder(m_book.bookDir());
-    return commit(-1);
+    const QString dir = QDir(m_root).filePath(name);
+    if (!BookManifest::exists(dir)) {
+        if (!QDir().mkpath(dir)) {
+            emit message(QStringLiteral("Could not create %1").arg(dir));
+            return false;
+        }
+        QString err;
+        if (!BookManifest::fromFolder(dir).save(&err)) {
+            emit message(QStringLiteral("Could not write %1/book.json: %2").arg(name, err));
+            return false;
+        }
+    }
+    scanBooks();
+    m_current = name;
+    loadCurrent();
+    emit currentBookChanged(m_current);
+    emit bookChanged();
+    return m_hasBook;
+}
+
+void BookSidebar::chooseNewBook()
+{
+    if (m_root.isEmpty()) {
+        emit chooseLibraryRequested();
+        return;
+    }
+    if (m_newBookDialog) {
+        m_newBookDialog->raise();
+        return;
+    }
+    auto *dlg = new QInputDialog(window());
+    dlg->setObjectName(QStringLiteral("bookNewDialog"));
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+    dlg->setWindowTitle(QStringLiteral("New Book"));
+    dlg->setLabelText(QStringLiteral("Subfolder of %1 for the book (pick one or type a new name):")
+                          .arg(QFileInfo(m_root).fileName()));
+    dlg->setComboBoxEditable(true);
+    dlg->setComboBoxItems(candidateFolders());
+    if (!candidateFolders().isEmpty()) {
+        dlg->setTextValue(candidateFolders().first());
+    }
+    dlg->setWindowModality(Qt::WindowModal);
+    connect(dlg, &QInputDialog::textValueSelected, this,
+            [this](const QString &name) { createBook(name); });
+    m_newBookDialog = dlg;
+    dlg->open();
+}
+
+QString BookSidebar::addFileToBook(const QString &path)
+{
+    if (m_root.isEmpty()) {
+        return QStringLiteral("No library folder");
+    }
+    const QString rel =
+        QDir::cleanPath(QDir(m_root).relativeFilePath(QFileInfo(path).absoluteFilePath()));
+    const QStringList parts = rel.split(QLatin1Char('/'));
+    if (parts.size() < 2 || parts.first() == QLatin1String("..")) {
+        return QStringLiteral("%1 is not in a book subfolder; each book is a subfolder of the "
+                              "library.")
+            .arg(QFileInfo(path).fileName());
+    }
+    const QString sub = parts.first();
+    if (!m_books.contains(sub)) {
+        if (!createBook(sub)) {
+            return QStringLiteral("Could not create a book in %1").arg(sub);
+        }
+    } else {
+        selectBook(sub);
+    }
+    if (!m_hasBook) {
+        return QStringLiteral("%1/book.json could not be read").arg(sub);
+    }
+    addChapters({path});
+    return {};
 }
 
 int BookSidebar::addChapters(const QStringList &paths)
@@ -317,12 +473,22 @@ int BookSidebar::addChapters(const QStringList &paths)
     }
     int added = 0;
     int last = -1;
+    QStringList refused;
     for (const QString &p : paths) {
         const int before = m_book.count();
-        last = m_book.add(p);
+        const int at = m_book.add(p);
+        if (at < 0) {
+            refused << QFileInfo(p).fileName();
+            continue;
+        }
+        last = at;
         if (m_book.count() > before) {
             ++added;
         }
+    }
+    if (!refused.isEmpty()) {
+        emit message(QStringLiteral("Not added (chapters must be .md / .txt files inside %1): %2")
+                         .arg(m_current, refused.join(QStringLiteral(", "))));
     }
     if (added > 0) {
         commit(last);
@@ -476,29 +642,6 @@ void BookSidebar::chooseChapterFiles()
     dlg->open();
 }
 
-void BookSidebar::chooseRootFolder()
-{
-    if (m_folderDialog) {
-        m_folderDialog->raise();
-        m_folderDialog->activateWindow();
-        return;
-    }
-    auto *dlg = new QFileDialog(window(), QStringLiteral("Choose Book Folder"),
-                                rootPath().isEmpty() ? QDir::homePath() : rootPath());
-    dlg->setObjectName(QStringLiteral("bookFolderDialog"));
-    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
-    dlg->setFileMode(QFileDialog::Directory);
-    dlg->setOption(QFileDialog::ShowDirsOnly, true);
-    dlg->setOption(QFileDialog::DontUseNativeDialog, true);
-    dlg->setWindowModality(Qt::WindowModal);
-    connect(dlg, &QFileDialog::fileSelected, this, [this](const QString &dir) {
-        setRootPath(dir);
-        emit rootPathChosen(rootPath());
-    });
-    m_folderDialog = dlg;
-    dlg->open();
-}
-
 void BookSidebar::applyTheme(const ThemeColors &c)
 {
     setStyleSheet(QStringLiteral(
@@ -508,9 +651,12 @@ void BookSidebar::applyTheme(const ThemeColors &c)
         "#bookHint, #bookFooter { color: %3; font-size: 9pt; }"
         "#bookCreate, #bookChooseFolder { color: %2; background-color: %4; border: none;"
         " border-radius: 4px; padding: 4px 12px; }"
-        "#bookToLibrary, #bookAdd, #bookChoose { color: %2; border: none; border-radius: 4px;"
+        "#bookToLibrary, #bookAdd, #bookNew { color: %2; border: none; border-radius: 4px;"
         " padding: 1px 6px; }"
-        "#bookToLibrary:hover, #bookAdd:hover, #bookChoose:hover { background-color: %4; }"
+        "#bookToLibrary:hover, #bookAdd:hover, #bookNew:hover { background-color: %4; }"
+        "QComboBox#bookPicker { color: %2; background-color: %1; border: none; font-size: 9pt;"
+        " font-weight: 600; padding: 1px 4px; }"
+        "QComboBox#bookPicker:hover { background-color: %4; }"
         "QListWidget#bookList { background-color: %1; color: %2; border: none; outline: 0;"
         " font-size: 10pt; }"
         "QListWidget#bookList::item { padding: 4px 8px; border-bottom: 1px solid %7; }"

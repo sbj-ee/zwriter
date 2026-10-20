@@ -1,6 +1,7 @@
 #include "BookManifest.hpp"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -25,9 +26,8 @@ QString cleanRel(const QString &p)
     return s.isEmpty() ? s : QDir::cleanPath(s);
 }
 
-// "2 Middle" < "10 End": runs of digits compare as numbers, the rest
-// case-insensitively. (QCollator's numeric mode depends on ICU and the locale.)
-bool naturalLess(const QString &a, const QString &b)
+// (QCollator's numeric mode depends on ICU and the locale, so not used.)
+bool naturalLessImpl(const QString &a, const QString &b)
 {
     int i = 0;
     int j = 0;
@@ -89,7 +89,7 @@ QString BookManifest::manifestPath(const QString &bookDir)
 
 QStringList BookManifest::statuses()
 {
-    return {QStringLiteral("Idea"), QStringLiteral("Draft"), QStringLiteral("Revised"),
+    return {QStringLiteral("Idea"), QStringLiteral("Outline"), QStringLiteral("Draft"), QStringLiteral("Revised"),
             QStringLiteral("Final")};
 }
 
@@ -252,9 +252,25 @@ QString BookManifest::relativePath(const QString &path) const
     return cleanRel(path);
 }
 
+bool BookManifest::isInsideBook(const QString &rel)
+{
+    const QString p = cleanRel(rel);
+    if (p.isEmpty() || p == QLatin1String(".") || p.startsWith(QLatin1Char('/'))
+        || QFileInfo(p).isAbsolute() || (p.size() >= 2 && p.at(1) == QLatin1Char(':'))) {
+        return false;
+    }
+    const QStringList parts = p.split(QLatin1Char('/'));
+    return !parts.contains(QStringLiteral(".."));
+}
+
+bool BookManifest::isOutside(int i) const
+{
+    return i >= 0 && i < count() && !isInsideBook(m_chapters.at(i).path);
+}
+
 QString BookManifest::absolutePath(int i) const
 {
-    if (i < 0 || i >= count()) {
+    if (i < 0 || i >= count() || isOutside(i)) {
         return {};
     }
     return QDir::cleanPath(QDir(m_dir).absoluteFilePath(m_chapters.at(i).path));
@@ -262,7 +278,8 @@ QString BookManifest::absolutePath(int i) const
 
 bool BookManifest::isMissing(int i) const
 {
-    return !QFileInfo(absolutePath(i)).isFile();
+    const QString abs = absolutePath(i);
+    return abs.isEmpty() || !QFileInfo(abs).isFile();
 }
 
 int BookManifest::indexOf(const QString &path) const
@@ -285,7 +302,8 @@ QString BookManifest::displayTitle(int i) const
 int BookManifest::add(const QString &path, int at)
 {
     const QString rel = relativePath(path);
-    if (rel.isEmpty()) {
+    const QString suffix = QFileInfo(rel).suffix().toLower();
+    if (!isInsideBook(rel) || (suffix != QLatin1String("md") && suffix != QLatin1String("txt"))) {
         return -1;
     }
     const int existing = indexOf(rel);
@@ -344,10 +362,26 @@ BookManifest BookManifest::fromFolder(const QString &bookDir)
     BookManifest b;
     b.setBookDir(bookDir);
     b.m_title = QFileInfo(b.m_dir).fileName();
-    QDir dir(b.m_dir);
-    QStringList files = dir.entryList({QStringLiteral("*.md"), QStringLiteral("*.txt")},
-                                      QDir::Files | QDir::NoDotAndDotDot);
-    std::sort(files.begin(), files.end(), naturalLess);
+    QStringList files;
+    QDirIterator it(b.m_dir, {QStringLiteral("*.md"), QStringLiteral("*.txt")},
+                    QDir::Files | QDir::AllDirs | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    const QDir root(b.m_dir);
+    while (it.hasNext()) {
+        const QString abs = it.next();
+        if (!it.fileInfo().isFile()) {
+            continue;
+        }
+        const QString rel = root.relativeFilePath(abs);
+        bool hidden = false;
+        for (const QString &part : rel.split(QLatin1Char('/'))) {
+            hidden = hidden || part.startsWith(QLatin1Char('.'));
+        }
+        if (!hidden) {
+            files << rel;
+        }
+    }
+    std::sort(files.begin(), files.end(), naturalLessImpl);
     for (const QString &f : files) {
         b.add(f);
     }
@@ -384,4 +418,9 @@ int countWordsInFile(const QString &path)
         return -1;
     }
     return countWords(QString::fromUtf8(f.readAll()));
+}
+
+bool BookManifest::naturalLess(const QString &a, const QString &b)
+{
+    return naturalLessImpl(a, b);
 }

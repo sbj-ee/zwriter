@@ -7,6 +7,10 @@
 //   M  missing chapter files stay in the book, marked missing
 //   R  reorder (move, move up/down, drag-drop order) persists to book.json
 //   X  remove from book never deletes the file
+//   O  chapters outside the book folder: refused when added, invalid when
+//      already in book.json (kept, never opened)
+//   B  several books in one library (one book.json per subfolder): listed,
+//      picked, New Book in an existing or new subfolder, Add to Book
 //   S  the sidebar: Create Book from a folder (name order with numbers),
 //      Move Up/Down + drag reorder saved, details dialog round-trip, context menu
 //   W  word counts
@@ -189,6 +193,37 @@ void tolerantTests()
     check(b.at(1).status == "Draft" && b.at(1).wordTarget == 0, "T  bad status / target → defaults");
     check(b.at(1).tags == QStringList({"x", "y"}) && b.at(2).tags == QStringList({"t"}),
           "T  tags from a string or array, blanks dropped");
+    check(BookManifest::statuses()
+              == QStringList({"Idea", "Outline", "Draft", "Revised", "Final"}),
+          "T  statuses");
+}
+
+void outsideTests()
+{
+    QTemporaryDir tmp;
+    const QString dir = tmp.path() + "/book";
+    write(dir + "/in.md", "in\n");
+    write(tmp.path() + "/out.md", "out\n");
+    write(dir + "/notes.odt", "x");
+    BookManifest b;
+    b.setBookDir(dir);
+    check(b.add(dir + "/in.md") == 0, "O  file inside the book folder is added");
+    check(b.add(tmp.path() + "/out.md") == -1, "O  absolute path outside is refused");
+    check(b.add("../out.md") == -1 && b.add("sub/../../out.md") == -1, "O  ../ paths are refused");
+    check(b.add("/etc/passwd.md") == -1 && b.add("C:/x.md") == -1, "O  root / drive paths refused");
+    check(b.add("notes.odt") == -1, "O  only .md / .txt");
+    check(b.count() == 1, "O  ... nothing else was added");
+
+    write(BookManifest::manifestPath(dir),
+          R"({"chapters": ["in.md", "../out.md", "/tmp/abs.md", {"path": "a/../../other.md"}]})");
+    b.load(dir);
+    check(b.count() == 4, "O  existing outside entries are kept in the book", QString::number(b.count()));
+    check(!b.isOutside(0) && b.isOutside(1) && b.isOutside(2) && b.isOutside(3),
+          "O  ... marked outside");
+    check(b.absolutePath(1).isEmpty() && b.isMissing(1), "O  ... no path, treated as missing");
+    b.save();
+    check(QString::fromUtf8(readAll(BookManifest::manifestPath(dir))).contains("../out.md"),
+          "O  ... and not dropped on save");
 }
 
 void wordTests()
@@ -198,14 +233,26 @@ void wordTests()
           "W  Markdown markers alone are not words");
 }
 
+QStringList chooserText(BookSidebar *side)
+{
+    QStringList out;
+    for (int i = 0; i < side->picker()->count(); ++i) {
+        out << side->picker()->itemText(i);
+    }
+    return out;
+}
+
 void sidebarTests()
 {
     QTemporaryDir tmp;
-    const QString dir = tmp.path() + "/Novel";
+    const QString lib = tmp.path() + "/Library";
+    const QString dir = lib + "/Novel";
     write(dir + "/10 End.md", "the end\n");
     write(dir + "/2 Middle.md", "middle bit here\n");
     write(dir + "/1 Start.txt", "start\n");
     write(dir + "/cover.png", "x");
+    write(lib + "/loose.md", "top level\n");
+    write(lib + "/Essays/b.md", "b\n");
 
     QMainWindow win;
     auto *side = new BookSidebar(&win);
@@ -213,19 +260,52 @@ void sidebarTests()
     win.resize(400, 600);
     win.show();
 
-    side->setRootPath(dir);
-    check(!side->hasBook() && side->createButton()->isVisibleTo(side),
-          "S  folder without book.json: Create Book offered, nothing written");
-    check(!BookManifest::exists(dir), "S  ... no book.json yet");
-    check(side->createBook(), "S  Create Book");
+    side->setRootPath(QString());
+    check(!side->hasBook() && !side->createButton()->isVisibleTo(side),
+          "S  no library folder: no New Book, a hint instead");
+    side->setRootPath(lib);
+    check(side->books().isEmpty() && !side->hasBook() && side->createButton()->isVisibleTo(side),
+          "B  library without books: New Book offered, nothing written");
+    check(!BookManifest::exists(dir) && !BookManifest::exists(lib), "B  ... no book.json yet");
+    check(side->candidateFolders() == QStringList({"Essays", "Novel"}), "B  candidate subfolders",
+          side->candidateFolders().join(","));
+    check(!side->createBook("../x") && !side->createBook("") && !side->createBook(".hidden"),
+          "B  New Book refuses names that are not one subfolder");
+    check(side->createBook("Novel"), "B  New Book in an existing subfolder");
     check(onDisk(dir) == QStringList({"1 Start.txt", "2 Middle.md", "10 End.md"}),
           "S  created in name order, numbers as numbers, only .md/.txt", onDisk(dir).join(","));
+    check(!BookManifest::exists(lib), "B  no book.json at the library top level");
     check(side->view()->count() == 3 && side->view()->isVisibleTo(side), "S  list shows 3 chapters");
+
+    check(side->createBook("Poems") && QDir(lib + "/Poems").exists() && side->currentBook() == "Poems"
+              && side->view()->count() == 0,
+          "B  New Book with a new name makes the subfolder");
+    check(side->books() == QStringList({"Novel", "Poems"}) && side->picker()->isVisibleTo(side),
+          "B  both books listed", side->books().join(","));
+    check(side->selectBook("Novel") && side->currentBook() == "Novel" && side->view()->count() == 3,
+          "B  pick a book");
+    check(!side->selectBook("Essays"), "B  a folder without book.json is not a book");
+    {
+        BookManifest named;
+        named.load(lib + "/Poems");
+        named.setTitle("Collected Poems");
+        named.save();
+        side->reload();
+        check(chooserText(side) == QStringList({"Novel", "Collected Poems"}),
+              "B  picker shows book titles", chooserText(side).join(","));
+        check(side->currentBook() == "Novel", "B  reload keeps the picked book");
+    }
+    BookSidebar other;
+    other.selectBookOnLoad("Poems");
+    other.setRootPath(lib);
+    check(other.currentBook() == "Poems", "B  saved book is picked on load");
+    other.selectBookOnLoad("Gone");
+    other.setRootPath(lib);
+    check(other.currentBook() == "Novel", "B  saved book gone: the first book");
 
     check(side->moveChapter(2, 0) && onDisk(dir).first() == "10 End.md", "S  move saved at once");
     side->view()->setCurrentRow(0);
     side->setFocus();
-    // Move Down via its shortcut action.
     for (QAction *a : side->actions()) {
         if (a->text() == "Move Down") {
             a->trigger();
@@ -234,25 +314,24 @@ void sidebarTests()
     check(onDisk(dir) == QStringList({"1 Start.txt", "10 End.md", "2 Middle.md"}),
           "S  Move Down (Alt+Down) saved", onDisk(dir).join(","));
 
-    // Drag-drop: the view's model moves a row → the book order follows.
     QAbstractItemModel *model = side->view()->model();
     check(model->moveRow(QModelIndex(), 2, QModelIndex(), 0), "S  drag-drop row move");
     QApplication::processEvents();
     check(onDisk(dir) == QStringList({"2 Middle.md", "1 Start.txt", "10 End.md"}),
           "S  drag-drop order saved", onDisk(dir).join(","));
-    check(side->view()->item(0)->text().startsWith("1. Middle") == false
-              && side->view()->item(0)->text().startsWith("1. 2 Middle"),
+    check(side->view()->item(0)->text().startsWith("1. 2 Middle"),
           "S  list renumbered after the drop", side->view()->item(0)->text());
 
-    // Details dialog round-trip.
     side->editChapter(1);
     BookChapterDialog *dlg = side->chapterDialog();
     check(dlg && dlg->isVisible(), "S  Edit Details… opens the dialog");
     if (dlg) {
         check(dlg->progressLabel()->text() == "1 word", "S  shows the current count",
               dlg->progressLabel()->text());
+        check(dlg->statusBox()->count() == 5 && dlg->statusBox()->itemText(1) == "Outline",
+              "S  status list includes Outline");
         dlg->titleEdit()->setText("  Start  ");
-        dlg->statusBox()->setCurrentText("Final");
+        dlg->statusBox()->setCurrentText("Outline");
         dlg->povEdit()->setText("Ivo");
         dlg->tagsEdit()->setText("a, b, a,");
         dlg->targetBox()->setValue(4);
@@ -266,12 +345,11 @@ void sidebarTests()
     BookManifest b;
     b.load(dir);
     const BookChapter c = b.at(1);
-    check(c.path == "1 Start.txt" && c.title == "Start" && c.status == "Final" && c.pov == "Ivo"
+    check(c.path == "1 Start.txt" && c.title == "Start" && c.status == "Outline" && c.pov == "Ivo"
               && c.tags == QStringList({"a", "b"}) && c.wordTarget == 4 && c.synopsis == "syn"
               && c.notes == "notes",
           "S  details saved to book.json");
 
-    // Context menu.
     QMenu *menu = side->buildContextMenu(0);
     QStringList texts;
     for (QAction *a : menu->actions()) {
@@ -284,7 +362,25 @@ void sidebarTests()
                                 "Remove from Book", "Add Chapters…"}),
           "S  context menu", texts.join(" | "));
 
-    // Missing + remove.
+    // Outside paths: refused with a message, the book unchanged.
+    QStringList messages;
+    QObject::connect(side, &BookSidebar::message, [&messages](const QString &m) { messages << m; });
+    check(side->addChapters({lib + "/loose.md", lib + "/Essays/b.md"}) == 0
+              && onDisk(dir).size() == 3 && messages.size() == 1,
+          "O  sidebar refuses files outside the book, with a message");
+
+    // Library → Add to Book.
+    check(!side->addFileToBook(lib + "/loose.md").isEmpty(),
+          "B  Add to Book: a top-level library file is refused");
+    check(side->addFileToBook(lib + "/Essays/b.md").isEmpty() && side->currentBook() == "Essays"
+              && onDisk(lib + "/Essays") == QStringList({"b.md"}),
+          "B  Add to Book: the subfolder becomes a book, the file is in it");
+    write(dir + "/extra.md", "extra\n");
+    check(side->addFileToBook(dir + "/extra.md").isEmpty() && side->currentBook() == "Novel"
+              && onDisk(dir).last() == "extra.md",
+          "B  Add to Book: picks the file's own book");
+    side->removeChapter(3);
+
     QFile::remove(dir + "/10 End.md");
     side->reload();
     check(side->view()->item(2)->text().contains("Missing: 10 End.md"), "S  missing file marked",
@@ -296,10 +392,26 @@ void sidebarTests()
               && onDisk(dir).last() == "1 Start.txt",
           "S  Add Chapters appends, skipping ones already in the book");
 
+    // An outside entry written by hand: listed as outside, clicking does nothing.
+    QJsonObject json = QJsonDocument::fromJson(readAll(BookManifest::manifestPath(dir))).object();
+    QJsonArray arr = json.value("chapters").toArray();
+    arr.append(QJsonObject{{"path", "../loose.md"}});
+    json.insert("chapters", arr);
+    write(BookManifest::manifestPath(dir), QJsonDocument(json).toJson());
+    side->reload();
+    QStringList opened;
+    QObject::connect(side, &BookSidebar::fileActivated, [&opened](const QString &p) { opened << p; });
+    QListWidgetItem *outside = side->view()->item(3);
+    check(outside && outside->text().contains("Outside the book folder: ../loose.md"),
+          "O  outside entry listed as outside", outside ? outside->text() : QString());
+    emit side->view()->itemClicked(outside);
+    check(opened.isEmpty(), "O  ... and is never opened");
+
     // Bad book.json: shown as a hint, never overwritten.
     write(BookManifest::manifestPath(dir), "{");
-    side->setRootPath(dir);
-    check(!side->hasBook() && !side->createButton()->isVisibleTo(side) && !side->createBook()
+    side->setRootPath(lib);
+    side->selectBook("Novel");
+    check(!side->hasBook() && !side->createButton()->isVisibleTo(side)
               && readAll(BookManifest::manifestPath(dir)) == "{",
           "S  unreadable book.json is left alone");
 }
@@ -313,6 +425,7 @@ int main(int argc, char **argv)
     QCoreApplication::setApplicationName("book_test");
     manifestTests();
     tolerantTests();
+    outsideTests();
     wordTests();
     sidebarTests();
     check(QString::fromLatin1(zwriter::kVersionString) == "1.4.0", "V  version 1.4.0",
