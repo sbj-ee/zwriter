@@ -1,5 +1,6 @@
 #include "MainWindow.hpp"
 #include "Images.hpp"
+#include "ImagePropertiesDialog.hpp"
 #include "AlignmentActions.hpp"
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
@@ -313,6 +314,8 @@ MainWindow::MainWindow(QWidget *parent)
         return m_spellChecker && m_spellChecker->isEnabled() && m_spellChecker->isAvailable()
             && !m_spellChecker->isCorrect(word);
     });
+    connect(m_editor, &PageTextEdit::imageNote, this,
+            [this](const QString &msg) { statusBar()->showMessage(msg, 5000); });
     m_editor->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_editor, &QWidget::customContextMenuRequested,
             this, &MainWindow::showEditorContextMenu);
@@ -804,6 +807,10 @@ void MainWindow::buildFormatMenu()
     tableMenu->addSeparator();
     tableMenu->addAction(m_tableRemoveRowAction);
     tableMenu->addAction(m_tableRemoveColAction);
+
+    m_insertImageAction = m_formatMenu->addAction(QStringLiteral("Insert I&mage…"));
+    m_insertImageAction->setToolTip(QStringLiteral("Insert a picture from a file (PNG, JPEG, GIF, WebP, BMP, SVG)"));
+    connect(m_insertImageAction, &QAction::triggered, this, &MainWindow::insertImageFromFile);
 
     auto *pageBreakAct = m_formatMenu->addAction(QStringLiteral("Insert Page Brea&k"));
     m_pageBreakAction = pageBreakAct;
@@ -1947,6 +1954,15 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
         menu = new QMenu(m_editor);
     }
 
+    const int imagePos = m_markdownMode ? -1 : imagePositionAt(docPos);
+    if (imagePos >= 0) {
+        QAction *props = new QAction(QStringLiteral("Image Properties…"), menu);
+        connect(props, &QAction::triggered, this, [this, imagePos]() { showImageProperties(imagePos); });
+        QAction *first = menu->actions().isEmpty() ? nullptr : menu->actions().constFirst();
+        menu->insertAction(first, props);
+        menu->insertSeparator(first);
+    }
+
     if (m_spellChecker && m_spellChecker->isEnabled() && m_spellChecker->isAvailable()) {
         QTextCursor cursor = m_editor->cursorForPosition(docPos);
         cursor.select(QTextCursor::WordUnderCursor);
@@ -2019,6 +2035,93 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
 
     menu->exec(m_editor->viewport()->mapToGlobal(pos));
     delete menu;
+}
+
+void MainWindow::insertImageFromFile()
+{
+    if (m_markdownMode) {
+        return;
+    }
+    QFileDialog dlg(this, QStringLiteral("Insert Image"));
+    setupNativeFileDialog(dlg);
+    dlg.setFileMode(QFileDialog::ExistingFile);
+    dlg.setAcceptMode(QFileDialog::AcceptOpen);
+    dlg.setNameFilter(Images::imageFileFilter());
+    if (dlg.exec() != QDialog::Accepted || dlg.selectedFiles().isEmpty()) {
+        return;
+    }
+    insertImageFile(dlg.selectedFiles().constFirst());
+}
+
+bool MainWindow::insertImageFile(const QString &path)
+{
+    if (!m_editor || m_markdownMode) {
+        return false;
+    }
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        statusBar()->showMessage(QStringLiteral("Could not read %1.").arg(QFileInfo(path).fileName()), 5000);
+        return false;
+    }
+    QTextCursor c = m_editor->textCursor();
+    QString note;
+    const bool ok = Images::insertImage(c, f.readAll(), &note);
+    if (ok) {
+        m_editor->setTextCursor(c);
+        m_editor->setFocus();
+    }
+    if (!note.isEmpty()) {
+        statusBar()->showMessage(note, 5000);
+    }
+    return ok;
+}
+
+int MainWindow::imagePositionAt(const QPoint &documentPos) const
+{
+    if (!m_editor) {
+        return -1;
+    }
+    QTextDocument *doc = m_editor->document();
+    const int hit = doc->documentLayout()->hitTest(QPointF(documentPos), Qt::FuzzyHit);
+    for (int pos : {hit, hit - 1}) {
+        const QTextCursor c = Images::imageAt(doc, pos);
+        if (c.isNull()) {
+            continue;
+        }
+        // Only when the click is on the picture itself, not beside it.
+        QTextCursor at(doc);
+        at.setPosition(pos);
+        const QRectF caret = m_editor->cursorRect(at);
+        const QTextImageFormat f = c.charFormat().toImageFormat();
+        const qreal w = f.width() > 0 ? f.width() : Images::naturalSize(doc, f.name()).width();
+        const Images::Wrap wrap = Images::wrapAt(doc, pos);
+        if (wrap != Images::Wrap::Inline
+            || (documentPos.x() >= caret.left() - 2 && documentPos.x() <= caret.left() + w + 2)) {
+            return pos;
+        }
+    }
+    return -1;
+}
+
+void MainWindow::showImageProperties(int position)
+{
+    QTextDocument *doc = m_editor->document();
+    QTextCursor sel = Images::imageAt(doc, position);
+    if (sel.isNull()) {
+        return;
+    }
+    const QTextImageFormat f = sel.charFormat().toImageFormat();
+    const QSize natural = Images::naturalSize(doc, f.name());
+    ImagePropertiesDialog dlg(natural, Images::columnWidth(doc), this);
+    dlg.setImageSize(QSize(qRound(f.width() > 0 ? f.width() : natural.width()),
+                           qRound(f.height() > 0 ? f.height() : natural.height())));
+    dlg.setWrap(Images::wrapAt(doc, position));
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    const QSize size = dlg.imageSize();
+    Images::applyImage(sel, f.name(), size.width(), size.height(), dlg.wrap());
+    m_editor->setTextCursor(sel);
 }
 
 void MainWindow::onCursorMoved()
@@ -2516,7 +2619,7 @@ void MainWindow::syncRichActions()
     const bool rich = !m_markdownMode;
     for (QAction *a : {m_boldAction, m_italicAction, m_underlineAction, m_paragraphAction,
                        m_h1Action, m_h2Action, m_h3Action, m_bulletListAction, m_numberListAction,
-                       m_clearFormatAction, m_insertTableAction, m_pageBreakAction,
+                       m_clearFormatAction, m_insertTableAction, m_insertImageAction, m_pageBreakAction,
                        m_pageNumbersAction, m_headerFooterAction}) {
         if (a) {
             a->setEnabled(rich);

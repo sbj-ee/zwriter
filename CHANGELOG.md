@@ -3,6 +3,34 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.5.1] — unreleased
+
+Images in documents, part 2 of 3: insert pictures, size them and wrap text around them.
+
+- **Format → Insert Image…** picks a PNG, JPEG, GIF (first frame), WebP or BMP file. SVG works
+  when Qt's SVG image plugin is installed; otherwise it's refused with a message. The picture
+  goes in line at the caret, at its own size but no wider than the text column.
+- **Paste and drag-and-drop.** Pasting image data (a screenshot, Copy Image in a browser) or
+  pasting or dropping image files inserts the pictures. A multi-file drop is one undo step.
+  Image data that arrives with text (some apps add a bitmap of copied text) still pastes as text.
+  Markdown documents don't take pictures (Markdown gets them in part 3).
+- **Big pictures are scaled down** to 4000 px on the longest side, with a status-bar note. PNG
+  and JPEG keep their bytes; other types are stored as PNG, which is what ODT holds anyway.
+- **Right-click a picture → Image Properties…**: width and height in px (Keep proportions on by
+  default), **Fit Column Width**, **Original Size** (capped to the column), and **Wrap**: in line
+  with text, left (text flows on the right) or right (text flows on the left). One undo step.
+- **Wrap saves to ODT.** A floating picture is saved as a char-anchored frame with a graphic style
+  (`style:wrap`, `style:horizontal-pos` left/right), which LibreOffice shows the same way.
+  Opening an ODT reads those styles back, including LibreOffice's paragraph-anchored frames
+  with wrap and a left/right position. Centred frames show in line.
+- Known limit: Qt puts no gap between a floating picture and the text beside it, so wrapped text
+  runs right up to the picture's edge. A gap is planned as a follow-up.
+- Tests: `images_test` W (left/inline/right survive an ODT save/open, graphic styles, anchors),
+  N (column cap, 4000 px limit, JPEG bytes kept, GIF to PNG, refusals, undo of insert and of
+  Image Properties), L (LibreOffice right-floated frame). `mainwindow_test` P (Insert Image,
+  paste, drop and its undo, click hit-test, Markdown refuses, dialog maths). Screenshots
+  `images-wrap-*.png`, `images-properties.png`.
+
 ## [1.5.0] — unreleased
 
 Images in documents, part 1 of 3: pictures in ODT files open, show and save.

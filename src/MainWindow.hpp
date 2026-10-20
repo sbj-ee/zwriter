@@ -67,6 +67,15 @@ public:
     // so text always starts on the left guide.
     QPair<qreal, qreal> pageGuideColumn() const;
 
+    // Insert → Image… without the file dialog (also used by tests): insert
+    // the picture at the caret. False (with a status message) if it isn't one.
+    bool insertImageFile(const QString &path);
+    // The picture under a document position for Image Properties (position of
+    // the image character, or -1).
+    int imagePositionAt(const QPoint &documentPos) const;
+    // Right-click → Image Properties… for the picture at `position`.
+    void showImageProperties(int position);
+
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -83,6 +92,7 @@ private slots:
     void editPastePlain();
     void clearFormatting();
     void fileNew();
+    void insertImageFromFile();
     void fileNewMarkdown();
     void applyHeading();
     void onFontFamilyChosen(const QFont &font);
@@ -308,6 +318,7 @@ private:
     QAction *m_checkUpdatesAtStartupAction = nullptr;
     QAction *m_newMarkdownAction = nullptr;
     QAction *m_insertTableAction = nullptr;
+    QAction *m_insertImageAction = nullptr;
     QAction *m_pageBreakAction = nullptr;
     QAction *m_headerFooterAction = nullptr;
     QMenu *m_helpMenu = nullptr;

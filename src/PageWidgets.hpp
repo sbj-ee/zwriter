@@ -48,6 +48,15 @@ public:
 
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 
+    // Paste / drop of pictures (image data, or local image files). Returns how
+    // many were inserted; problems go out through imageNote().
+    int insertImagesFromMimeData(const QMimeData *source);
+    bool canInsertFromMimeData(const QMimeData *source) const override;
+
+signals:
+    // A status-bar note about a pasted / dropped picture (refused, scaled down).
+    void imageNote(const QString &message);
+
 protected:
     // Rich paste keeps structure and emphasis but drops hard-coded text and
     // background colours, which would clash with the theme (text follows it).

@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.5.0 LANGUAGES CXX)
+project(zwriter VERSION 1.5.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -114,6 +114,8 @@ add_executable(zwriter
   src/FindReplaceBar.hpp
   src/InsertTableDialog.cpp
   src/InsertTableDialog.hpp
+  src/ImagePropertiesDialog.cpp
+  src/ImagePropertiesDialog.hpp
   src/HeaderFooterDialog.cpp
   src/HeaderFooterDialog.hpp
   src/SpellChecker.cpp

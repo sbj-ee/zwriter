@@ -1098,6 +1098,67 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
     qreal frameW = 0.0;
     qreal frameH = 0.0;
     bool frameDone = false;
+    QString frameFloat; // "left" / "right" / empty = in line
+    // Graphic styles (content.xml automatic, styles.xml common): which ones
+    // float a frame left or right with text wrapping past it.
+    struct GraphicStyle {
+        QString wrap;
+        QString hpos;
+        QString parent;
+    };
+    QHash<QString, GraphicStyle> graphicStyles;
+    for (const QByteArray *src : {&stylesXml, &xml}) {
+        QXmlStreamReader g(*src);
+        QString current;
+        while (!g.atEnd()) {
+            const auto tok = g.readNext();
+            if (tok == QXmlStreamReader::StartElement && g.name() == QLatin1String("style")
+                && g.attributes().value(QStringLiteral("style:family")) == QLatin1String("graphic")) {
+                current = g.attributes().value(QStringLiteral("style:name")).toString();
+                graphicStyles[current].parent =
+                    g.attributes().value(QStringLiteral("style:parent-style-name")).toString();
+            } else if (tok == QXmlStreamReader::StartElement && !current.isEmpty()
+                       && g.name() == QLatin1String("graphic-properties")) {
+                const auto a = g.attributes();
+                if (a.hasAttribute(QStringLiteral("style:wrap"))) {
+                    graphicStyles[current].wrap = a.value(QStringLiteral("style:wrap")).toString();
+                }
+                if (a.hasAttribute(QStringLiteral("style:horizontal-pos"))) {
+                    graphicStyles[current].hpos = a.value(QStringLiteral("style:horizontal-pos")).toString();
+                }
+            } else if (tok == QXmlStreamReader::EndElement && g.name() == QLatin1String("style")) {
+                current.clear();
+            }
+        }
+    }
+    auto floatOf = [&](QString style) -> QString {
+        QString wrap;
+        QString hpos;
+        for (int depth = 0; depth < 8 && !style.isEmpty(); ++depth) {
+            const auto it = graphicStyles.constFind(style);
+            if (it == graphicStyles.constEnd()) {
+                break;
+            }
+            if (wrap.isEmpty()) {
+                wrap = it->wrap;
+            }
+            if (hpos.isEmpty()) {
+                hpos = it->hpos;
+            }
+            style = it->parent;
+        }
+        if (wrap.isEmpty() || wrap == QLatin1String("none") || wrap == QLatin1String("run-through")) {
+            return QString();
+        }
+        if (hpos == QLatin1String("left") || hpos == QLatin1String("inside") || hpos == QLatin1String("from-left")
+            || hpos == QLatin1String("from-inside")) {
+            return QStringLiteral("left");
+        }
+        if (hpos == QLatin1String("right") || hpos == QLatin1String("outside")) {
+            return QStringLiteral("right");
+        }
+        return QString(); // centred: no float in zwriter, show it in line
+    };
     while (!reader.atEnd()) {
         const auto token = reader.readNext();
         if (token == QXmlStreamReader::StartElement) {
@@ -1219,6 +1280,10 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                 frameW = Images::odfLengthToPx(attrs.value(QStringLiteral("svg:width")));
                 frameH = Images::odfLengthToPx(attrs.value(QStringLiteral("svg:height")));
                 frameDone = false;
+                frameFloat.clear();
+                if (attrs.value(QStringLiteral("text:anchor-type")) != QLatin1String("as-char")) {
+                    frameFloat = floatOf(attrs.value(QStringLiteral("draw:style-name")).toString());
+                }
             } else if (name == QLatin1String("image") && reader.prefix() == QLatin1String("draw")) {
                 // A frame may hold several images (LibreOffice: an SVG plus a
                 // PNG fallback): use the first one Qt can show.
@@ -1237,6 +1302,9 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                     }
                     if (frameH > 0.0) {
                         html += QStringLiteral(" height=\"%1\"").arg(qRound(frameH));
+                    }
+                    if (!frameFloat.isEmpty()) {
+                        html += QStringLiteral(" style=\"float: %1\"").arg(frameFloat);
                     }
                     html += QStringLiteral(" />");
                     atLineStart = false;
@@ -1560,6 +1628,56 @@ QString tablePatchedContent(QString xml)
     return xml;
 }
 
+// Text wrap: Qt writes every picture as an as-char frame. A floating image
+// becomes a char-anchored frame with a graphic style that puts it at the left
+// or right of the paragraph with text running past it (LibreOffice's
+// "Wrap: Page/Optimal" look).
+QString framePatchedContent(const QString &xml, const QList<Images::Wrap> &wraps)
+{
+    static const QRegularExpression frame(QStringLiteral(R"(<draw:frame\b[^>]*>)"));
+    static const QRegularExpression anchor(QStringLiteral(R"(\stext:anchor-type="[^"]*")"));
+    QString out;
+    out.reserve(xml.size() + 1024);
+    qsizetype last = 0;
+    int index = 0;
+    auto it = frame.globalMatch(xml);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        out += QStringView(xml).mid(last, m.capturedStart() - last);
+        QString tag = m.captured();
+        const Images::Wrap w = index < wraps.size() ? wraps.at(index) : Images::Wrap::Inline;
+        ++index;
+        if (w != Images::Wrap::Inline) {
+            tag.remove(anchor);
+            tag.insert(11, QStringLiteral(" draw:style-name=\"%1\" text:anchor-type=\"char\"")
+                               .arg(w == Images::Wrap::Left ? QStringLiteral("zwImageLeft")
+                                                            : QStringLiteral("zwImageRight")));
+        }
+        out += tag;
+        last = m.capturedEnd();
+    }
+    out += QStringView(xml).mid(last);
+    const QString styles = QStringLiteral(
+        "<style:style style:name=\"zwImageLeft\" style:family=\"graphic\">"
+        "<style:graphic-properties style:wrap=\"right\" style:number-wrapped-paragraphs=\"no-limit\" "
+        "style:horizontal-pos=\"left\" style:horizontal-rel=\"paragraph\" style:vertical-pos=\"top\" "
+        "style:vertical-rel=\"paragraph\" fo:margin-right=\"0.25cm\" fo:margin-bottom=\"0.1cm\"/></style:style>"
+        "<style:style style:name=\"zwImageRight\" style:family=\"graphic\">"
+        "<style:graphic-properties style:wrap=\"left\" style:number-wrapped-paragraphs=\"no-limit\" "
+        "style:horizontal-pos=\"right\" style:horizontal-rel=\"paragraph\" style:vertical-pos=\"top\" "
+        "style:vertical-rel=\"paragraph\" fo:margin-left=\"0.25cm\" fo:margin-bottom=\"0.1cm\"/></style:style>");
+    const qsizetype close = out.indexOf(QLatin1String("</office:automatic-styles>"));
+    if (close >= 0) {
+        out.insert(close, styles);
+    } else {
+        const qsizetype body = out.indexOf(QLatin1String("<office:body"));
+        if (body >= 0) {
+            out.insert(body, QStringLiteral("<office:automatic-styles>%1</office:automatic-styles>").arg(styles));
+        }
+    }
+    return out;
+}
+
 // Post-process content.xml written by QTextDocumentWriter: headings (text:h)
 // and table styling. Best effort: the document itself is already saved.
 bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
@@ -1587,7 +1705,22 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
             textStyleFamilies.insert(QStringLiteral("c%1").arg(i), fams.first());
         }
     }
-    if (headingStyles.isEmpty() && tables.isEmpty() && textStyleFamilies.isEmpty()) {
+    // Wrap (float) of every image, in document order = the order Qt writes
+    // the draw:frame elements.
+    QList<Images::Wrap> frameWraps;
+    bool anyFloat = false;
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextCharFormat f = it.fragment().charFormat();
+            if (f.isImageFormat()) {
+                for (int k = 0; k < it.fragment().length(); ++k) {
+                    frameWraps << Images::wrapOf(doc, f);
+                    anyFloat = anyFloat || frameWraps.last() != Images::Wrap::Inline;
+                }
+            }
+        }
+    }
+    if (headingStyles.isEmpty() && tables.isEmpty() && textStyleFamilies.isEmpty() && !anyFloat) {
         return true;
     }
     auto fail = [error](const QString &msg) {
@@ -1612,6 +1745,9 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
     }
     if (!tables.isEmpty()) {
         patched = tablePatchedContent(patched);
+    }
+    if (anyFloat) {
+        patched = framePatchedContent(patched, frameWraps);
     }
     if (!textStyleFamilies.isEmpty()) {
         static const QRegularExpression re(QStringLiteral(
