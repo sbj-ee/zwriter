@@ -22,6 +22,7 @@
 #include "version.hpp"
 
 #include <QApplication>
+#include <QVersionNumber>
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
@@ -498,7 +499,8 @@ int main(int argc, char **argv)
     odtTests();
     wordTests();
     sidebarTests();
-    check(QString::fromLatin1(zwriter::kVersionString) == "1.4.1", "V  version 1.4.1",
+    check(QVersionNumber::fromString(QString::fromLatin1(zwriter::kVersionString)) >= QVersionNumber(1, 4, 0),
+          "V  version is 1.4.0 or later (the Book view shipped in 1.4.0)",
           QString::fromLatin1(zwriter::kVersionString));
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures,
                 g_failures == 1 ? "" : "s");

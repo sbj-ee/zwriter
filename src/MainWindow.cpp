@@ -1,4 +1,5 @@
 #include "MainWindow.hpp"
+#include "Images.hpp"
 #include "AlignmentActions.hpp"
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
@@ -2755,6 +2756,31 @@ bool MainWindow::maybeSave()
     return !m_dirty;
 }
 
+bool MainWindow::confirmImagesDropped(const QTextDocument *doc, DocumentIo::Format format)
+{
+    if (Images::formatKeepsImages(format)) {
+        return true;
+    }
+    const int n = int(Images::imageFormats(doc).size());
+    if (n == 0) {
+        return true;
+    }
+    QMessageBox box(QMessageBox::Warning, QStringLiteral("Images will be left out"),
+                    QStringLiteral("This document has %1 image%2. %3 files can't hold images, so %4 "
+                                   "left out of the saved file.")
+                        .arg(n)
+                        .arg(n == 1 ? QString() : QStringLiteral("s"))
+                        .arg(DocumentIo::formatName(format).toUpper())
+                        .arg(n == 1 ? QStringLiteral("it will be") : QStringLiteral("they will be")),
+                    QMessageBox::NoButton, this);
+    box.setInformativeText(QStringLiteral("Save as ODT to keep them."));
+    QPushButton *save = box.addButton(QStringLiteral("Save Without Images"), QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.exec();
+    return box.clickedButton() == save;
+}
+
 bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
 {
     m_meta.ensureDefaults();
@@ -2775,6 +2801,10 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
         all.setCharFormat(QTextCharFormat());
         plainCopy->setDefaultFont(richDocumentFont());
         doc = plainCopy.get();
+    }
+
+    if (!confirmImagesDropped(doc, format)) {
+        return false;
     }
 
     QString error;

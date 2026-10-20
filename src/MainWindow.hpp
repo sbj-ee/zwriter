@@ -32,6 +32,7 @@ class QGraphicsDropShadowEffect;
 class TypewriterSounds;
 class FindReplaceBar;
 class QTextTable;
+class QTextDocument;
 class QFileDialog;
 namespace Alignment { class Actions; }
 class SpellChecker;
@@ -173,6 +174,8 @@ private:
     QString defaultBaseName() const;
     void updateWindowTitle();
     bool maybeSave();
+    // TXT/RTF/Markdown can't hold images: ask before saving without them.
+    bool confirmImagesDropped(const QTextDocument *doc, DocumentIo::Format format);
     bool saveToPath(const QString &path, DocumentIo::Format format);
     void setCurrentFile(const QString &path, DocumentIo::Format format);
     bool openPath(const QString &path);

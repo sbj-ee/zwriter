@@ -1,8 +1,10 @@
 #include "DocumentIo.hpp"
+#include "Images.hpp"
 #include "Alignment.hpp"
 
 #include <QStringView>
 
+#include <QDir>
 #include <QFile>
 #include <QHash>
 #include <QIODevice>
@@ -30,6 +32,7 @@
 #include <QSet>
 #include <QTextList>
 #include <QTextFragment>
+#include <QUrl>
 #include <functional>
 #include <QtGlobal>
 
@@ -730,7 +733,10 @@ QHash<QString, OdtAlignStyle> odtCommonAlignStyles(const QByteArray &stylesXml)
 // text:s / text:tab / text:line-break are explicit) and every paragraph is
 // emitted with white-space:pre-wrap so Qt keeps exactly what we produce.
 // `stylesXml` (optional) supplies the alignment of named styles.
-QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteArray())
+// `images`: package members (e.g. "Pictures/1.png") that hold a decodable
+// image; draw:image elements pointing elsewhere are skipped.
+QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteArray(),
+                     const QSet<QString> &images = QSet<QString>())
 {
     struct StyleInfo {
         QString fontFamily;
@@ -1089,6 +1095,9 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
         }
     };
 
+    qreal frameW = 0.0;
+    qreal frameH = 0.0;
+    bool frameDone = false;
     while (!reader.atEnd()) {
         const auto token = reader.readNext();
         if (token == QXmlStreamReader::StartElement) {
@@ -1205,6 +1214,35 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                 pHasContent = true;
             } else if (name == QLatin1String("soft-page-break")) {
                 // Layout hint only; not content.
+            } else if (name == QLatin1String("frame") && reader.prefix() == QLatin1String("draw")) {
+                const auto attrs = reader.attributes();
+                frameW = Images::odfLengthToPx(attrs.value(QStringLiteral("svg:width")));
+                frameH = Images::odfLengthToPx(attrs.value(QStringLiteral("svg:height")));
+                frameDone = false;
+            } else if (name == QLatin1String("image") && reader.prefix() == QLatin1String("draw")) {
+                // A frame may hold several images (LibreOffice: an SVG plus a
+                // PNG fallback): use the first one Qt can show.
+                QString href = reader.attributes().value(QStringLiteral("xlink:href")).toString();
+                if (href.startsWith(QLatin1String("./"))) {
+                    href = href.mid(2);
+                }
+                if (!frameDone && images.contains(href)) {
+                    if (!inP) {
+                        openParagraph(0, QString());
+                    }
+                    flushSpace();
+                    html += QStringLiteral("<img src=\"%1\"").arg(htmlEscaped(href));
+                    if (frameW > 0.0) {
+                        html += QStringLiteral(" width=\"%1\"").arg(qRound(frameW));
+                    }
+                    if (frameH > 0.0) {
+                        html += QStringLiteral(" height=\"%1\"").arg(qRound(frameH));
+                    }
+                    html += QStringLiteral(" />");
+                    atLineStart = false;
+                    pHasContent = true;
+                    frameDone = true;
+                }
             }
         } else if (token == QXmlStreamReader::EndElement) {
             const QStringView name = reader.name();
@@ -1370,7 +1408,45 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
             stylesXml = styles.readAllStandardOutput();
         }
     }
-    doc->setHtml(odtXmlToHtml(xml, stylesXml));
+    // Pictures: every package member that decodes as an image becomes a
+    // document resource named by its path, which the draw:image hrefs use.
+    QSet<QString> imageMembers;
+    QHash<QString, QByteArray> imageData;
+    {
+        QProcess list;
+        list.start(QStringLiteral("unzip"), {QStringLiteral("-Z1"), path});
+        if (list.waitForFinished(15000) && list.exitStatus() == QProcess::NormalExit
+            && list.exitCode() == 0) {
+            const QStringList members =
+                QString::fromUtf8(list.readAllStandardOutput()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+            for (QString m : members) {
+                m = m.trimmed();
+                if (m.isEmpty() || m.endsWith(QLatin1Char('/')) || m.endsWith(QLatin1String(".xml"))
+                    || m == QLatin1String("mimetype") || m.startsWith(QLatin1String("META-INF/"))
+                    || !xml.contains(m.toUtf8())) {
+                    continue;
+                }
+                QProcess one;
+                one.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, m});
+                if (!one.waitForFinished(15000) || one.exitCode() != 0) {
+                    continue;
+                }
+                const QByteArray data = one.readAllStandardOutput();
+                if (Images::isDecodable(data)) {
+                    doc->addResource(QTextDocument::ImageResource, QUrl(m), data);
+                    imageMembers.insert(m);
+                    imageData.insert(m, data);
+                }
+            }
+        }
+    }
+    doc->setHtml(odtXmlToHtml(xml, stylesXml, imageMembers));
+    for (const QString &m : std::as_const(imageMembers)) {
+        // setHtml() may drop resources on some Qt versions; put them back.
+        if (doc->resource(QTextDocument::ImageResource, QUrl(m)).isNull()) {
+            doc->addResource(QTextDocument::ImageResource, QUrl(m), imageData.value(m));
+        }
+    }
     restyleTables(doc->rootFrame());
     normaliseImportedBlocks(doc);
     // The clean-up above is part of loading, not an edit: nothing to undo.
@@ -1606,6 +1682,83 @@ void spellOutDefaultFamilies(QTextDocument *doc, const QFont &defaultFont)
         sel.mergeCharFormat(f);
     }
     edit.endEditBlock();
+}
+
+// Qt's ODF writer re-encodes every picture as PNG. Put JPEG originals back
+// (photos would grow several times over and lose nothing by staying JPEG):
+// the frame's draw:name is the image resource name, so map frame -> member.
+bool restoreJpegPictures(QTextDocument *doc, const QString &path, QString *error)
+{
+    auto fail = [&](const QString &msg) {
+        if (error) {
+            *error = msg;
+        }
+        return false;
+    };
+    QProcess unzip;
+    unzip.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("content.xml")});
+    if (!unzip.waitForFinished(15000) || unzip.exitCode() != 0) {
+        return fail(QStringLiteral("Pictures saved as PNG (unzip unavailable)."));
+    }
+    QHash<QString, QByteArray> jpegs; // member -> original bytes
+    QXmlStreamReader r(unzip.readAllStandardOutput());
+    QString frameName;
+    while (!r.atEnd()) {
+        if (r.readNext() != QXmlStreamReader::StartElement) {
+            continue;
+        }
+        if (r.name() == QLatin1String("frame")) {
+            frameName = r.attributes().value(QStringLiteral("draw:name")).toString();
+        } else if (r.name() == QLatin1String("image") && !frameName.isEmpty()) {
+            const QString href = r.attributes().value(QStringLiteral("xlink:href")).toString();
+            const QByteArray data = doc->resource(QTextDocument::ImageResource, QUrl(frameName)).toByteArray();
+            if (data.startsWith("\xFF\xD8\xFF") && !href.isEmpty()) {
+                jpegs.insert(href, data);
+            }
+            frameName.clear();
+        }
+    }
+    if (jpegs.isEmpty()) {
+        return true;
+    }
+    QTemporaryDir dir;
+    if (!dir.isValid()) {
+        return fail(QStringLiteral("Pictures saved as PNG (no temp dir)."));
+    }
+    QProcess man;
+    man.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("META-INF/manifest.xml")});
+    if (!man.waitForFinished(15000) || man.exitCode() != 0) {
+        return fail(QStringLiteral("Pictures saved as PNG (no manifest)."));
+    }
+    QString manifest = QString::fromUtf8(man.readAllStandardOutput());
+    QStringList members;
+    for (auto it = jpegs.cbegin(); it != jpegs.cend(); ++it) {
+        const QString file = dir.filePath(it.key());
+        QDir().mkpath(QFileInfo(file).absolutePath());
+        QFile f(file);
+        if (!f.open(QIODevice::WriteOnly) || f.write(it.value()) != it.value().size()) {
+            return fail(QStringLiteral("Pictures saved as PNG (temp write failed)."));
+        }
+        members << it.key();
+        static const QRegularExpression entry(QStringLiteral(
+            "manifest:media-type=\"image/png\"(\\s+manifest:full-path=\"%1\")"));
+        const QRegularExpression one(entry.pattern().arg(QRegularExpression::escape(it.key())));
+        manifest.replace(one, QStringLiteral("manifest:media-type=\"image/jpeg\"\\1"));
+    }
+    QDir().mkpath(dir.filePath(QStringLiteral("META-INF")));
+    QFile mf(dir.filePath(QStringLiteral("META-INF/manifest.xml")));
+    if (!mf.open(QIODevice::WriteOnly) || mf.write(manifest.toUtf8()) < 0) {
+        return fail(QStringLiteral("Pictures saved as PNG (temp write failed)."));
+    }
+    mf.close();
+    members << QStringLiteral("META-INF/manifest.xml");
+    QProcess zip;
+    zip.setWorkingDirectory(dir.path());
+    zip.start(QStringLiteral("zip"), QStringList{QStringLiteral("-X"), QStringLiteral("-q"), path} + members);
+    if (!zip.waitForFinished(30000) || zip.exitCode() != 0) {
+        return fail(QStringLiteral("Pictures saved as PNG (zip unavailable)."));
+    }
+    return true;
 }
 
 bool saveWithWriter(QTextDocument *doc, const QString &path, const QByteArray &fmt, QString *error)
@@ -1917,6 +2070,10 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
         QString headingError;
         if (!patchOdtContent(copy.get(), path, &headingError)) {
             qWarning("zwriter: %s", qPrintable(headingError));
+        }
+        QString pictureError;
+        if (!restoreJpegPictures(copy.get(), path, &pictureError)) {
+            qWarning("zwriter: %s", qPrintable(pictureError));
         }
         return true;
     }
