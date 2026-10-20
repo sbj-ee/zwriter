@@ -11,6 +11,7 @@
 //   I  an ODT with a picture opens with the picture shown in the editor, clean
 //   P  Insert Image (file), paste image data, drop image files; Image Properties
 //      dialog maths; the picture under a click; Markdown mode refuses pictures
+//   K  captions, PDF export with a picture, Markdown pictures into <name>.assets/
 //   G  with Page Guides on, typed text starts on the left guide and stays
 //      inside the guides in every theme, view, window width and sidebar state
 // Run: QT_QPA_PLATFORM=offscreen ctest --output-on-failure
@@ -27,6 +28,9 @@
 #include <QAction>
 #include <QApplication>
 #include <QBuffer>
+#include <QAbstractButton>
+#include <QTextBrowser>
+#include <QTextBlock>
 #include <QMimeData>
 #include <QUrl>
 #include <QImage>
@@ -589,7 +593,7 @@ void testInsertPictures(const QString &dir)
         wait(150);
         auto *med = qobject_cast<PageTextEdit *>(editorOf(md));
         check(med && med->insertImagesFromMimeData(&drop) == 0 && !md.insertImageFile(file),
-              "P Markdown mode refuses inserted / dropped pictures");
+              "P an unsaved Markdown file refuses pictures (they need a folder next to it)");
         md.close();
     }
 
@@ -605,6 +609,120 @@ void testInsertPictures(const QString &dir)
     check(small.imageSize() == QSize(100, 50), "P Original Size of a small picture");
     small.setWrap(Images::Wrap::Right);
     check(small.wrap() == Images::Wrap::Right, "P wrap choice round-trips");
+}
+
+void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
+{
+    const QString file = dir + QStringLiteral("/k.png");
+    {
+        QFile f(file);
+        f.open(QIODevice::WriteOnly);
+        f.write(pngBytes(300, 150, QColor(60, 120, 180)));
+    }
+    {
+        MainWindow win;
+        win.resize(1000, 700);
+        win.show();
+        wait(150);
+        QTextEdit *ed = editorOf(win);
+        win.insertImageFile(file);
+        const int pos = 0;
+        check(win.addCaption(pos), "K Add Caption under a picture");
+        const QTextBlock cap = ed->document()->findBlockByNumber(1);
+        check(cap.text() == QLatin1String("Caption"), "K caption paragraph follows the picture", cap.text());
+        check(cap.blockFormat().alignment() & Qt::AlignHCenter, "K caption is centred");
+        check(cap.begin().fragment().charFormat().fontItalic(), "K caption is italic");
+        check(ed->textCursor().selectedText() == QLatin1String("Caption"), "K caption text is selected for typing");
+        ed->document()->undo();
+        check(ed->document()->blockCount() == 1, "K one undo removes the caption");
+        check(!win.addCaption(5), "K no caption where there is no picture");
+
+        const QString pdf = dir + QStringLiteral("/k.pdf");
+        check(win.exportPdfTo(pdf), "K export PDF");
+        QFile pf(pdf);
+        pf.open(QIODevice::ReadOnly);
+        const QByteArray bytes = pf.readAll();
+        check(bytes.contains("/Subtype /Image"), "K the PDF has an image object");
+        check(bytes.contains("/Width 300") && bytes.contains("/Height 150"),
+              "K the picture is embedded at its full 300x150 pixels");
+        ed->document()->setModified(false);
+        win.close();
+    }
+    {
+        const QString md = dir + QStringLiteral("/Field notes.md");
+        writeFile(md, "# Field notes\n\n");
+        MainWindow win;
+        win.resize(1000, 700);
+        win.show();
+        win.openExternalFile(md);
+        wait(300);
+        QTextEdit *ed = editorOf(win);
+        QTextCursor end = ed->textCursor();
+        end.movePosition(QTextCursor::End);
+        ed->setTextCursor(end);
+        check(win.insertImageFile(file), "K Markdown: Insert Image");
+        check(ed->toPlainText().contains(QLatin1String("![image-001](Field%20notes.assets/image-001.png)")),
+              "K Markdown: a link to the copied picture is typed", ed->toPlainText());
+        check(QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-001.png")),
+              "K Markdown: picture copied into Field notes.assets/");
+        auto *ped = qobject_cast<PageTextEdit *>(ed);
+        QMimeData drop;
+        drop.setUrls({QUrl::fromLocalFile(file)});
+        check(ped && ped->insertImagesFromMimeData(&drop) == 1
+                  && QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-002.png")),
+              "K Markdown: drop copies image-002.png");
+        auto *preview = win.findChild<QTextBrowser *>(QStringLiteral("markdownPreview"));
+        if (preview && !preview->isVisible()) {
+            QMetaObject::invokeMethod(&win, "toggleMarkdownPreview");
+        }
+        wait(900);
+        bool shown = false;
+        for (QTextBrowser *b : win.findChildren<QTextBrowser *>()) {
+            for (QTextBlock blk = b->document()->begin(); blk.isValid(); blk = blk.next()) {
+                for (auto it = blk.begin(); !it.atEnd(); ++it) {
+                    const QTextCharFormat f = it.fragment().charFormat();
+                    if (f.isImageFormat()
+                        && !b->loadResource(QTextDocument::ImageResource, QUrl(f.toImageFormat().name())).isNull()) {
+                        shown = true;
+                    }
+                }
+            }
+        }
+        check(shown, "K Markdown preview shows the picture from the assets folder");
+        // Remove the second link and save: the unused image-002 is offered for
+        // deletion. Escape / default keeps it; Delete Files removes only it.
+        QString text = ed->toPlainText();
+        text.remove(QStringLiteral("![image-002](Field%20notes.assets/image-002.png)"));
+        ed->setPlainText(text);
+        prompts.seen = 0;
+        QMetaObject::invokeMethod(&win, "fileSave");
+        wait(200);
+        check(prompts.seen == 1 && QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-002.png")),
+              "K save offers cleanup of the unused picture; default keeps it",
+              QString::number(prompts.seen));
+        QTimer deleter;
+        deleter.setInterval(0);
+        QObject::connect(&deleter, &QTimer::timeout, [&] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                for (QAbstractButton *b : box->buttons()) {
+                    if (b->text() == QLatin1String("Delete Files")) {
+                        b->click();
+                        return;
+                    }
+                }
+            }
+        });
+        deleter.start();
+        ed->insertPlainText(QStringLiteral(" "));
+        QMetaObject::invokeMethod(&win, "fileSave");
+        wait(200);
+        deleter.stop();
+        check(!QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-002.png"))
+                  && QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-001.png")),
+              "K Delete Files removes only the unused picture");
+        ed->document()->setModified(false);
+        win.close();
+    }
 }
 
 } // namespace
@@ -662,6 +780,7 @@ int main(int argc, char **argv)
     testTitle();
     testOdtImageOpens(dataDir.path());
     testInsertPictures(dataDir.path());
+    testCaptionsPdfMarkdown(dataDir.path(), prompts);
     testPageGuidesContainText();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

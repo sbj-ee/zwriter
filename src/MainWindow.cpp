@@ -314,6 +314,7 @@ MainWindow::MainWindow(QWidget *parent)
         return m_spellChecker && m_spellChecker->isEnabled() && m_spellChecker->isAvailable()
             && !m_spellChecker->isCorrect(word);
     });
+    m_editor->setPlainImageHandler([this](const QByteArray &data) { return insertMarkdownPicture(data); });
     connect(m_editor, &PageTextEdit::imageNote, this,
             [this](const QString &msg) { statusBar()->showMessage(msg, 5000); });
     m_editor->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -811,6 +812,9 @@ void MainWindow::buildFormatMenu()
     m_insertImageAction = m_formatMenu->addAction(QStringLiteral("Insert I&mage…"));
     m_insertImageAction->setToolTip(QStringLiteral("Insert a picture from a file (PNG, JPEG, GIF, WebP, BMP, SVG)"));
     connect(m_insertImageAction, &QAction::triggered, this, &MainWindow::insertImageFromFile);
+    m_insertCaptionAction = m_formatMenu->addAction(QStringLiteral("Insert Ca&ption"));
+    m_insertCaptionAction->setToolTip(QStringLiteral("Add a caption under the picture at the caret"));
+    connect(m_insertCaptionAction, &QAction::triggered, this, &MainWindow::insertCaptionHere);
 
     auto *pageBreakAct = m_formatMenu->addAction(QStringLiteral("Insert Page Brea&k"));
     m_pageBreakAction = pageBreakAct;
@@ -1960,6 +1964,9 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
         connect(props, &QAction::triggered, this, [this, imagePos]() { showImageProperties(imagePos); });
         QAction *first = menu->actions().isEmpty() ? nullptr : menu->actions().constFirst();
         menu->insertAction(first, props);
+        QAction *caption = new QAction(QStringLiteral("Add Caption"), menu);
+        connect(caption, &QAction::triggered, this, [this, imagePos]() { addCaption(imagePos); });
+        menu->insertAction(first, caption);
         menu->insertSeparator(first);
     }
 
@@ -2039,9 +2046,6 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
 
 void MainWindow::insertImageFromFile()
 {
-    if (m_markdownMode) {
-        return;
-    }
     QFileDialog dlg(this, QStringLiteral("Insert Image"));
     setupNativeFileDialog(dlg);
     dlg.setFileMode(QFileDialog::ExistingFile);
@@ -2055,13 +2059,16 @@ void MainWindow::insertImageFromFile()
 
 bool MainWindow::insertImageFile(const QString &path)
 {
-    if (!m_editor || m_markdownMode) {
+    if (!m_editor) {
         return false;
     }
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) {
         statusBar()->showMessage(QStringLiteral("Could not read %1.").arg(QFileInfo(path).fileName()), 5000);
         return false;
+    }
+    if (m_markdownMode) {
+        return insertMarkdownPicture(f.readAll());
     }
     QTextCursor c = m_editor->textCursor();
     QString note;
@@ -2074,6 +2081,83 @@ bool MainWindow::insertImageFile(const QString &path)
         statusBar()->showMessage(note, 5000);
     }
     return ok;
+}
+
+bool MainWindow::insertMarkdownPicture(const QByteArray &data)
+{
+    if (!m_editor || !m_markdownMode) {
+        return false;
+    }
+    QString note;
+    const QString rel = Images::copyToMarkdownAssets(m_currentPath, data, &note);
+    if (!note.isEmpty()) {
+        statusBar()->showMessage(note, 6000);
+    }
+    if (rel.isEmpty()) {
+        return false;
+    }
+    QTextCursor c = m_editor->textCursor();
+    c.insertText(Images::markdownImageLink(rel));
+    m_editor->setTextCursor(c);
+    m_editor->setFocus();
+    return true;
+}
+
+bool MainWindow::addCaption(int position)
+{
+    QTextDocument *doc = m_editor->document();
+    if (m_markdownMode || Images::imageAt(doc, position).isNull()) {
+        return false;
+    }
+    QTextCursor c(doc);
+    c.setPosition(position);
+    c.movePosition(QTextCursor::EndOfBlock);
+    c.beginEditBlock();
+    QTextBlockFormat bf;
+    bf.setAlignment(Qt::AlignHCenter);
+    bf.setHeadingLevel(0);
+    QTextCharFormat cf;
+    // The caption uses the face of the text around the picture.
+    for (QTextBlock b = doc->findBlock(position); b.isValid(); b = b.previous()) {
+        bool found = false;
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextCharFormat near = it.fragment().charFormat();
+            if (!near.isImageFormat() && !near.fontFamilies().toStringList().isEmpty()) {
+                cf.setFontFamilies(near.fontFamilies().toStringList());
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            break;
+        }
+    }
+    cf.setFontItalic(true);
+    const qreal body = doc->defaultFont().pointSizeF() > 0 ? doc->defaultFont().pointSizeF()
+                                                           : qreal(kDefaultBodyPointSize);
+    cf.setFontPointSize(qMax(8.0, body - 2.0));
+    c.insertBlock(bf, cf);
+    c.insertText(QStringLiteral("Caption"), cf);
+    c.endEditBlock();
+    c.movePosition(QTextCursor::StartOfBlock, QTextCursor::KeepAnchor);
+    m_editor->setTextCursor(c);
+    m_editor->setFocus();
+    return true;
+}
+
+void MainWindow::insertCaptionHere()
+{
+    // The picture in the caret's paragraph (the last one, if several).
+    const QTextBlock block = m_editor->textCursor().block();
+    int found = -1;
+    for (auto it = block.begin(); !it.atEnd(); ++it) {
+        if (it.fragment().charFormat().isImageFormat()) {
+            found = it.fragment().position() + it.fragment().length() - 1;
+        }
+    }
+    if (found < 0 || !addCaption(found)) {
+        statusBar()->showMessage(QStringLiteral("Put the caret in the paragraph with the picture first."), 4000);
+    }
 }
 
 int MainWindow::imagePositionAt(const QPoint &documentPos) const
@@ -2619,7 +2703,7 @@ void MainWindow::syncRichActions()
     const bool rich = !m_markdownMode;
     for (QAction *a : {m_boldAction, m_italicAction, m_underlineAction, m_paragraphAction,
                        m_h1Action, m_h2Action, m_h3Action, m_bulletListAction, m_numberListAction,
-                       m_clearFormatAction, m_insertTableAction, m_insertImageAction, m_pageBreakAction,
+                       m_clearFormatAction, m_insertTableAction, m_insertCaptionAction, m_pageBreakAction,
                        m_pageNumbersAction, m_headerFooterAction}) {
         if (a) {
             a->setEnabled(rich);
@@ -2869,19 +2953,55 @@ bool MainWindow::confirmImagesDropped(const QTextDocument *doc, DocumentIo::Form
         return true;
     }
     QMessageBox box(QMessageBox::Warning, QStringLiteral("Images will be left out"),
-                    QStringLiteral("This document has %1 image%2. %3 files can't hold images, so %4 "
+                    QStringLiteral("This document has %1 image%2. TXT files can't hold images, so %3 "
                                    "left out of the saved file.")
                         .arg(n)
                         .arg(n == 1 ? QString() : QStringLiteral("s"))
-                        .arg(DocumentIo::formatName(format).toUpper())
                         .arg(n == 1 ? QStringLiteral("it will be") : QStringLiteral("they will be")),
                     QMessageBox::NoButton, this);
-    box.setInformativeText(QStringLiteral("Save as ODT to keep them."));
+    box.setInformativeText(QStringLiteral("Save as ODT or RTF to keep them in the file, or as Markdown "
+                                          "to copy them into a folder next to it."));
     QPushButton *save = box.addButton(QStringLiteral("Save Without Images"), QMessageBox::AcceptRole);
     box.addButton(QMessageBox::Cancel);
     box.setDefaultButton(QMessageBox::Cancel);
     box.exec();
     return box.clickedButton() == save;
+}
+
+int MainWindow::offerAssetCleanup(const QString &markdownPath, const QString &text)
+{
+    const QStringList unused = Images::unreferencedMarkdownAssets(markdownPath, text);
+    if (unused.isEmpty()) {
+        return 0;
+    }
+    QStringList shown = unused.mid(0, 15);
+    if (unused.size() > shown.size()) {
+        shown << QStringLiteral("… and %1 more").arg(unused.size() - shown.size());
+    }
+    QMessageBox box(QMessageBox::Question, QStringLiteral("Unused pictures"),
+                    QStringLiteral("%1 picture%2 in the assets folder %3 no longer used in this file:")
+                        .arg(unused.size())
+                        .arg(unused.size() == 1 ? QString() : QStringLiteral("s"))
+                        .arg(unused.size() == 1 ? QStringLiteral("is") : QStringLiteral("are")),
+                    QMessageBox::NoButton, this);
+    box.setInformativeText(shown.join(QLatin1Char('\n'))
+                           + QStringLiteral("\n\nDelete them? Only pictures zwriter added are listed."));
+    QPushButton *keep = box.addButton(QStringLiteral("Keep Files"), QMessageBox::RejectRole);
+    QPushButton *del = box.addButton(QStringLiteral("Delete Files"), QMessageBox::DestructiveRole);
+    box.setDefaultButton(keep);
+    box.setEscapeButton(keep);
+    box.exec();
+    if (box.clickedButton() != del) {
+        return 0;
+    }
+    const QDir base = QFileInfo(markdownPath).absoluteDir();
+    int removed = 0;
+    for (const QString &rel : unused) {
+        removed += QFile::remove(base.filePath(rel)) ? 1 : 0;
+    }
+    statusBar()->showMessage(QStringLiteral("Deleted %1 unused picture%2.")
+                                 .arg(removed).arg(removed == 1 ? QString() : QStringLiteral("s")), 4000);
+    return removed;
 }
 
 bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
@@ -2909,11 +3029,26 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
     if (!confirmImagesDropped(doc, format)) {
         return false;
     }
+    // A rich document saved as Markdown: its pictures go into <name>.assets/
+    // and the text gets links to them.
+    std::unique_ptr<QTextDocument> markdownCopy;
+    if (format == DocumentIo::Format::Markdown && !m_markdownMode && Images::hasImages(doc)) {
+        QString note;
+        markdownCopy.reset(Images::withPicturesAsMarkdownLinks(doc, path, &note));
+        doc = markdownCopy.get();
+        if (!note.isEmpty()) {
+            statusBar()->showMessage(note, 6000);
+        }
+    }
 
     QString error;
     if (!DocumentIo::save(doc, path, format, &error)) {
         QMessageBox::warning(this, QStringLiteral("Save failed"), error);
         return false;
+    }
+
+    if (format == DocumentIo::Format::Markdown && m_markdownMode) {
+        offerAssetCleanup(path, DocumentIo::markdownText(doc));
     }
 
     if (format == DocumentIo::Format::Odt) {
@@ -3267,7 +3402,11 @@ void MainWindow::exportPdf()
     if (path.isEmpty()) {
         return;
     }
+    exportPdfTo(path);
+}
 
+bool MainWindow::exportPdfTo(const QString &path)
+{
     QPrinter pdf(QPrinter::HighResolution);
     pdf.setOutputFormat(QPrinter::PdfFormat);
     pdf.setOutputFileName(path);
@@ -3278,6 +3417,7 @@ void MainWindow::exportPdf()
 
     doPrint(&pdf);
     statusBar()->showMessage(QStringLiteral("Exported PDF: %1").arg(QFileInfo(path).fileName()), 4000);
+    return QFileInfo(path).size() > 0;
 }
 
 void MainWindow::doPrint(QPrinter *printer)

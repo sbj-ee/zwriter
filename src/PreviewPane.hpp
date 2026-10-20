@@ -42,6 +42,7 @@ public:
     // the preview stale for the next show.
     void scheduleRender();
     // Render right away (cancels a pending debounce).
+    void fitImagesToWidth();
     void renderNow();
     bool isRenderPending() const;
     int debounceInterval() const;
@@ -67,6 +68,7 @@ signals:
 
 protected:
     void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     void syncFromScrollBar();

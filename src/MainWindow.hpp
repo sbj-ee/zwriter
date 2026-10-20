@@ -75,6 +75,13 @@ public:
     int imagePositionAt(const QPoint &documentPos) const;
     // Right-click → Image Properties… for the picture at `position`.
     void showImageProperties(int position);
+    // A caption paragraph right under the picture at `position`: centred,
+    // italic, 2 pt smaller than body text, "Caption" selected for typing.
+    bool addCaption(int position);
+    // File → Export as PDF without the dialog (also used by tests).
+    bool exportPdfTo(const QString &path);
+    // Markdown mode: copy the picture into "<name>.assets/" and type a link.
+    bool insertMarkdownPicture(const QByteArray &data);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -93,6 +100,7 @@ private slots:
     void clearFormatting();
     void fileNew();
     void insertImageFromFile();
+    void insertCaptionHere();
     void fileNewMarkdown();
     void applyHeading();
     void onFontFamilyChosen(const QFont &font);
@@ -186,6 +194,9 @@ private:
     bool maybeSave();
     // TXT/RTF/Markdown can't hold images: ask before saving without them.
     bool confirmImagesDropped(const QTextDocument *doc, DocumentIo::Format format);
+    // Markdown saved: offer to delete pictures zwriter put in <name>.assets/
+    // that the text no longer links to (default: keep). Returns files deleted.
+    int offerAssetCleanup(const QString &markdownPath, const QString &text);
     bool saveToPath(const QString &path, DocumentIo::Format format);
     void setCurrentFile(const QString &path, DocumentIo::Format format);
     bool openPath(const QString &path);
@@ -319,6 +330,7 @@ private:
     QAction *m_newMarkdownAction = nullptr;
     QAction *m_insertTableAction = nullptr;
     QAction *m_insertImageAction = nullptr;
+    QAction *m_insertCaptionAction = nullptr;
     QAction *m_pageBreakAction = nullptr;
     QAction *m_headerFooterAction = nullptr;
     QMenu *m_helpMenu = nullptr;

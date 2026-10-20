@@ -29,8 +29,8 @@ QString addImageData(QTextDocument *doc, const QByteArray &data, const QString &
 QList<QTextImageFormat> imageFormats(const QTextDocument *doc);
 bool hasImages(const QTextDocument *doc);
 
-// Whether a save in this format keeps images (ODT does; TXT, RTF and
-// Markdown do not yet, so the window asks before saving without them).
+// Whether a save in this format keeps images: ODT and RTF embed them,
+// Markdown copies them into <name>.assets/; only TXT can't (the window asks).
 bool formatKeepsImages(DocumentIo::Format format);
 
 // An ODF length ("2.54cm", "1in", "72pt", "25.4mm", "96px", "3pc") in CSS px
@@ -78,5 +78,24 @@ void applyImage(QTextCursor &selection, const QString &name, qreal width, qreal 
 
 // The decoded size of an image resource (invalid if it does not decode).
 QSize naturalSize(const QTextDocument *doc, const QString &name);
+
+// Markdown pictures live in "<name>.assets/" next to the .md file. Copy the
+// bytes there under a fresh "image-<nnn>.<type>" and return the path relative
+// to the .md file ("" + *message on failure). Types are kept as in
+// addInsertableImage (PNG/JPEG bytes, others as PNG).
+QString copyToMarkdownAssets(const QString &markdownPath, const QByteArray &data, QString *message);
+// The Markdown for an image link: ![alt](path), with spaces / parentheses
+// escaped; alt defaults to the file name without extension.
+QString markdownImageLink(const QString &relativePath, const QString &alt = QString());
+
+// Pictures zwriter put in "<name>.assets/" (image-<nnn>.<type>) that the
+// Markdown text no longer links to. Paths relative to the .md file, sorted.
+QStringList unreferencedMarkdownAssets(const QString &markdownPath, const QString &text);
+
+// A rich document saved as Markdown: a copy of `doc` in which every picture
+// was copied into "<name>.assets/" and replaced by its ![alt](link). The
+// caller owns the copy. *message collects problems (pictures that failed).
+QTextDocument *withPicturesAsMarkdownLinks(const QTextDocument *doc, const QString &markdownPath,
+                                           QString *message);
 
 } // namespace Images

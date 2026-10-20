@@ -57,7 +57,8 @@ QStringList localImageFiles(const QMimeData *source)
 
 bool PageTextEdit::canInsertFromMimeData(const QMimeData *source) const
 {
-    if (source && acceptRichText() && (source->hasImage() || !localImageFiles(source).isEmpty())) {
+    if (source && (acceptRichText() || m_plainImageHandler)
+        && (source->hasImage() || !localImageFiles(source).isEmpty())) {
         return true;
     }
     return QTextEdit::canInsertFromMimeData(source);
@@ -65,7 +66,7 @@ bool PageTextEdit::canInsertFromMimeData(const QMimeData *source) const
 
 int PageTextEdit::insertImagesFromMimeData(const QMimeData *source)
 {
-    if (!source || !acceptRichText()) {
+    if (!source || (!acceptRichText() && !m_plainImageHandler)) {
         return 0;
     }
     QList<QByteArray> pictures;
@@ -91,6 +92,15 @@ int PageTextEdit::insertImagesFromMimeData(const QMimeData *source)
         return 0;
     }
     int inserted = 0;
+    if (!acceptRichText()) {
+        QTextCursor edit = textCursor();
+        edit.beginEditBlock();
+        for (const QByteArray &data : std::as_const(pictures)) {
+            inserted += m_plainImageHandler(data) ? 1 : 0;
+        }
+        edit.endEditBlock();
+        return inserted;
+    }
     QStringList notes;
     QTextCursor c = textCursor();
     c.beginEditBlock(); // one undo step for the whole paste / drop
@@ -115,7 +125,7 @@ void PageTextEdit::insertFromMimeData(const QMimeData *source)
 {
     // Image files, or bare image data. Image data that comes with text (some
     // apps add a bitmap rendering of copied text) pastes as the text.
-    if (source && acceptRichText()
+    if (source && (acceptRichText() || m_plainImageHandler)
         && (!localImageFiles(source).isEmpty() || (source->hasImage() && !source->hasText()))) {
         if (insertImagesFromMimeData(source) > 0) {
             return;
