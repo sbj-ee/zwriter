@@ -3,6 +3,28 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.5.0] — unreleased
+
+Images in documents, part 1 of 3: pictures in ODT files open, show and save.
+
+- **ODT pictures open and show.** Opening an `.odt` now loads its pictures from the package
+  (`Pictures/…`) with the size the file gives the frame (cm, mm, in, pt, pc or px). Before, they
+  were dropped without a word. A frame holding several images, like LibreOffice's SVG with a
+  PNG fallback, shows the first one this build can draw. A picture missing from the package is
+  skipped and the text around it is kept.
+- **ODT pictures save.** Saving keeps every picture in the package and the manifest, at its
+  displayed size. JPEG photos are stored as the original JPEG bytes instead of Qt's PNG
+  re-encode, so they don't grow several times over.
+- **Saving as TXT, RTF or Markdown with pictures asks first.** Those formats can't hold images
+  yet. The new warning offers **Save Without Images** or **Cancel** (the default). RTF and
+  Markdown get image support later in this series.
+- New `src/Images.*`: image resources named `zw-image-<n>.<type>` holding the original bytes, plus
+  ODF length conversion.
+- New `images_test`: unit conversion, the PNG + JPEG round trip (package members, manifest
+  types, JPEG bytes, display size, pixels, a second save/open cycle), and a LibreOffice-shaped
+  fixture (cm frame, SVG with PNG fallback, missing member). `mainwindow_test` I: an ODT with a
+  picture opens clean and the picture is drawn. Screenshots `images-odt-*.png`.
+
 ## [1.3.2] — unreleased
 
 - **Page guides frame the text again.** In the continuous view (Full Page off) the guides were

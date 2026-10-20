@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.3.2 LANGUAGES CXX)
+project(zwriter VERSION 1.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -101,6 +101,8 @@ add_executable(zwriter
   src/MainWindow.cpp
   src/MainWindow.hpp
   src/DocumentIo.cpp
+  src/Images.cpp
+  src/Images.hpp
   src/DocumentIo.hpp
   src/DocumentMeta.cpp
   src/DocumentMeta.hpp
@@ -273,6 +275,8 @@ if(ZWRITER_BUILD_TESTS)
   add_executable(odt_roundtrip_test
     tests/odt_roundtrip_test.cpp
     src/DocumentIo.cpp
+    src/Images.cpp
+    src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
     src/Alignment.hpp
@@ -282,10 +286,27 @@ if(ZWRITER_BUILD_TESTS)
   add_test(NAME odt_roundtrip COMMAND odt_roundtrip_test)
   set_tests_properties(odt_roundtrip PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+  # Images in documents: ODT pictures round trip, LibreOffice-shaped frames.
+  add_executable(images_test
+    tests/images_test.cpp
+    src/DocumentIo.cpp
+    src/DocumentIo.hpp
+    src/Images.cpp
+    src/Images.hpp
+    src/Alignment.cpp
+    src/Alignment.hpp
+  )
+  target_include_directories(images_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(images_test PRIVATE Qt6::Gui)
+  add_test(NAME images COMMAND images_test)
+  set_tests_properties(images PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
   # GUI-test regressions: print scale, ODT manifest/styles, RTF import/export, tables.
   add_executable(regression_test
     tests/regression_test.cpp
     src/DocumentIo.cpp
+    src/Images.cpp
+    src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
     src/Alignment.hpp
@@ -308,6 +329,8 @@ if(ZWRITER_BUILD_TESTS)
     src/AlignmentActions.cpp
     src/AlignmentActions.hpp
     src/DocumentIo.cpp
+    src/Images.cpp
+    src/Images.hpp
     src/DocumentIo.hpp
     src/PrintLayout.cpp
     src/PrintLayout.hpp
@@ -322,6 +345,8 @@ if(ZWRITER_BUILD_TESTS)
   add_executable(markdown_test
     tests/markdown_test.cpp
     src/DocumentIo.cpp
+    src/Images.cpp
+    src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
     src/Alignment.hpp

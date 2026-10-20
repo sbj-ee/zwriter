@@ -5,15 +5,19 @@
 //   E  a real edit makes it dirty and closing asks; Cancel keeps the window
 //   S  after Save the window is clean again and closes without asking
 //   T  the title carries "zwriter <version> (<commit>)"
+//   I  an ODT with a picture opens with the picture shown in the editor, clean
 //   G  with Page Guides on, typed text starts on the left guide and stays
 //      inside the guides in every theme, view, window width and sidebar state
 // Run: QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 #include "DocumentIo.hpp"
+#include "Images.hpp"
 #include "MainWindow.hpp"
 #include "version.hpp"
 
 #include <QAction>
 #include <QApplication>
+#include <QBuffer>
+#include <QImage>
 #include <QCloseEvent>
 #include <QDir>
 #include <QElapsedTimer>
@@ -323,6 +327,47 @@ void testPageGuidesContainText()
     }
 }
 
+void testOdtImageOpens(const QString &dir)
+{
+    QTextDocument src;
+    QTextCursor c(&src);
+    c.insertText(QStringLiteral("Field notes with a picture:"));
+    c.insertBlock();
+    QImage img(120, 80, QImage::Format_RGB32);
+    img.fill(QColor(200, 40, 40));
+    QByteArray png;
+    QBuffer buf(&png);
+    buf.open(QIODevice::WriteOnly);
+    img.save(&buf, "PNG");
+    QTextImageFormat f;
+    f.setName(Images::addImageData(&src, png));
+    c.insertImage(f);
+    const QString path = dir + QStringLiteral("/picture.odt");
+    QString err;
+    DocumentIo::save(&src, path, DocumentIo::Format::Odt, &err);
+
+    MainWindow win;
+    win.resize(1000, 700);
+    win.show();
+    win.openExternalFile(path);
+    wait(600);
+    QTextEdit *ed = editorOf(win);
+    check(ed && Images::imageFormats(ed->document()).size() == 1, "I the opened ODT has its picture");
+    check(!isDirty(win), "I opening it is not an edit", win.windowTitle());
+    if (ed) {
+        const QImage shot = ed->viewport()->grab().toImage();
+        int red = 0;
+        for (int y = 0; y < shot.height(); y += 2) {
+            for (int x = 0; x < shot.width(); x += 2) {
+                const QColor px = shot.pixelColor(x, y);
+                red += (px.red() > 180 && px.green() < 70 && px.blue() < 70) ? 1 : 0;
+            }
+        }
+        check(red > 500, "I the picture is drawn in the editor", QString::number(red));
+    }
+    win.close();
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -371,6 +416,7 @@ int main(int argc, char **argv)
     }
     testEditAndSave(dataDir.path(), prompts);
     testTitle();
+    testOdtImageOpens(dataDir.path());
     testPageGuidesContainText();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
