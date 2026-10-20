@@ -64,7 +64,7 @@ BookSidebar::BookSidebar(QWidget *parent)
                            QStringLiteral("Show the Library sidebar instead (Ctrl+Shift+L)"));
     connect(m_libraryButton, &QToolButton::clicked, this, &BookSidebar::switchToLibrary);
     m_addButton = tool(QStringLiteral("bookAdd"), QStringLiteral("+"),
-                       QStringLiteral("Add chapters (.md / .txt inside the book folder)"));
+                       QStringLiteral("Add chapters (.md / .txt / .odt inside the book folder)"));
     connect(m_addButton, &QToolButton::clicked, this, &BookSidebar::chooseChapterFiles);
     m_newButton = tool(QStringLiteral("bookNew"), QStringLiteral("New"),
                        QStringLiteral("New book: write book.json in a subfolder of the library"));
@@ -83,7 +83,7 @@ BookSidebar::BookSidebar(QWidget *parent)
     m_createButton = new QPushButton(QStringLiteral("New Book…"), m_hintBox);
     m_createButton->setObjectName(QStringLiteral("bookCreate"));
     m_createButton->setToolTip(QStringLiteral(
-        "Write book.json in a subfolder, listing its .md / .txt files in name order"));
+        "Write book.json in a subfolder, listing its .md / .txt / .odt files in name order"));
     connect(m_createButton, &QPushButton::clicked, this, &BookSidebar::chooseNewBook);
     hint->addWidget(m_createButton, 0, Qt::AlignLeft);
     m_chooseFolderButton = new QPushButton(QStringLiteral("Choose Library Folder…"), m_hintBox);
@@ -337,7 +337,7 @@ void BookSidebar::updateHeader()
     } else {
         m_hint->setText(QStringLiteral("No books in %1 yet. A book is a subfolder with its own "
                                        "book.json; New Book… writes one, listing the subfolder's "
-                                       ".md and .txt files in name order.")
+                                       ".md, .txt and .odt files in name order.")
                             .arg(QFileInfo(m_root).fileName()));
     }
     if (m_hasBook) {
@@ -487,7 +487,7 @@ int BookSidebar::addChapters(const QStringList &paths)
         }
     }
     if (!refused.isEmpty()) {
-        emit message(QStringLiteral("Not added (chapters must be .md / .txt files inside %1): %2")
+        emit message(QStringLiteral("Not added (chapters must be .md / .txt / .odt files inside %1): %2")
                          .arg(m_current, refused.join(QStringLiteral(", "))));
     }
     if (added > 0) {
@@ -630,7 +630,7 @@ void BookSidebar::chooseChapterFiles()
     }
     // Qt dialog, parented to the main window: see LibrarySidebar::createFolderDialog.
     auto *dlg = new QFileDialog(window(), QStringLiteral("Add Chapters"), m_book.bookDir(),
-                                QStringLiteral("Markdown and text (*.md *.txt)"));
+                                QStringLiteral("Chapters (*.md *.txt *.odt)"));
     dlg->setObjectName(QStringLiteral("bookAddDialog"));
     dlg->setAttribute(Qt::WA_DeleteOnClose, true);
     dlg->setFileMode(QFileDialog::ExistingFiles);

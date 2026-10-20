@@ -54,6 +54,35 @@ Images in documents, part 1 of 3: pictures in ODT files open, show and save.
   picture opens clean and the picture is drawn. Screenshots `images-odt-*.png`.
 - `book_test`'s version check now accepts 1.4.0 or later instead of exactly 1.4.0.
 
+## [1.4.1] — unreleased
+
+- **Book view takes `.odt` chapters** as well as `.md` / `.txt`: **+** / Add Chapters…, New Book
+  discovery, listing, opening (click), word counts, word targets and missing-file handling all
+  cover `.odt`. An `.odt` chapter's words are counted from the text the editor's own ODT load path
+  reads (`content.xml`), so the count matches the status bar once it is open; an unreadable `.odt`
+  is counted as missing. Other types (e.g. `.docx`) are still refused. The Library sidebar still
+  lists `.md` / `.txt` only.
+- `book_test`: `.odt` discovery, add, count, target, open and missing cases. Screenshot
+  `book-odt-chapter.png`.
+- **Fix: opening a chapter no longer leaves it "modified"** (1.4.0 bug: in the Book view every
+  click on another chapter asked "Save changes?" and the title showed `*Chapter 1.txt` right after
+  opening, with nothing edited). Root cause: zwriter took `QTextDocument`'s modified flag as
+  "unsaved changes", and Qt sets that flag for changes that leave the text exactly as it was. Above
+  all an input-method event that re-commits text around the caret: Stephen's vertex runs zwriter
+  under Wayland with the IBus input context (`QT_IM_MODULE=ibus`, Qt 6.4), and zwriter gives the
+  editor keyboard focus right after a Book / Library click opens a file. A replacement like that
+  turns the flag on, with undo steps but identical text; the save prompt is then tested on that
+  flag. zwriter's own opening steps (default font, theme, page layout, Markdown spacing) were
+  already guarded, and the tests prove they stay clean. Now the window remembers the text (and, for
+  ODT / RTF, the formatting) as it was opened or last saved. A "modification" that leaves it
+  identical is dropped, and the save prompt checks the same before it asks. Real edits (and
+  header / footer or document-property changes) still prompt.
+- `mainwindow_test`: opening `.txt`, `.md` and `.odt` from the Book and the Library sidebars with a
+  real mouse click, in dark and paper themes, continuous and page view, using the settings and files
+  the bug was reported with. It checks the window is clean with an empty undo stack, that switching
+  chapters never prompts, that non-edits (the modified flag set, an IME replacement with identical
+  text, an empty edit block) stay clean, and that a real edit still prompts.
+
 ## [1.4.0] — unreleased
 
 Book view: a sidebar for the chapters of a book, in book order. The library can hold several books.

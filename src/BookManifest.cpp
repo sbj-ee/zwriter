@@ -7,6 +7,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
+#include <QTextDocument>
+
+#include "DocumentIo.hpp"
 
 #include <algorithm>
 
@@ -303,7 +306,7 @@ int BookManifest::add(const QString &path, int at)
 {
     const QString rel = relativePath(path);
     const QString suffix = QFileInfo(rel).suffix().toLower();
-    if (!isInsideBook(rel) || (suffix != QLatin1String("md") && suffix != QLatin1String("txt"))) {
+    if (!isInsideBook(rel) || !isChapterSuffix(suffix)) {
         return -1;
     }
     const int existing = indexOf(rel);
@@ -363,7 +366,7 @@ BookManifest BookManifest::fromFolder(const QString &bookDir)
     b.setBookDir(bookDir);
     b.m_title = QFileInfo(b.m_dir).fileName();
     QStringList files;
-    QDirIterator it(b.m_dir, {QStringLiteral("*.md"), QStringLiteral("*.txt")},
+    QDirIterator it(b.m_dir, chapterNameFilters(),
                     QDir::Files | QDir::AllDirs | QDir::NoDotAndDotDot,
                     QDirIterator::Subdirectories);
     const QDir root(b.m_dir);
@@ -411,8 +414,31 @@ int countWords(const QString &text)
     return n;
 }
 
+QStringList BookManifest::chapterNameFilters()
+{
+    return {QStringLiteral("*.md"), QStringLiteral("*.txt"), QStringLiteral("*.odt")};
+}
+
+bool BookManifest::isChapterSuffix(const QString &suffix)
+{
+    const QString s = suffix.toLower();
+    return s == QLatin1String("md") || s == QLatin1String("txt") || s == QLatin1String("odt");
+}
+
 int countWordsInFile(const QString &path)
 {
+    if (QFileInfo(path).suffix().compare(QLatin1String("odt"), Qt::CaseInsensitive) == 0) {
+        // The editor's own ODT load path (content.xml text), so the count
+        // matches what opens.
+        if (!QFileInfo(path).isFile()) {
+            return -1;
+        }
+        QTextDocument doc;
+        if (!DocumentIo::load(&doc, path)) {
+            return -1;
+        }
+        return countWords(doc.toPlainText());
+    }
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) {
         return -1;

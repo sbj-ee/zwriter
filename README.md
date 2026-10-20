@@ -194,12 +194,14 @@ chapters in book order. Each book is a subfolder of the library with its own pla
 switches between them and **New** makes a book of an existing or new subfolder. Drag a chapter, or
 use Move Up / Move Down (`Alt+Up` / `Alt+Down`), to reorder; right-click → Edit Details… for title,
 status (Idea / Outline / Draft / Revised / Final), POV, tags, word target, synopsis and notes. **+**
-adds `.md` / `.txt` files from the book's folder (or right-click a file in the Library → Add to
+adds `.md` / `.txt` / `.odt` files from the book's folder (or right-click a file in the Library → Add to
 Book); files outside the book folder are refused. Remove from Book never deletes the file, and a
 chapter whose file is gone stays listed as missing. Exporting a book in book order (EPUB / PDF) is
 planned.
 
 ![Book sidebar](docs/screenshots/book-sidebar.png)
+
+![ODT chapter open from a book](docs/screenshots/book-odt-chapter.png)
 
 ![Book picker](docs/screenshots/book-picker.png) ![Book chapter menu](docs/screenshots/book-context-menu.png) ![Chapter details](docs/screenshots/book-chapter-details.png)
 
