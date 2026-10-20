@@ -478,6 +478,7 @@ bool writeLibreOfficeImageOdt(const QString &path)
         "<text:p><draw:frame draw:name=\"Image1\" text:anchor-type=\"as-char\" svg:width=\"2.54cm\" svg:height=\"1.27cm\">"
         "<draw:image xlink:href=\"Pictures/10000001.svg\" xlink:type=\"simple\"/>"
         "<draw:image xlink:href=\"Pictures/10000002.png\" xlink:type=\"simple\"/>"
+        "<svg:title>Male Northern Cardinal</svg:title><svg:desc>A red bird on a branch</svg:desc>"
         "</draw:frame>A sketch of the trail.</text:p>"
         "<text:p><draw:frame draw:name=\"Gone\" svg:width=\"1in\" svg:height=\"1in\">"
         "<draw:image xlink:href=\"Pictures/missing.png\"/></draw:frame>After the missing one.</text:p>"
@@ -503,6 +504,9 @@ void testLibreOffice(const QString &dir)
     QString err;
     check(DocumentIo::load(&doc, path, &err), "L open it", err);
     const QList<QTextImageFormat> imgs = Images::imageFormats(&doc);
+    check(!doc.toPlainText().contains(QLatin1String("Cardinal")) && !doc.toPlainText().contains(QLatin1String("red bird"))
+              && doc.toPlainText().contains(QLatin1String("A sketch of the trail.")),
+          "L a frame's svg:title / svg:desc are not shown as body text", doc.toPlainText());
     check(imgs.size() == 2, "L two images: SVG skipped for its PNG fallback, missing member dropped",
           QString::number(imgs.size()));
     if (imgs.size() == 2) {

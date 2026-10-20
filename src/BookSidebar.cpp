@@ -128,13 +128,15 @@ BookSidebar::BookSidebar(QWidget *parent)
 
     auto *up = new QAction(QStringLiteral("Move Up"), this);
     up->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Up));
-    up->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    // Window-wide, so Alt+Up/Down also move the open chapter while the editor
+    // has focus. Qt only fires it while the sidebar is visible.
+    up->setShortcutContext(Qt::WindowShortcut);
     connect(up, &QAction::triggered, this, [this]() {
         moveChapter(currentRow(), currentRow() - 1);
     });
     auto *down = new QAction(QStringLiteral("Move Down"), this);
     down->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
-    down->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    down->setShortcutContext(Qt::WindowShortcut);
     connect(down, &QAction::triggered, this, [this]() {
         moveChapter(currentRow(), currentRow() + 1);
     });
@@ -275,7 +277,9 @@ QString BookSidebar::itemText(int row) const
     }
     const QLocale loc;
     const int words = countWordsInFile(m_book.absolutePath(row));
-    QString detail = c.status + QStringLiteral(" · ") + loc.toString(std::max(0, words));
+    QString detail = (BookManifest::isKnownStatus(c.status) ? c.status
+                                                            : c.status + QStringLiteral(" (unknown status)"))
+        + QStringLiteral(" · ") + loc.toString(std::max(0, words));
     detail += c.wordTarget > 0 ? QStringLiteral(" / %1 words").arg(loc.toString(c.wordTarget))
                                : QStringLiteral(" words");
     if (!c.pov.isEmpty()) {

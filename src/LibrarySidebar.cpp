@@ -56,7 +56,7 @@ LibrarySidebar::LibrarySidebar(QWidget *parent)
     auto *hintLayout = new QVBoxLayout(m_hintBox);
     hintLayout->setContentsMargins(12, 4, 12, 4);
     hintLayout->setSpacing(8);
-    m_hint = new QLabel(QStringLiteral("Choose a library folder of .md and .txt files."), m_hintBox);
+    m_hint = new QLabel(QStringLiteral("Choose a library folder of .md, .txt and .odt files."), m_hintBox);
     m_hint->setObjectName(QStringLiteral("libraryHint"));
     m_hint->setWordWrap(true);
     hintLayout->addWidget(m_hint);
@@ -118,14 +118,14 @@ QSize LibrarySidebar::sizeHint() const
 
 QStringList LibrarySidebar::nameFilters()
 {
-    return {QStringLiteral("*.md"), QStringLiteral("*.txt")};
+    return {QStringLiteral("*.md"), QStringLiteral("*.txt"), QStringLiteral("*.odt")};
 }
 
 bool LibrarySidebar::acceptsFile(const QString &fileName)
 {
     const QString suffix = QFileInfo(fileName).suffix().toLower();
     return !QFileInfo(fileName).fileName().startsWith(QLatin1Char('.'))
-        && (suffix == QLatin1String("md") || suffix == QLatin1String("txt"));
+        && (suffix == QLatin1String("md") || suffix == QLatin1String("txt") || suffix == QLatin1String("odt"));
 }
 
 void LibrarySidebar::setRootPath(const QString &path)

@@ -1385,6 +1385,11 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                 pHasContent = true;
             } else if (name == QLatin1String("soft-page-break")) {
                 // Layout hint only; not content.
+            } else if ((name == QLatin1String("title") || name == QLatin1String("desc"))
+                       && reader.prefix() == QLatin1String("svg")) {
+                // A frame's hidden title / description (alt text): not body text.
+                reader.skipCurrentElement();
+                continue;
             } else if (name == QLatin1String("frame") && reader.prefix() == QLatin1String("draw")) {
                 const auto attrs = reader.attributes();
                 frameW = Images::odfLengthToPx(attrs.value(QStringLiteral("svg:width")));

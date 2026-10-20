@@ -3,7 +3,53 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [1.5.2] — unreleased
+## [1.5.3] — unreleased
+
+Fixes from the Birds of the Midwest test of 1.5.2 (Debian 13, a real book with .md and .odt
+chapters).
+
+- **The .deb installs on Debian 13 as well as Ubuntu 24.04+.** Its Depends line is now written by
+  hand in `cmake/DebDepends.cmake`: every Qt library is `libqt6xxx6 (>= 6.4) | libqt6xxx6t64 (>= 6.4)`,
+  so Debian's names and Ubuntu's `t64` names both satisfy it. `dpkg-shlibdeps` is off, because on
+  the Ubuntu build runner it only produced the `t64` names. The duplicate widgets, hunspell and
+  libsodium entries are gone. New `deb_depends` test: every `t64` name has a Debian alternative
+  in front of it, and nothing is listed twice.
+- **New Book no longer takes files from subfolders as chapters.** Only `.md` / `.txt` / `.odt`
+  files directly in the book folder are listed; `images/README.md`, `notes/*.md` and the like are
+  left out. A file in a subfolder can still be added with **+**.
+- **An unknown chapter status is kept.** A hand-edited `"status": "Done"` used to load as Draft and
+  be overwritten by the next save. Now it is kept as written: the sidebar shows
+  "Done (unknown status)", and Edit Details… lists it as an extra choice (selected), so OK doesn't
+  change it. A missing status is still Draft. The code comment listing the statuses now includes
+  Outline.
+- **The Library lists `.odt` files**, so an ODT chapter can be added with right-click → Add to Book.
+- **An ODT picture's hidden title and description no longer show as body text.** `svg:title` and
+  `svg:desc` inside a `draw:frame` (LibreOffice's alt text, e.g. "Male Northern Cardinal") were read
+  as text next to the picture. They are skipped now, and they don't count as words either.
+- **Alt+Up / Alt+Down move the chapter while the editor has focus.** The shortcuts used to work only
+  while the sidebar had focus, so they did nothing once a chapter was open. Now they work anywhere
+  in the window while the Book sidebar is shown, and the editor keeps focus.
+- **First sidebar click after a dialog (investigated, not reproduced).** The reported steps
+  (Ctrl+Shift+E, Enter in the dialog, then one click on another chapter) were run offscreen three
+  times in a row: every first click opened the chapter. So did a click with a few pixels of mouse
+  movement between press and release. No zwriter code drops the click. The likely cause is
+  the desktop: after a modal dialog closes, some Wayland compositors give focus back to the main
+  window only on the next click, and on a slow machine a click that moves 10 px or more starts a
+  drag (the list supports drag-to-reorder), which doesn't open anything. The steps are now a
+  regression test.
+- README: Library and Book text match the app (.odt in the Library, top-level files for New Book,
+  Alt+Up/Down anywhere, unknown statuses kept). Markdown files are described honestly: the text is
+  saved byte for byte, but pictures go in a `<name>.assets/` folder next to the file. "Scene /
+  chapter navigation" is listed as a roadmap item, not a shipped feature. Debian 13 install
+  instructions are corrected. CHANGELOG: 1.3.0 to 1.5.2 now carry their dates instead of
+  "unreleased".
+- Tests: `book_test` F (subfolders, unknown status through load / save / sidebar / dialog),
+  `images_test` L (svg:title / svg:desc hidden), `mainwindow_test` B (the dialog-then-click steps,
+  slightly moving clicks, Alt+Up/Down from the editor, Library `.odt`), `deb_depends`. `panes_test`
+  now expects `.odt` in the Library. Screenshots `book-feedback-odt-title.png` (unknown status
+  marked, ODT picture without its title text) and `library-odt.png`.
+
+## [1.5.2] — 2026-10-20
 
 Images in documents, part 3 of 3: captions, RTF and Markdown pictures, PDF.
 
@@ -37,7 +83,7 @@ Images in documents, part 3 of 3: captions, RTF and Markdown pictures, PDF.
   object at 300×150, Markdown insert and drop into `Field notes.assets/`, preview shows the
   picture). Screenshots `images-caption.png`, `images-markdown.png`.
 
-## [1.5.1] — unreleased
+## [1.5.1] — 2026-10-20 (not released separately; shipped in 1.5.2)
 
 Images in documents, part 2 of 3: insert pictures, size them and wrap text around them.
 
@@ -65,7 +111,7 @@ Images in documents, part 2 of 3: insert pictures, size them and wrap text aroun
   paste, drop and its undo, click hit-test, Markdown refuses, dialog maths). Screenshots
   `images-wrap-*.png`, `images-properties.png`.
 
-## [1.5.0] — unreleased
+## [1.5.0] — 2026-10-20 (not released separately; shipped in 1.5.2)
 
 Images in documents, part 1 of 3: pictures in ODT files open, show and save.
 
@@ -88,7 +134,7 @@ Images in documents, part 1 of 3: pictures in ODT files open, show and save.
   picture opens clean and the picture is drawn. Screenshots `images-odt-*.png`.
 - `book_test`'s version check now accepts 1.4.0 or later instead of exactly 1.4.0.
 
-## [1.4.1] — unreleased
+## [1.4.1] — 2026-10-20 (not released separately; shipped in 1.5.2)
 
 - **Book view takes `.odt` chapters** as well as `.md` / `.txt`: **+** / Add Chapters…, New Book
   discovery, listing, opening (click), word counts, word targets and missing-file handling all
@@ -117,7 +163,7 @@ Images in documents, part 1 of 3: pictures in ODT files open, show and save.
   chapters never prompts, that non-edits (the modified flag set, an IME replacement with identical
   text, an empty edit block) stay clean, and that a real edit still prompts.
 
-## [1.4.0] — unreleased
+## [1.4.0] — 2026-10-20
 
 Book view: a sidebar for the chapters of a book, in book order. The library can hold several books.
 
@@ -150,7 +196,7 @@ Book view: a sidebar for the chapters of a book, in book order. The library can 
   several books per library, reorder persistence, metadata round-trip, remove-keeps-file, the
   sidebar's actions. Screenshots `book-*.png`.
 
-## [1.3.2] — unreleased
+## [1.3.2] — 2026-10-20 (not released separately; shipped in 1.4.0)
 
 - **Page guides frame the text again.** In the continuous view (Full Page off) the guides were
   drawn at a fixed tenth of the editor's viewport, while the text column starts at the
@@ -163,7 +209,7 @@ Book view: a sidebar for the chapters of a book, in book order. The library can 
   stays inside the guides for the dark, paper and inverse themes, continuous and Full Page views,
   window widths 640–1920 px, with and without the Library sidebar.
 
-## [1.3.1] — unreleased
+## [1.3.1] — 2026-10-18
 
 - **zwriter's own release key.** The updater now trusts minisign key `DBC46B23C3AF0EF3` (zwriter's
   own, replacing the zterminal key `32960BBA77B36F1F` that 1.3.0 embedded), the key that
@@ -173,7 +219,7 @@ Book view: a sidebar for the chapters of a book, in book order. The library can 
   key's ID and bytes are pinned by their own test. Docs name the new key. No other behaviour
   change.
 
-## [1.3.0] — unreleased
+## [1.3.0] — 2026-10-18 (not released separately; shipped in 1.3.1)
 
 In-app updates, the same flow zterminal has: download, verify, install, offer a restart.
 

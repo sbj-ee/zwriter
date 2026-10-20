@@ -193,7 +193,9 @@ void tolerantTests()
           "T  string entries kept; empty, pathless, non-object, duplicate dropped; '\\' → '/'",
           order(b).join(","));
     check(b.title().isEmpty(), "T  non-string title → empty");
-    check(b.at(1).status == "Draft" && b.at(1).wordTarget == 0, "T  bad status / target → defaults");
+    check(b.at(1).status == "Bogus" && !BookManifest::isKnownStatus("Bogus") && b.at(1).wordTarget == 0,
+          "T  unknown status kept as written (not Draft); bad target → 0", b.at(1).status);
+    check(b.at(0).status == "Draft", "T  no status → Draft");
     check(b.at(1).tags == QStringList({"x", "y"}) && b.at(2).tags == QStringList({"t"}),
           "T  tags from a string or array, blanks dropped");
     check(BookManifest::statuses()
@@ -310,6 +312,60 @@ QStringList chooserText(BookSidebar *side)
         out << side->picker()->itemText(i);
     }
     return out;
+}
+
+// 1.5.3 feedback: New Book skips subfolders; an unknown status survives a save
+// and the dialog, and the sidebar marks it.
+void feedbackTests()
+{
+    QTemporaryDir tmp;
+    const QString lib = tmp.path() + "/Library";
+    const QString dir = lib + "/Birds";
+    write(dir + "/01.md", "one\n");
+    write(dir + "/02 Songbirds.md", "two\n");
+    write(dir + "/images/README.md", "image sources\n");
+    write(dir + "/notes/todo.txt", "notes\n");
+    const BookManifest found = BookManifest::fromFolder(dir);
+    check(order(found) == QStringList({"01.md", "02 Songbirds.md"}),
+          "F  New Book lists top-level files only (images/, notes/ skipped)", order(found).join(","));
+    // A file in a subfolder can still be added by hand.
+    BookManifest withSub = found;
+    withSub.add("images/README.md");
+    check(withSub.count() == 3, "F  ... a subfolder file can still be added explicitly");
+
+    write(BookManifest::manifestPath(dir),
+          R"({"format":"zwriter-book","version":1,"title":"Birds","chapters":[
+                {"path":"01.md","status":"Done"},{"path":"02 Songbirds.md","status":"Final"}]})");
+    BookManifest b;
+    QString err;
+    const bool loaded = b.load(dir, &err);
+    check(loaded, "F  manifest with an unknown status loads", err);
+    if (!loaded || b.count() < 2) {
+        return;
+    }
+    check(b.at(0).status == "Done", "F  hand-edited status \"Done\" loads as Done", b.at(0).status);
+    check(b.save(), "F  save");
+    check(readAll(BookManifest::manifestPath(dir)).contains("\"status\": \"Done\""), "F  ... and is saved back unchanged",
+          QString::fromUtf8(readAll(BookManifest::manifestPath(dir))));
+
+    QMainWindow win;
+    auto *side = new BookSidebar(&win);
+    win.setCentralWidget(side);
+    win.show();
+    side->setRootPath(lib);
+    side->selectBook("Birds");
+    check(side->view()->count() == 2 && side->view()->item(0)->text().contains("Done (unknown status)")
+              && !side->view()->item(1)->text().contains("unknown"),
+          "F  sidebar marks the unknown status", side->view()->count() ? side->view()->item(0)->text() : QString());
+    side->editChapter(0);
+    if (BookChapterDialog *dlg = side->chapterDialog()) {
+        check(dlg->statusBox()->currentText() == "Done" && dlg->statusBox()->count() == 6
+                  && dlg->chapter().status == "Done",
+              "F  details dialog keeps \"Done\" selectable and selected", dlg->statusBox()->currentText());
+        dlg->reject();
+    } else {
+        check(false, "F  details dialog opens");
+    }
 }
 
 void sidebarTests()
@@ -497,6 +553,7 @@ int main(int argc, char **argv)
     tolerantTests();
     outsideTests();
     odtTests();
+    feedbackTests();
     wordTests();
     sidebarTests();
     check(QVersionNumber::fromString(QString::fromLatin1(zwriter::kVersionString)) >= QVersionNumber(1, 4, 0),
