@@ -3,6 +3,17 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.4.1] — unreleased
+
+- **Book view takes `.odt` chapters** as well as `.md` / `.txt`: **+** / Add Chapters…, New Book
+  discovery, listing, opening (click), word counts, word targets and missing-file handling all
+  cover `.odt`. An `.odt` chapter's words are counted from the text the editor's own ODT load path
+  reads (`content.xml`), so the count matches the status bar once it is open; an unreadable `.odt`
+  is counted as missing. Other types (e.g. `.docx`) are still refused. The Library sidebar still
+  lists `.md` / `.txt` only.
+- `book_test`: `.odt` discovery, add, count, target, open and missing cases. Screenshot
+  `book-odt-chapter.png`.
+
 ## [1.4.0] — unreleased
 
 Book view: a sidebar for the chapters of a book, in book order. The library can hold several books.

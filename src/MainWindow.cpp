@@ -4353,8 +4353,13 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
             write(bookDir + QStringLiteral("/chapters/the-letter.md"),
                   "# The Letter\n\n" + prose + prose);
             write(bookDir + QStringLiteral("/chapters/low-tide.md"), "# Low Tide\n\n" + prose);
-            write(bookDir + QStringLiteral("/chapters/the-lighthouse.md"),
-                  "# The Lighthouse\n\n" + prose + prose + prose);
+            {
+                // An .odt chapter (1.4.1) next to the Markdown ones.
+                QTextDocument odt;
+                odt.setPlainText(QString::fromUtf8("The Lighthouse\n\n" + prose + prose + prose));
+                DocumentIo::save(&odt, bookDir + QStringLiteral("/chapters/the-lighthouse.odt"),
+                                 DocumentIo::Format::Odt);
+            }
             write(bookDir + QStringLiteral("/notes.txt"), "keep the coat\n");
             BookManifest demo;
             demo.setBookDir(bookDir);
@@ -4367,7 +4372,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
                  "Mara meets the late ferry and sees her mother's coat.", 2500},
                 {"chapters/the-letter.md", "The Letter", "Draft", "Mara",
                  "The coat holds a letter addressed to no one.", 3000},
-                {"chapters/the-lighthouse.md", "The Lighthouse", "Draft", "Ivo", "", 3000},
+                {"chapters/the-lighthouse.odt", "The Lighthouse", "Draft", "Ivo", "", 3000},
                 {"chapters/low-tide.md", "Low Tide", "Outline", "", "", 0},
                 {"chapters/epilogue.md", "Epilogue", "Idea", "", "", 0}, // not written yet
             };
@@ -4460,6 +4465,12 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
             grab().save(dir + QStringLiteral("/book-sidebar-dark.png"), "PNG");
             m_themeId = QStringLiteral("paper");
             applyTheme();
+            // 1.4.1: an .odt chapter open from the book (word count from content.xml).
+            openPath(bookDir + QStringLiteral("/chapters/the-lighthouse.odt"));
+            statusBar()->clearMessage();
+            m_book->setCurrentFile(m_currentPath);
+            QApplication::processEvents();
+            grab().save(dir + QStringLiteral("/book-odt-chapter.png"), "PNG");
             m_book->hide();
             m_book->setRootPath(QString());
         }
