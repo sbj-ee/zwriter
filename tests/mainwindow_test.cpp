@@ -5,11 +5,14 @@
 //   E  a real edit makes it dirty and closing asks; Cancel keeps the window
 //   S  after Save the window is clean again and closes without asking
 //   T  the title carries "zwriter <version> (<commit>)"
+//   G  with Page Guides on, typed text starts on the left guide and stays
+//      inside the guides in every theme, view, window width and sidebar state
 // Run: QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 #include "DocumentIo.hpp"
 #include "MainWindow.hpp"
 #include "version.hpp"
 
+#include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDir>
@@ -255,6 +258,71 @@ void testTitle()
     check(win.windowTitle().endsWith(want), "T title ends with 'zwriter <version> (<commit>)'", win.windowTitle());
 }
 
+// Page guides vs the text column (1.3.2 bug: in the continuous view the guides
+// sat at a fixed tenth of the viewport while the text used the page margins,
+// so typed text started left of the left guide).
+void testPageGuidesContainText()
+{
+    const char *themes[] = {"setThemeDark", "setThemePaper", "setThemeInverse"};
+    const int widths[] = {640, 800, 1024, 1280, 1600, 1920};
+    for (int fullPage = 0; fullPage < 2; ++fullPage) {
+        {
+            QSettings s;
+            s.setValue(QStringLiteral("view/fullPageView"), fullPage == 1);
+            s.setValue(QStringLiteral("view/fitPageWidth"), false);
+            s.setValue(QStringLiteral("view/typewriterScroll"), false);
+            s.sync();
+        }
+        MainWindow win;
+        win.show();
+        wait(100);
+        QTextEdit *ed = editorOf(win);
+        QAction *guides = nullptr;
+        for (QAction *a : win.findChildren<QAction *>()) {
+            if (a->text() == QStringLiteral("Page &Guides")) {
+                guides = a;
+            }
+        }
+        check(ed && guides, "G editor and Page Guides action found");
+        if (!ed || !guides) {
+            return;
+        }
+        guides->setChecked(true);
+        QMetaObject::invokeMethod(&win, "togglePageGuides");
+        ed->setFocus();
+        QTextCursor c(ed->document());
+        c.insertText(QStringLiteral("test"));
+        c.movePosition(QTextCursor::Start);
+        ed->setTextCursor(c);
+        for (int library = 0; library < 2; ++library) {
+            for (const char *theme : themes) {
+                QMetaObject::invokeMethod(&win, theme);
+                for (int w : widths) {
+                    win.resize(w, 700);
+                    wait(60);
+                    const QPair<qreal, qreal> col = win.pageGuideColumn();
+                    const qreal caretX = ed->cursorRect(c).left();
+                    QTextCursor end(ed->document());
+                    end.movePosition(QTextCursor::End);
+                    const qreal endX = ed->cursorRect(end).left();
+                    const bool ok = caretX >= col.first - 2.0 && caretX <= col.first + 3.0
+                        && endX <= col.second + 1.0 && col.second > col.first;
+                    check(ok,
+                          qPrintable(QStringLiteral("G %1 %2 %3 w=%4: text starts on the left guide")
+                                         .arg(fullPage ? QStringLiteral("full-page") : QStringLiteral("continuous"),
+                                              QLatin1String(theme),
+                                              library ? QStringLiteral("library-toggled") : QStringLiteral("default"))
+                                         .arg(w)),
+                          QStringLiteral("caret=%1 end=%2 guides=%3..%4").arg(caretX).arg(endX).arg(col.first).arg(col.second));
+                }
+            }
+            QMetaObject::invokeMethod(&win, "toggleLibrary");
+            wait(60);
+        }
+        win.close();
+    }
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -303,6 +371,7 @@ int main(int argc, char **argv)
     }
     testEditAndSave(dataDir.path(), prompts);
     testTitle();
+    testPageGuidesContainText();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

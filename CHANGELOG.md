@@ -3,6 +3,19 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.3.2] — unreleased
+
+- **Page guides frame the text again.** In the continuous view (Full Page off) the guides were
+  drawn at a fixed tenth of the editor's viewport, while the text column starts at the
+  viewport's own left edge (the column is centred by the viewport inset, plus any root-frame
+  margins). So typed text began left of the left guide, outside the "page", by a tenth of the
+  column width, in every theme. The guides are now drawn at the text column's real edges
+  (root-frame margins + document margin, in document units, zoom-aware) and follow window
+  resizes and the Library sidebar. Full Page view was already correct and is unchanged.
+- Test: with Page Guides on, the caret at the start of a line sits on the left guide and the text
+  stays inside the guides for the dark, paper and inverse themes, continuous and Full Page views,
+  window widths 640–1920 px, with and without the Library sidebar.
+
 ## [1.3.1] — unreleased
 
 - **zwriter's own release key.** The updater now trusts minisign key `DBC46B23C3AF0EF3` (zwriter's
