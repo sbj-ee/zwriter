@@ -795,12 +795,14 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
             if (!sawDialog) {
                 sawDialog = true;
                 dlg->selectFile(pdf);
-                if (auto *name = dlg->findChild<QLineEdit *>(QStringLiteral("fileNameEdit"))) {
+                // Enter goes to the dialog's file name box (not to whatever has
+                // focus: with Qt 6.4 offscreen that can still be the editor).
+                auto *name = dlg->findChild<QLineEdit *>(QStringLiteral("fileNameEdit"));
+                if (name) {
                     name->setText(pdf);
                     name->setFocus();
                 }
-                QWidget *f = QApplication::focusWidget() ? QApplication::focusWidget() : dlg;
-                QTest::keyPress(f, Qt::Key_Return);
+                QTest::keyPress(name ? static_cast<QWidget *>(name) : dlg, Qt::Key_Return);
                 // The Enter release arrives after the dialog has closed.
                 QTimer::singleShot(0, [] {
                     if (QWidget *w = QApplication::focusWidget()) {
@@ -823,7 +825,8 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
         }
         closer.stop();
         wait(200);
-        check(sawDialog && QFileInfo::exists(pdf), qPrintable(QStringLiteral("B round %1: export dialog, Enter exports").arg(round)),
+        check(sawDialog && QFileInfo::exists(pdf) && !isDirty(*win),
+              qPrintable(QStringLiteral("B round %1: export dialog, Enter exports, document stays clean").arg(round)),
               QStringLiteral("action=%1 dialog=%2 ticks=%3").arg(exportAct != nullptr).arg(sawDialog).arg(ticks));
         const int row = 1 + round % 2;
         QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(row));
