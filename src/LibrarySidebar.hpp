@@ -73,6 +73,9 @@ public:
 signals:
     void fileActivated(const QString &path);
     void rootPathChosen(const QString &path);
+    void switchToBook();
+    // Right-click a file → Add to Book.
+    void addToBookRequested(const QString &path);
 
 private:
     void onClicked(const QModelIndex &index);
@@ -83,6 +86,7 @@ private:
     QLabel *m_title = nullptr;
     QLabel *m_hint = nullptr;
     QToolButton *m_chooseButton = nullptr;
+    QToolButton *m_bookButton = nullptr;
     QPushButton *m_hintButton = nullptr;
     QPointer<QFileDialog> m_folderDialog;
     QWidget *m_hintBox = nullptr;

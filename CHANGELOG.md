@@ -50,6 +50,40 @@ Images in documents, part 1 of 3: pictures in ODT files open, show and save.
   types, JPEG bytes, display size, pixels, a second save/open cycle), and a LibreOffice-shaped
   fixture (cm frame, SVG with PNG fallback, missing member). `mainwindow_test` I: an ODT with a
   picture opens clean and the picture is drawn. Screenshots `images-odt-*.png`.
+- `book_test`'s version check now accepts 1.4.0 or later instead of exactly 1.4.0.
+
+## [1.4.0] — unreleased
+
+Book view: a sidebar for the chapters of a book, in book order. The library can hold several books.
+
+- View → Book Sidebar (`Ctrl+Alt+B`) shows the book in the library's place; the **Book** and
+  **Library** buttons in the sidebar headers switch between the two. Visibility and the picked book
+  are remembered.
+- **One book per subfolder:** each book is a subfolder of the library folder with its own
+  `book.json`. The picker at the top of the sidebar lists them by title. **New** (or New Book…)
+  writes `book.json` in an existing subfolder or a new one, listing the `.md` / `.txt` files already
+  in it (subfolders included) in name order, with numbers sorted as numbers.
+- `book.json` is human-readable JSON with chapter paths relative to the book folder; the array order
+  is the book order. Unknown keys are kept on save; a `book.json` that cannot be read is shown as an
+  error and never overwritten. Saves are atomic.
+- **Chapters stay inside their book folder:** adding a file outside it (`../`, an absolute path,
+  another book) is refused with a status-bar message. An entry like that already in `book.json` is
+  kept but treated as invalid: listed as "Outside the book folder", never opened.
+- Reorder by drag and drop or Move Up / Move Down (`Alt+Up` / `Alt+Down`, also on the right-click
+  menu); every change is saved at once.
+- Right-click → Edit Details…: title, status (Idea / Outline / Draft / Revised / Final), POV, tags,
+  word-count target with the current count and percentage, synopsis, notes. Each row shows status,
+  words / target and POV; the footer totals chapters and words.
+- **+** (or Add Chapters… on the menu) adds `.md` / `.txt` files from the book folder. A Library
+  file's right-click → Add to Book adds it to the book of its subfolder, creating that book first if
+  needed (top-level library files are refused). Remove from Book drops the entry only; the file is
+  never deleted. A chapter whose file is missing stays in the book, listed in italics as missing.
+- Click a chapter to open it (the usual unsaved-changes prompt first). Word counts refresh when a
+  chapter is saved.
+- Not in this release: exporting the whole book in book order to EPUB / PDF (planned follow-up).
+- New `book_test`: manifest load/save, tolerant loading, missing files, outside-the-book paths,
+  several books per library, reorder persistence, metadata round-trip, remove-keeps-file, the
+  sidebar's actions. Screenshots `book-*.png`.
 
 ## [1.3.2] — unreleased
 

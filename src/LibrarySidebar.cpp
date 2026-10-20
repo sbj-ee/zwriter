@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
 #include <QPointer>
 #include <QPushButton>
 #include <QSettings>
@@ -33,6 +34,13 @@ LibrarySidebar::LibrarySidebar(QWidget *parent)
     m_title->setObjectName(QStringLiteral("libraryTitle"));
     m_title->setTextFormat(Qt::PlainText);
     headerLayout->addWidget(m_title, 1);
+    m_bookButton = new QToolButton(header);
+    m_bookButton->setObjectName(QStringLiteral("libraryToBook"));
+    m_bookButton->setText(QStringLiteral("Book"));
+    m_bookButton->setToolTip(QStringLiteral("Show the Book sidebar instead (Ctrl+Alt+B)"));
+    m_bookButton->setAutoRaise(true);
+    connect(m_bookButton, &QToolButton::clicked, this, &LibrarySidebar::switchToBook);
+    headerLayout->addWidget(m_bookButton);
     m_chooseButton = new QToolButton(header);
     m_chooseButton->setObjectName(QStringLiteral("libraryChoose"));
     m_chooseButton->setText(QStringLiteral("…"));
@@ -85,6 +93,19 @@ LibrarySidebar::LibrarySidebar(QWidget *parent)
     m_view->setFocusPolicy(Qt::ClickFocus);
     connect(m_view, &QTreeView::clicked, this, &LibrarySidebar::onClicked);
     connect(m_view, &QTreeView::activated, this, &LibrarySidebar::onClicked); // Enter
+    m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_view, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const QModelIndex idx = m_view->indexAt(pos);
+        if (!idx.isValid() || m_model->isDir(idx)) {
+            return;
+        }
+        const QString path = m_model->filePath(idx);
+        auto *menu = new QMenu(this);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->addAction(QStringLiteral("Add to Book"), this,
+                        [this, path]() { emit addToBookRequested(path); });
+        menu->popup(m_view->viewport()->mapToGlobal(pos));
+    });
     layout->addWidget(m_view, 1);
 
     setRootPath(QString());
@@ -150,8 +171,8 @@ void LibrarySidebar::applyTheme(const ThemeColors &c)
         "#libraryHint { color: %3; font-size: 9pt; }"
         "#libraryChooseFolder { color: %2; background-color: %4; border: none; border-radius: 4px;"
         " padding: 4px 12px; }"
-        "#libraryChoose { color: %2; border: none; border-radius: 4px; padding: 1px 6px; }"
-        "#libraryChoose:hover { background-color: %4; }"
+        "#libraryChoose, #libraryToBook { color: %2; border: none; border-radius: 4px; padding: 1px 6px; }"
+        "#libraryChoose:hover, #libraryToBook:hover { background-color: %4; }"
         "QTreeView#libraryTree { background-color: %1; color: %2; border: none;"
         " outline: 0; font-size: 10pt; selection-background-color: %5; selection-color: %6; }"
         "QTreeView#libraryTree::item { padding: 3px 2px; }"
