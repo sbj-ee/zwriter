@@ -23,9 +23,10 @@ if(UNIX AND NOT APPLE)
   set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
   set(CPACK_DEBIAN_PACKAGE_SECTION "editors")
   set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
-  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-  # Fallback depends if shlibdeps unavailable on a runner.
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6widgets6 | libqt6widgets6t64, libhunspell-1.7-0, hunspell-en-us, libsodium23")
+  # Hand-written, portable Depends (Debian 13 and Ubuntu 24.04+); see DebDepends.cmake.
+  include(${CMAKE_CURRENT_LIST_DIR}/DebDepends.cmake)
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "${ZWRITER_DEB_DEPENDS_STRING}")
 
   install(TARGETS zwriter RUNTIME DESTINATION bin COMPONENT zwriter)
   # Short command name: `zw` next to `zwriter` on $PATH. A relative symlink, so

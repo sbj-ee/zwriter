@@ -29,7 +29,7 @@ struct BookChapter
 {
     QString path;     // relative to the book folder, '/' separators
     QString title;    // empty = shown as the file's base name
-    QString status;   // one of BookManifest::statuses(); default "Draft"
+    QString status;   // normally one of statuses(); default "Draft"; unknown values are kept
     QString synopsis;
     QString notes;
     QString pov;
@@ -45,7 +45,8 @@ class BookManifest
 public:
     static QString fileName() { return QStringLiteral("book.json"); }
     static QString manifestPath(const QString &bookDir);
-    static QStringList statuses(); // Idea, Draft, Revised, Final
+    static QStringList statuses(); // Idea, Outline, Draft, Revised, Final
+    static bool isKnownStatus(const QString &status); // false for hand-edited values like "Done"
     static bool exists(const QString &bookDir);
 
     // Load bookDir/book.json. Missing file: false, empty book, no error.

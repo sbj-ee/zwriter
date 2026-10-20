@@ -265,11 +265,13 @@ void testLibrary(const QString &root)
     check(LibrarySidebar::acceptsFile(QStringLiteral("a.md")) && LibrarySidebar::acceptsFile(QStringLiteral("B.TXT"))
               && LibrarySidebar::acceptsFile(QStringLiteral("/x/y/Notes.Md")),
           "F .md / .txt accepted, any case");
-    check(!LibrarySidebar::acceptsFile(QStringLiteral("a.odt")) && !LibrarySidebar::acceptsFile(QStringLiteral("a.rtf"))
+    check(LibrarySidebar::acceptsFile(QStringLiteral("Chapter 2.odt")) && LibrarySidebar::acceptsFile(QStringLiteral("B.ODT")),
+          "F .odt accepted too (1.5.3: ODT chapters can be added from the Library)");
+    check(!LibrarySidebar::acceptsFile(QStringLiteral("a.rtf"))
               && !LibrarySidebar::acceptsFile(QStringLiteral("a.md.bak"))
               && !LibrarySidebar::acceptsFile(QStringLiteral("a.markdown"))
               && !LibrarySidebar::acceptsFile(QStringLiteral(".hidden.md")),
-          "F everything else rejected (odt, rtf, .md.bak, hidden)");
+          "F everything else rejected (rtf, .md.bak, .markdown, hidden)");
 
     LibrarySidebar side;
     side.resize(260, 400);
@@ -287,9 +289,9 @@ void testLibrary(const QString &root)
         return names;
     };
     const QStringList want{QStringLiteral("README.MD"), QStringLiteral("drafts"), QStringLiteral("images"),
-                           QStringLiteral("notes.md"), QStringLiteral("todo.txt")};
+                           QStringLiteral("letter.odt"), QStringLiteral("notes.md"), QStringLiteral("todo.txt")};
     spinUntil([&] { return listed(rootIdx) == want; }, 3000);
-    check(listed(rootIdx) == want, "F root lists folders + .md/.txt only",
+    check(listed(rootIdx) == want, "F root lists folders + .md/.txt/.odt only",
           listed(rootIdx).join(QLatin1String(", ")));
 
     const QModelIndex drafts = model->index(root + QStringLiteral("/drafts"));

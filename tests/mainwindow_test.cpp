@@ -21,6 +21,9 @@
 #include "PageWidgets.hpp"
 #include "MainWindow.hpp"
 #include "BookManifest.hpp"
+#include <QFileDialog>
+#include <QLineEdit>
+#include <QMouseEvent>
 #include "BookSidebar.hpp"
 #include "LibrarySidebar.hpp"
 #include "version.hpp"
@@ -727,6 +730,146 @@ void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
 
 } // namespace
 
+// 1.5.3 feedback: the first sidebar click after the Export dialog, Alt+Up/Down
+// with the editor focused, and .odt files in the Library.
+void testBookFeedback(const QString &root, PromptWatcher &prompts)
+{
+    const QString lib = root + QStringLiteral("/lib-feedback");
+    const QString book = lib + QStringLiteral("/Bird Book");
+    QDir().mkpath(book);
+    writeFile(book + QStringLiteral("/01 Intro.md"), "# Intro\n\nOne.\n");
+    writeFile(book + QStringLiteral("/02 Songbirds.md"), "# Songbirds\n\nTwo.\n");
+    writeFile(book + QStringLiteral("/03 Raptors.md"), "# Raptors\n\nThree.\n");
+    {
+        QTextDocument doc;
+        doc.setPlainText(QStringLiteral("Owls"));
+        DocumentIo::save(&doc, book + QStringLiteral("/04 Owls.odt"), DocumentIo::Format::Odt);
+    }
+    BookManifest::fromFolder(book).save();
+    prompts.seen = 0;
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("theme/id"), QStringLiteral("paper"));
+        s.setValue(QStringLiteral("view/fullPageView"), false);
+        s.setValue(QStringLiteral("library/rootPath"), lib);
+        s.setValue(QStringLiteral("library/visible"), false);
+        s.setValue(QStringLiteral("book/visible"), true);
+        s.setValue(QStringLiteral("book/current"), QStringLiteral("Bird Book"));
+        s.sync();
+    }
+    auto win = std::make_unique<MainWindow>();
+    win->resize(1024, 640);
+    win->show();
+    win->activateWindow();
+    QApplication::setActiveWindow(win.get());
+    wait(100);
+    check(win->isActiveWindow(), "B window active (shortcuts are delivered)");
+    auto *side = win->findChild<BookSidebar *>();
+    QListWidget *list = side ? side->view() : nullptr;
+    check(list && list->count() == 4, "B feedback book has 4 chapters");
+    if (!list || list->count() != 4) {
+        return;
+    }
+    const auto at = [&](int row) { return list->visualItemRect(list->item(row)).center(); };
+    const auto titleHas = [&](const char *name) { return win->windowTitle().contains(QLatin1String(name)); };
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(0));
+    wait(300);
+    check(titleHas("01 Intro.md"), "B click opens chapter 1", win->windowTitle());
+
+    // Ctrl+Shift+E from the editor, Enter in the dialog, then one click on
+    // another chapter: that click must open it (the bug report's steps).
+    for (int round = 0; round < 3; ++round) {
+        QTextEdit *ed = editorOf(*win);
+        ed->setFocus();
+        wait(50);
+        const QString pdf = root + QStringLiteral("/feedback-%1.pdf").arg(round);
+        bool sawDialog = false;
+        int ticks = 0;
+        QTimer closer;
+        closer.setInterval(50);
+        QObject::connect(&closer, &QTimer::timeout, [&] {
+            auto *dlg = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+            if (!dlg) {
+                return;
+            }
+            if (!sawDialog) {
+                sawDialog = true;
+                dlg->selectFile(pdf);
+                if (auto *name = dlg->findChild<QLineEdit *>(QStringLiteral("fileNameEdit"))) {
+                    name->setText(pdf);
+                    name->setFocus();
+                }
+                QWidget *f = QApplication::focusWidget() ? QApplication::focusWidget() : dlg;
+                QTest::keyPress(f, Qt::Key_Return);
+                // The Enter release arrives after the dialog has closed.
+                QTimer::singleShot(0, [] {
+                    if (QWidget *w = QApplication::focusWidget()) {
+                        QTest::keyRelease(w, Qt::Key_Return);
+                    }
+                });
+            } else if (++ticks > 5) {
+                QMetaObject::invokeMethod(dlg, "accept"); // Enter didn't reach the dialog's button: don't hang
+            }
+        });
+        closer.start();
+        QAction *exportAct = nullptr;
+        for (QAction *a : win->findChildren<QAction *>()) {
+            if (a->shortcut() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E)) {
+                exportAct = a;
+            }
+        }
+        if (exportAct) {
+            exportAct->trigger(); // what Ctrl+Shift+E does; runs the modal dialog
+        }
+        closer.stop();
+        wait(200);
+        check(sawDialog && QFileInfo::exists(pdf), qPrintable(QStringLiteral("B round %1: export dialog, Enter exports").arg(round)),
+              QStringLiteral("action=%1 dialog=%2 ticks=%3").arg(exportAct != nullptr).arg(sawDialog).arg(ticks));
+        const int row = 1 + round % 2;
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(row));
+        wait(300);
+        const QByteArray want = row == 1 ? "02 Songbirds.md" : "03 Raptors.md";
+        check(titleHas(want.constData()), qPrintable(QStringLiteral("B round %1: first click after the dialog opens chapter %2").arg(round).arg(row + 1)),
+              win->windowTitle());
+        // A click with a few pixels of movement (a shaky hand or a laggy
+        // machine) is still a click, not a drag.
+        const int other = row == 1 ? 3 : 0;
+        QTest::mousePress(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(other));
+        QMouseEvent move(QEvent::MouseMove, at(other) + QPoint(4, 3), list->viewport()->mapToGlobal(at(other) + QPoint(4, 3)),
+                         Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(list->viewport(), &move);
+        QTest::mouseRelease(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(other) + QPoint(4, 3));
+        wait(300);
+        check(titleHas(other == 3 ? "04 Owls.odt" : "01 Intro.md"),
+              qPrintable(QStringLiteral("B round %1: a slightly moving click still opens").arg(round)), win->windowTitle());
+    }
+
+    // Alt+Down / Alt+Up with the editor focused move the open chapter.
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(1));
+    wait(300);
+    QTextEdit *ed = editorOf(*win);
+    ed->setFocus();
+    wait(50);
+    QTest::keyClick(ed, Qt::Key_Down, Qt::AltModifier);
+    wait(100);
+    BookManifest saved;
+    saved.load(book);
+    check(saved.count() == 4 && saved.at(2).path == QLatin1String("02 Songbirds.md") && ed->hasFocus(),
+          "B Alt+Down in the editor moves the open chapter down (book.json saved, focus kept)",
+          saved.count() ? saved.at(2).path : QString());
+    QTest::keyClick(ed, Qt::Key_Up, Qt::AltModifier);
+    wait(100);
+    saved = BookManifest();
+    saved.load(book);
+    check(saved.at(1).path == QLatin1String("02 Songbirds.md"), "B Alt+Up in the editor moves it back");
+    check(prompts.seen == 0, "B no save prompts");
+
+    // The Library lists .odt files.
+    check(LibrarySidebar::acceptsFile(QStringLiteral("04 Owls.odt"))
+              && LibrarySidebar::nameFilters().contains(QStringLiteral("*.odt")),
+          "B Library lists .odt files");
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -742,6 +885,12 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_FEEDBACK")) { // quick local runs
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+        testBookFeedback(dataDir.path(), prompts);
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     QStringList paths;
     makeFixtures(dataDir.path(), &paths);
     check(paths.size() == 6, "fixtures created", QString::number(paths.size()));
@@ -781,6 +930,7 @@ int main(int argc, char **argv)
     testOdtImageOpens(dataDir.path());
     testInsertPictures(dataDir.path());
     testCaptionsPdfMarkdown(dataDir.path(), prompts);
+    testBookFeedback(dataDir.path(), prompts);
     testPageGuidesContainText();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

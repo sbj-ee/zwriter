@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.5.2** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.5.3** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -36,7 +36,8 @@ xattr -dr com.apple.quarantine /Applications/zwriter.app
 ```
 
 **Linux (amd64)**: `sudo apt install ./zwriter-X.Y.Z-Linux-amd64.deb`. The package is built on
-Ubuntu 24.04 and depends on the `t64` Qt 6 packages, so it needs **Ubuntu 24.04+ or Debian 13+**.
+Ubuntu 24.04 and accepts either Qt 6 package name (`libqt6gui6` on Debian, `libqt6gui6t64` on
+Ubuntu), so it installs on **Ubuntu 24.04+ and Debian 13+**.
 
 Either name starts it from a terminal — `zwriter`, or the short `zw` (`/usr/bin/zw` is a symlink
 the package installs). Both accept the same arguments: `zw draft.odt`.
@@ -79,7 +80,7 @@ never installed.
 
 - **Markdown document mode** (iA Writer-style) — `.md` / `.markdown` files open as plain text and save back **byte for byte**: nothing is reflowed, re-encoded or normalised (line endings, UTF-8 BOM, tabs, trailing spaces and a missing final newline are all kept; checked by `tests/markdown_test`). File → **New Markdown Document** (`Ctrl+Alt+N`) starts one. In this mode zwriter is a calm plain-text editor: the formatting toolbar never appears, the Format menu, B/I/U, styles, alignment, lists, tables, page breaks, page numbers, headers/footers, the font controls and Full Page view are switched off, chrome is hidden by default (Esc pins it; remembered separately from ODT mode), the status bar is slimmer, and the text sits in a centred column of about **66 characters** in **iA Writer Duo** at ~150 % line height. Markdown is **styled inline as you type** — headings, bold, italic, `code` spans and fenced code blocks, links and URLs, lists and task boxes, block quotes and rules — with the `#`, `*`, `` ` ``, `>` and bracket markers greyed out but left in the text. Colours follow the theme. Spell check skips code, URLs and markup. Shift+Enter makes a new line (there are no soft line breaks in a text file). ODT, TXT and RTF documents behave exactly as before
 - **Markdown preview** (View → Markdown Preview, `Ctrl+Alt+P`, default off; Markdown documents only) — a read-only pane beside the editor shows the document rendered (Qt's `QTextDocument::setMarkdown`, GitHub dialect: headings, emphasis, lists and task boxes, quotes, code, links, tables). It re-renders about 300 ms after you stop typing, follows the editor's scroll position proportionally, and takes its colours from the theme. Web and mail links open in your browser; relative images load from the document's folder. The choice is remembered; ODT, TXT and RTF documents never show it
-- **Library sidebar** (View → Library Sidebar, `Ctrl+Shift+L`, default off; View → Choose Library Folder…) — the folders and `.md` / `.txt` files under one folder you pick (other files and hidden entries are left out). Click a file to open it; unsaved changes are asked about first, as with File → Open. The folder and whether the sidebar is shown are remembered
+- **Library sidebar** (View → Library Sidebar, `Ctrl+Shift+L`, default off; View → Choose Library Folder…) — the folders and `.md` / `.txt` / `.odt` files under one folder you pick (other files and hidden entries are left out). Click a file to open it; unsaved changes are asked about first, as with File → Open. The folder and whether the sidebar is shown are remembered
 - **Quiet formatting toolbar** (auto-hide optional; shown by default): font family + size, **B / I / U**, **align left / center / right / justify** (drawn icons that follow the theme; the checked one follows the paragraph at the cursor), and a paragraph-style dropdown (Body / Heading 1–3). Everything else — lists, tables, clear formatting — is in the Format menu
 - **Paper and ink** (default), **Dark room** or **Inverse** theme — the whole window follows the theme (warm light chrome with a paper page, calm charcoal, or a true black page with white text for maximum contrast); View → Theme (persisted in QSettings). Slim scrollbars, roomy menus, window size and position remembered
 - **Full Page view** (default **on**) — centered paper page on a desk background at **true physical size** (mm → DIPs via logical DPI); **multi-page**: the paper grows as you write, pages are stacked with a visible break and real top/bottom margins, the window follows the caret onto the next page, and the status bar shows **Page N of M** — what you see matches print and PDF; shipping paper size **A4** (210 × 297 mm); Page Setup / print / PDF use the same page metrics; View → Full Page (Ctrl+Shift+P); off = continuous strip
@@ -88,7 +89,7 @@ never installed.
 - **Default body face (ODT / TXT / RTF): typewriter / Courier-class monospace at 12 pt** (`Courier New` → `Courier` → `Courier Prime` → `Nimbus Mono PS` → `Liberation Mono` → `Noto Sans Mono` → `Menlo` / `Monaco` → `DejaVu Sans Mono` → `monospace`); switch/enlarge anytime via the font picker; ODT round-trip preserves face/size; print/PDF honor fonts and match Full Page density
 - **Five menus, nothing extra**: **File** (New / Open / Recent / Save / Export PDF / Print / Page Setup / Properties / Quit), **Edit** (Undo–Redo, Cut/Copy/Paste, Paste as Plain Text, Find / Replace), **Format** (B/I/U, Paragraph Style, Align, Lists, Insert Table, Table rows/columns, Insert Page Break, Page Numbers, Header & Footer, Clear Formatting), **View** (Full Page, Fit Page to Width, Page Guides, Typewriter Scroll, Focus Mode, Key Sounds, Spell Check, Smart Quotes, Theme, Always Show Toolbar, Markdown Preview, Library Sidebar, Choose Library Folder, Full Screen), **Help**
 - **Polished native Save/Open/Export dialogs** (Qt `QFileDialog`: Documents sidebar, last-dir via QSettings, live suffix from filter, OS overwrite confirm, Create Directory/New Folder via native panel, titles “Save Document” / “Open Document” / “Export PDF”)
-- **Native save default: ODT**; also open/save **Markdown** (byte-faithful), **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1). **What ODT round-trips:** text including repeated spaces, tabs and line breaks; font family/size; bold/italic/underline; Heading 1–3 (saved as `text:h` with an outline level, so they reopen as headings in zwriter and LibreOffice); paragraph alignment (left / center / right / justify as `fo:text-align`; from LibreOffice files also `start` / `end` and alignment inherited from named styles such as Title or Text Body in styles.xml); bulleted/numbered/nested lists (nested levels keep their own numbering/bullet style, also from LibreOffice files); tables incl. merged cells; blank paragraphs; manual page breaks; header/footer text and document properties (meta.xml; header, footer, page size and margins are also written as an ODF master page in styles.xml, so LibreOffice shows them). After one save, further save/open cycles give the same document again (checked by `tests/odt_roundtrip_test`). **What does not:** text/highlight colours (dropped, so text follows the theme), images, footnotes, links, custom paragraph spacing/indents, and per-table styling — a reopened table always gets zwriter's standard border/padding, so custom table borders are lost. Opening a file never marks it modified
+- **Native save default: ODT**; also open/save **Markdown** (text byte-faithful; pictures in `<name>.assets/`), **TXT** and best-effort **RTF** (no proprietary `.zwriter`, no DOCX in v1). **What ODT round-trips:** text including repeated spaces, tabs and line breaks; font family/size; bold/italic/underline; Heading 1–3 (saved as `text:h` with an outline level, so they reopen as headings in zwriter and LibreOffice); paragraph alignment (left / center / right / justify as `fo:text-align`; from LibreOffice files also `start` / `end` and alignment inherited from named styles such as Title or Text Body in styles.xml); bulleted/numbered/nested lists (nested levels keep their own numbering/bullet style, also from LibreOffice files); tables incl. merged cells; blank paragraphs; manual page breaks; header/footer text and document properties (meta.xml; header, footer, page size and margins are also written as an ODF master page in styles.xml, so LibreOffice shows them). After one save, further save/open cycles give the same document again (checked by `tests/odt_roundtrip_test`). **What does not:** text/highlight colours (dropped, so text follows the theme), images, footnotes, links, custom paragraph spacing/indents, and per-table styling — a reopened table always gets zwriter's standard border/padding, so custom table borders are lost. Opening a file never marks it modified
 - **Open from anywhere**: `zwriter FILE…` on the command line (`zwriter --version`, `zwriter --help`), or *Open With → zwriter* / double-click in a file manager (the desktop entry registers ODT, Markdown, plain text and RTF; the macOS app declares `.md` / `.markdown`). The first file opens in the running window, each further file in its own window. Files with an unrecognised extension (`.conf`, …) open as plain text and are saved back as plain text — never rewritten as ODT
 - **Export PDF…** (export-only — not a native edit/save format) via `QPrinter` PdfFormat
 - **Print options** (lean): native OS print dialog, page setup (paper / orientation / margins; default **A4**), print preview; paper size persisted in QSettings
@@ -114,7 +115,7 @@ never installed.
 ### Still roadmap / known limits
 
 - Richer themes pack (beyond Paper / Dark room / Inverse), autosave + restore cursor, multi-document / sessions
-- Daily word / time goal, scene / chapter navigation
+- Daily word / time goal, scene / chapter navigation (the Book sidebar lists chapters; there is no in-document outline yet), whole-book export (EPUB / PDF) and a generated table of contents
 - Richer ODT/RTF style round-trip (colours, images, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is best-effort (bold/italic/underline, paragraph alignment, headings by size, tables, Unicode; lists are exported as literal bullet/number text)
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it. Headings are written as `text:h` the same way (a patch of `content.xml`); without `zip` they save as styled paragraphs and reopen as body text
 - macOS app is ad-hoc signed only — no Developer ID signature or notarization yet, so the first launch needs right-click → Open (see Install)
@@ -148,10 +149,9 @@ never installed.
 - **Header & Footer** + opt-in page numbers (`{page}` / `{pages}`; off by default)
 - **Spell check** (Hunspell en_US; toggle; context suggestions)
 - Themes (Paper default + Dark room + Inverse; fuller packs later)
-- Autosave + restore cursor
-- Multi-document / sessions
-- Daily word / time goal
-- Scene / chapter navigation
+- **Library** and **Book** sidebars (chapters in book order; see [Screenshots](#screenshots))
+- Planned, not in yet: autosave + restore cursor, multi-document / sessions, daily word / time goal,
+  scene navigation inside a document, whole-book export and a table of contents
 
 ## v1 OUT
 
@@ -184,16 +184,19 @@ Markdown preview beside the editor (`Ctrl+Alt+P`), re-rendered as you pause, in 
 
 ![Markdown preview](docs/screenshots/markdown-preview.png)
 
-Library sidebar (`Ctrl+Shift+L`): folders plus the `.md` / `.txt` files of the folder you pick:
+Library sidebar (`Ctrl+Shift+L`): folders plus the `.md` / `.txt` / `.odt` files of the folder you pick:
 
 ![Library sidebar](docs/screenshots/library-sidebar.png)
 
 Book sidebar (`Ctrl+Alt+B`, or the **Book** / **Library** buttons in the sidebar headers): a book's
 chapters in book order. Each book is a subfolder of the library with its own plain `book.json`
 (chapter paths relative to it), so one library can hold several books; the picker at the top
-switches between them and **New** makes a book of an existing or new subfolder. Drag a chapter, or
-use Move Up / Move Down (`Alt+Up` / `Alt+Down`), to reorder; right-click → Edit Details… for title,
-status (Idea / Outline / Draft / Revised / Final), POV, tags, word target, synopsis and notes. **+**
+switches between them and **New** makes a book of an existing or new subfolder, listing the
+`.md` / `.txt` / `.odt` files directly in it (files in its own subfolders, like `images/`, are not
+chapters). Drag a chapter, or use Move Up / Move Down (`Alt+Up` / `Alt+Down`, which also work
+while you type in the editor), to reorder; right-click → Edit Details… for title,
+status (Idea / Outline / Draft / Revised / Final; a hand-edited other value is kept and marked
+"unknown status"), POV, tags, word target, synopsis and notes. **+**
 adds `.md` / `.txt` / `.odt` files from the book's folder (or right-click a file in the Library → Add to
 Book); files outside the book folder are refused. Remove from Book never deletes the file, and a
 chapter whose file is gone stays listed as missing. Exporting a book in book order (EPUB / PDF) is
@@ -210,11 +213,11 @@ planned.
 | Role | Formats |
 |---|---|
 | **Native default save** | ODT (OpenDocument Text) |
-| **Also open / save** | Markdown (`.md`, `.markdown` — saved byte for byte), TXT, basic RTF (best-effort) |
+| **Also open / save** | Markdown (`.md`, `.markdown` — text saved byte for byte; pictures go in `<name>.assets/`), TXT, basic RTF (best-effort) |
 | **Export only** | PDF |
 | **Not in v1** | DOCX, proprietary `.zwriter` |
 
-Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file. ODT open uses `unzip` to read `content.xml` / `meta.xml` (Linux + macOS). Prefer ODT for fidelity; RTF is readable interchange.
+Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file. Pictures in a Markdown document are image files in a `<name>.assets/` folder next to it, linked from the text. ODT open uses `unzip` to read `content.xml` / `meta.xml` (Linux + macOS). Prefer ODT for fidelity; RTF is readable interchange.
 
 ## Version bumps
 
@@ -224,7 +227,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.5.2 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.5.3 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:
@@ -313,7 +316,7 @@ at build time.
 | `Ctrl+Alt+N` | New Markdown document |
 | `Ctrl+Alt+P` | Toggle Markdown preview (Markdown documents; default off) |
 | `Ctrl+Shift+L` | Toggle library sidebar (default off; with no folder yet it shows a "Choose Folder…" button) |
-| `Ctrl+Alt+B` | Toggle book sidebar (takes the library's place; `Alt+Up` / `Alt+Down` move the selected chapter) |
+| `Ctrl+Alt+B` | Toggle book sidebar (takes the library's place; `Alt+Up` / `Alt+Down` move the selected chapter, also from the editor) |
 | `Ctrl+Shift+V` | Paste as plain text |
 | `Ctrl+Alt+G` | Toggle page guides |
 | `Ctrl+Enter` | Insert page break |

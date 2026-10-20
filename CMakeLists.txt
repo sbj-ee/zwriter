@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.5.2 LANGUAGES CXX)
+project(zwriter VERSION 1.5.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -446,6 +446,7 @@ if(TARGET Qt6::Widgets)
   target_include_directories(book_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ZWRITER_GENERATED_DIR})
   target_link_libraries(book_test PRIVATE Qt6::Widgets)
   add_test(NAME book COMMAND book_test)
+  add_test(NAME deb_depends COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_CURRENT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/deb_depends_test.cmake)
   set_tests_properties(book PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-book_test")
 endif()
 

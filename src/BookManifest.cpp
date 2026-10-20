@@ -90,6 +90,11 @@ QString BookManifest::manifestPath(const QString &bookDir)
     return QDir(bookDir).filePath(fileName());
 }
 
+bool BookManifest::isKnownStatus(const QString &status)
+{
+    return statuses().contains(status);
+}
+
 QStringList BookManifest::statuses()
 {
     return {QStringLiteral("Idea"), QStringLiteral("Outline"), QStringLiteral("Draft"), QStringLiteral("Revised"),
@@ -208,9 +213,11 @@ BookManifest BookManifest::fromJson(const QJsonObject &obj, const QString &bookD
         }
         c.title = o.value(QStringLiteral("title")).toString();
         c.status = o.value(QStringLiteral("status")).toString();
-        if (!statuses().contains(c.status)) {
+        if (c.status.trimmed().isEmpty()) {
             c.status = QStringLiteral("Draft");
         }
+        // An unknown status (e.g. a hand-edited "Done") is kept as written so
+        // the next save doesn't overwrite it; the sidebar marks it as unknown.
         c.synopsis = o.value(QStringLiteral("synopsis")).toString();
         c.notes = o.value(QStringLiteral("notes")).toString();
         c.pov = o.value(QStringLiteral("pov")).toString();
@@ -367,8 +374,7 @@ BookManifest BookManifest::fromFolder(const QString &bookDir)
     b.m_title = QFileInfo(b.m_dir).fileName();
     QStringList files;
     QDirIterator it(b.m_dir, chapterNameFilters(),
-                    QDir::Files | QDir::AllDirs | QDir::NoDotAndDotDot,
-                    QDirIterator::Subdirectories);
+                    QDir::Files); // top level only: images/, notes/ etc. are not chapters
     const QDir root(b.m_dir);
     while (it.hasNext()) {
         const QString abs = it.next();

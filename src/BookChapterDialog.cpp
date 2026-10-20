@@ -34,6 +34,12 @@ BookChapterDialog::BookChapterDialog(const BookChapter &chapter, int currentWord
 
     m_status = new QComboBox(this);
     m_status->addItems(BookManifest::statuses());
+    if (!chapter.status.isEmpty() && !BookManifest::isKnownStatus(chapter.status)) {
+        // Keep a hand-edited status selectable so OK doesn't silently change it.
+        m_status->addItem(chapter.status);
+        m_status->setToolTip(QStringLiteral("\"%1\" is not one of zwriter's statuses; it is kept as written.")
+                                 .arg(chapter.status));
+    }
     m_status->setCurrentText(chapter.status.isEmpty() ? QStringLiteral("Draft") : chapter.status);
     form->addRow(QStringLiteral("&Status:"), m_status);
 
