@@ -3605,11 +3605,37 @@ void MainWindow::paintPageGuides(QPainter &painter, int firstPage, int lastPage,
             painter.drawLine(left, bottom, right, bottom);
         }
     } else {
-        const int h = vp->height();
-        const int left = qMax(24, w / 10);
-        painter.drawLine(left, 0, left, h);
-        painter.drawLine(w - left, 0, w - left, h);
+        // Continuous view: the guides mark where the text column really is.
+        // They used to sit at a fixed tenth of the viewport, which ignored the
+        // page margins the text is laid out with and the viewport inset that
+        // centres the column, so text started left of the left guide (worse in
+        // wide windows / with the sidebar). Painting is in document units
+        // (the painter is scaled by the zoom), so the height is too.
+        const QPair<qreal, qreal> col = pageGuideColumn();
+        const qreal zoom = qMax(0.01, m_editor->zoom());
+        const qreal h = vp->height() / zoom;
+        // The right edge of the column is the viewport's last pixel column
+        // when the root frame has no margins; keep that line on screen.
+        const qreal right = qMin(col.second, (vp->width() - 1) / zoom);
+        painter.drawLine(QPointF(col.first, 0), QPointF(col.first, h));
+        painter.drawLine(QPointF(right, 0), QPointF(right, h));
     }
+}
+
+QPair<qreal, qreal> MainWindow::pageGuideColumn() const
+{
+    if (!m_editor || !m_editor->document()) {
+        return {0.0, 0.0};
+    }
+    const QTextDocument *doc = m_editor->document();
+    const QTextFrameFormat fmt = doc->rootFrame()->frameFormat();
+    const qreal dm = doc->documentMargin();
+    const qreal zoom = qMax(0.01, m_editor->zoom());
+    const bool paged = m_fullPageView && doc->pageSize().height() > 1.0;
+    const qreal width = paged ? doc->pageSize().width() : m_editor->viewport()->width() / zoom;
+    const qreal left = fmt.leftMargin() + fmt.border() + fmt.padding() + dm;
+    const qreal right = width - fmt.rightMargin() - fmt.border() - fmt.padding() - dm;
+    return {left, qMax(left, right)};
 }
 
 void MainWindow::insertPageBreak()

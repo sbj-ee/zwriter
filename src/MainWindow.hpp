@@ -61,6 +61,11 @@ public:
     // Docs/CI helper: write a few PNGs then quit the app.
     void captureDemoScreenshots(const QString &dir);
 
+    // Left/right page-guide x positions in document units (the editor's
+    // cursorRect() space). The continuous view's guides mark the text column,
+    // so text always starts on the left guide.
+    QPair<qreal, qreal> pageGuideColumn() const;
+
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
