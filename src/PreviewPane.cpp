@@ -7,6 +7,7 @@
 #include <QTextImageFormat>
 #include <QScrollBar>
 #include <QSettings>
+#include <QResizeEvent>
 #include <QShowEvent>
 #include <QTextBlock>
 #include <QTextBrowser>
@@ -144,7 +145,10 @@ void PreviewPane::scheduleRender()
 void PreviewPane::fitImagesToWidth()
 {
     QTextDocument *doc = m_browser->document();
-    const qreal avail = qMax(40.0, m_browser->viewport()->width() - 2.0 * kPreviewMargin - 4.0);
+    const qreal avail = m_browser->viewport()->width() - 2.0 * kPreviewMargin - 4.0;
+    if (avail < 120.0) {
+        return; // not laid out yet; resizeEvent() renders again
+    }
     for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
         for (auto it = b.begin(); !it.atEnd(); ++it) {
             const QTextFragment frag = it.fragment();
@@ -167,12 +171,13 @@ void PreviewPane::fitImagesToWidth()
             if (!natural.isValid() || natural.width() <= avail) {
                 continue;
             }
-            f.setWidth(avail);
-            f.setHeight(natural.height() * avail / natural.width());
+            QTextImageFormat size;
+            size.setWidth(qRound(avail));
+            size.setHeight(qRound(natural.height() * avail / natural.width()));
             QTextCursor c(doc);
             c.setPosition(frag.position());
             c.setPosition(frag.position() + frag.length(), QTextCursor::KeepAnchor);
-            c.setCharFormat(f);
+            c.mergeCharFormat(size);
         }
     }
 }
@@ -236,6 +241,15 @@ bool PreviewPane::loadVisibleSetting()
 void PreviewPane::saveVisibleSetting(bool visible)
 {
     QSettings().setValue(settingsKey(), visible);
+}
+
+void PreviewPane::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    // Pictures are capped to the pane width: fit them again at the new width.
+    if (event->oldSize().width() != event->size().width() && m_renderCount > 0) {
+        scheduleRender();
+    }
 }
 
 void PreviewPane::showEvent(QShowEvent *event)

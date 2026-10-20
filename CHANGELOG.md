@@ -3,6 +3,33 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.5.2] — unreleased
+
+Images in documents, part 3 of 3: captions, RTF and Markdown pictures, PDF.
+
+- **Captions.** Right-click a picture → **Add Caption**, or **Format → Insert Caption** with the
+  caret in the picture's paragraph. You get a plain paragraph right under the picture: centred,
+  italic, 2 pt smaller than body text, in the face of the text around it, with "Caption" selected
+  for typing. One undo step. It saves as a normal paragraph (ODT, RTF), with no figure numbering.
+- **RTF keeps pictures.** Saving writes each picture as a `\pict` group: PNG, or the original
+  JPEG bytes, at its display size in twips. Opening reads PNG and JPEG pictures, including Word's
+  `{\*\shppict{\pict…}}`, scaled by `\picscalex/y`. The `\nonshppict` metafile fallback and
+  `\blipuid` are skipped. Wrap isn't stored in RTF; floating pictures come back in line. Saving
+  as RTF no longer warns about dropped images.
+- **Markdown pictures go in an assets folder.** In a Markdown file, Insert Image, paste and drop
+  copy the picture into `<name>.assets/image-001.png` (JPEG stays `.jpg`, others become PNG,
+  one number per picture) next to the `.md` file and type `![image-001](<name>.assets/…)`, with
+  spaces escaped. Qt's Markdown reader drops images without alt text, so the file name is the
+  default alt. An unsaved Markdown file asks to be saved first. The preview shows the
+  pictures, no wider than the pane, and fits them again when the pane is resized. Saving a rich
+  document as Markdown is still plain text and still warns before dropping pictures.
+- **PDF export** embeds pictures at their full pixel size (checked by a test).
+  File → Export as PDF now goes through `exportPdfTo()`, which the test uses.
+- Tests: `images_test` T (RTF round trip, Word-shaped `\shppict` file), M (assets naming,
+  numbering, `.jpg`, unsaved file, link escaping). `mainwindow_test` K (caption, its undo, PDF image
+  object at 300×150, Markdown insert and drop into `Field notes.assets/`, preview shows the
+  picture). Screenshots `images-caption.png`, `images-markdown.png`.
+
 ## [1.5.1] — unreleased
 
 Images in documents, part 2 of 3: insert pictures, size them and wrap text around them.
