@@ -50,6 +50,8 @@ Images in documents, part 2 of 3: insert pictures, size them and wrap text aroun
   (`style:wrap`, `style:horizontal-pos` left/right), which LibreOffice shows the same way.
   Opening an ODT reads those styles back, including LibreOffice's paragraph-anchored frames
   with wrap and a left/right position. Centred frames show in line.
+- Known limit: Qt puts no gap between a floating picture and the text beside it, so wrapped text
+  runs right up to the picture's edge. A gap is planned as a follow-up.
 - Tests: `images_test` W (left/inline/right survive an ODT save/open, graphic styles, anchors),
   N (column cap, 4000 px limit, JPEG bytes kept, GIF to PNG, refusals, undo of insert and of
   Image Properties), L (LibreOffice right-floated frame). `mainwindow_test` P (Insert Image,
