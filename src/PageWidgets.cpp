@@ -1,4 +1,11 @@
 #include "PageWidgets.hpp"
+#include "Images.hpp"
+
+#include <QBuffer>
+#include <QFile>
+#include <QImage>
+#include <QMimeData>
+#include <QUrl>
 
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
@@ -31,8 +38,89 @@ void PageTextEdit::reapplyPageSize()
     }
 }
 
+namespace {
+// Local image files in a paste / drop (file manager copies, drags).
+QStringList localImageFiles(const QMimeData *source)
+{
+    QStringList out;
+    if (!source || !source->hasUrls()) {
+        return out;
+    }
+    for (const QUrl &u : source->urls()) {
+        if (u.isLocalFile() && Images::isImageFile(u.toLocalFile())) {
+            out << u.toLocalFile();
+        }
+    }
+    return out;
+}
+} // namespace
+
+bool PageTextEdit::canInsertFromMimeData(const QMimeData *source) const
+{
+    if (source && acceptRichText() && (source->hasImage() || !localImageFiles(source).isEmpty())) {
+        return true;
+    }
+    return QTextEdit::canInsertFromMimeData(source);
+}
+
+int PageTextEdit::insertImagesFromMimeData(const QMimeData *source)
+{
+    if (!source || !acceptRichText()) {
+        return 0;
+    }
+    QList<QByteArray> pictures;
+    const QStringList files = localImageFiles(source);
+    for (const QString &path : files) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            pictures << f.readAll();
+        }
+    }
+    if (pictures.isEmpty() && files.isEmpty() && source->hasImage()) {
+        // Image data (a screenshot, "Copy Image" in a browser): store as PNG.
+        const QImage img = qvariant_cast<QImage>(source->imageData());
+        if (!img.isNull()) {
+            QByteArray png;
+            QBuffer buf(&png);
+            buf.open(QIODevice::WriteOnly);
+            img.save(&buf, "PNG");
+            pictures << png;
+        }
+    }
+    if (pictures.isEmpty()) {
+        return 0;
+    }
+    int inserted = 0;
+    QStringList notes;
+    QTextCursor c = textCursor();
+    c.beginEditBlock(); // one undo step for the whole paste / drop
+    for (const QByteArray &data : std::as_const(pictures)) {
+        QString note;
+        if (Images::insertImage(c, data, &note)) {
+            ++inserted;
+        }
+        if (!note.isEmpty()) {
+            notes << note;
+        }
+    }
+    c.endEditBlock();
+    setTextCursor(c);
+    if (!notes.isEmpty()) {
+        emit imageNote(notes.join(QLatin1Char(' ')));
+    }
+    return inserted;
+}
+
 void PageTextEdit::insertFromMimeData(const QMimeData *source)
 {
+    // Image files, or bare image data. Image data that comes with text (some
+    // apps add a bitmap rendering of copied text) pastes as the text.
+    if (source && acceptRichText()
+        && (!localImageFiles(source).isEmpty() || (source->hasImage() && !source->hasText()))) {
+        if (insertImagesFromMimeData(source) > 0) {
+            return;
+        }
+    }
     if (!source || !acceptRichText() || !source->hasHtml()) {
         QTextEdit::insertFromMimeData(source);
         return;

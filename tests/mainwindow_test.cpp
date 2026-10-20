@@ -6,17 +6,23 @@
 //   S  after Save the window is clean again and closes without asking
 //   T  the title carries "zwriter <version> (<commit>)"
 //   I  an ODT with a picture opens with the picture shown in the editor, clean
+//   P  Insert Image (file), paste image data, drop image files; Image Properties
+//      dialog maths; the picture under a click; Markdown mode refuses pictures
 //   G  with Page Guides on, typed text starts on the left guide and stays
 //      inside the guides in every theme, view, window width and sidebar state
 // Run: QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 #include "DocumentIo.hpp"
 #include "Images.hpp"
+#include "ImagePropertiesDialog.hpp"
+#include "PageWidgets.hpp"
 #include "MainWindow.hpp"
 #include "version.hpp"
 
 #include <QAction>
 #include <QApplication>
 #include <QBuffer>
+#include <QMimeData>
+#include <QUrl>
 #include <QImage>
 #include <QCloseEvent>
 #include <QDir>
@@ -368,6 +374,89 @@ void testOdtImageOpens(const QString &dir)
     win.close();
 }
 
+QByteArray pngBytes(int w, int h, QColor c)
+{
+    QImage img(w, h, QImage::Format_RGB32);
+    img.fill(c);
+    QByteArray out;
+    QBuffer buf(&out);
+    buf.open(QIODevice::WriteOnly);
+    img.save(&buf, "PNG");
+    return out;
+}
+
+void testInsertPictures(const QString &dir)
+{
+    const QString file = dir + QStringLiteral("/pic.png");
+    {
+        QFile f(file);
+        f.open(QIODevice::WriteOnly);
+        f.write(pngBytes(300, 150, QColor(60, 120, 180)));
+    }
+    MainWindow win;
+    win.resize(1000, 700);
+    win.show();
+    wait(200);
+    auto *ed = qobject_cast<PageTextEdit *>(editorOf(win));
+    check(ed != nullptr, "P editor is a PageTextEdit");
+    if (!ed) {
+        return;
+    }
+    ed->insertPlainText(QStringLiteral("Notes "));
+    check(win.insertImageFile(file), "P Insert Image from a file");
+    check(Images::imageFormats(ed->document()).size() == 1, "P one picture in the document");
+    check(isDirty(win), "P inserting a picture is an edit", win.windowTitle());
+    check(!win.insertImageFile(dir + QStringLiteral("/doc.txt")), "P a text file is refused");
+
+    // The picture under a click: on it -> its position; far right of it -> none.
+    const int pos = 6;
+    QTextCursor at(ed->document());
+    at.setPosition(pos);
+    const QRect r = ed->cursorRect(at);
+    check(win.imagePositionAt(QPoint(r.left() + 20, r.top() + 10)) == pos, "P click on the picture finds it");
+    check(win.imagePositionAt(QPoint(r.left() + 600, r.top() + 10)) == -1, "P click beside it does not");
+
+    QMimeData data;
+    data.setImageData(QImage(40, 40, QImage::Format_RGB32));
+    QTextCursor end = ed->textCursor();
+    end.movePosition(QTextCursor::End);
+    ed->setTextCursor(end);
+    check(ed->canInsertFromMimeData(&data), "P image data can be pasted");
+    check(ed->insertImagesFromMimeData(&data) == 1, "P paste image data");
+    QMimeData drop;
+    drop.setUrls({QUrl::fromLocalFile(file), QUrl::fromLocalFile(file)});
+    check(ed->insertImagesFromMimeData(&drop) == 2, "P drop two image files");
+    check(Images::imageFormats(ed->document()).size() == 4, "P four pictures now");
+    ed->document()->undo();
+    check(Images::imageFormats(ed->document()).size() == 2, "P one undo removes the whole drop");
+
+    win.close();
+    {
+        // Markdown mode (a clean window, so New asks nothing): no pictures.
+        MainWindow md;
+        md.show();
+        QMetaObject::invokeMethod(&md, "fileNewMarkdown");
+        wait(150);
+        auto *med = qobject_cast<PageTextEdit *>(editorOf(md));
+        check(med && med->insertImagesFromMimeData(&drop) == 0 && !md.insertImageFile(file),
+              "P Markdown mode refuses inserted / dropped pictures");
+        md.close();
+    }
+
+    ImagePropertiesDialog dlg(QSize(400, 200), 300.0);
+    dlg.setImageSize(QSize(400, 200));
+    dlg.fitColumn();
+    check(dlg.imageSize() == QSize(300, 150), "P dialog Fit Column Width keeps proportions",
+          QStringLiteral("%1x%2").arg(dlg.imageSize().width()).arg(dlg.imageSize().height()));
+    dlg.originalSize();
+    check(dlg.imageSize() == QSize(300, 150), "P Original Size is capped to the column");
+    ImagePropertiesDialog small(QSize(100, 50), 300.0);
+    small.originalSize();
+    check(small.imageSize() == QSize(100, 50), "P Original Size of a small picture");
+    small.setWrap(Images::Wrap::Right);
+    check(small.wrap() == Images::Wrap::Right, "P wrap choice round-trips");
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -417,6 +506,7 @@ int main(int argc, char **argv)
     testEditAndSave(dataDir.path(), prompts);
     testTitle();
     testOdtImageOpens(dataDir.path());
+    testInsertPictures(dataDir.path());
     testPageGuidesContainText();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

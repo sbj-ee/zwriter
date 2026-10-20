@@ -1,6 +1,9 @@
 #include "Images.hpp"
 
 #include <QBuffer>
+#include <QFileInfo>
+#include <QTextFrame>
+#include <QTextFrameFormat>
 #include <QImage>
 #include <QImageReader>
 #include <QTextBlock>
@@ -95,6 +98,222 @@ qreal odfLengthToPx(QStringView length)
     if (unit == QLatin1String("pc")) return v * 16.0;
     if (unit == QLatin1String("px") || unit.isEmpty()) return v;
     return 0.0;
+}
+
+bool isImageFile(const QString &path)
+{
+    static const QStringList exts{QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+                                  QStringLiteral("gif"), QStringLiteral("webp"), QStringLiteral("bmp"),
+                                  QStringLiteral("svg")};
+    return exts.contains(QFileInfo(path).suffix().toLower());
+}
+
+QString imageFileFilter()
+{
+    return QStringLiteral("Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg);;All files (*)");
+}
+
+qreal columnWidth(const QTextDocument *doc)
+{
+    if (!doc) {
+        return 600.0;
+    }
+    qreal w = doc->pageSize().width();
+    if (w <= 1.0) {
+        w = doc->textWidth();
+    }
+    if (w <= 1.0) {
+        return 600.0;
+    }
+    const QTextFrameFormat fmt = doc->rootFrame()->frameFormat();
+    w -= fmt.leftMargin() + fmt.rightMargin() + 2.0 * (fmt.border() + fmt.padding())
+        + 2.0 * doc->documentMargin();
+    return qMax(40.0, w);
+}
+
+QString addInsertableImage(QTextDocument *doc, const QByteArray &data, QSize *natural, QString *message)
+{
+    auto fail = [&](const QString &msg) {
+        if (message) {
+            *message = msg;
+        }
+        return QString();
+    };
+    if (!doc) {
+        return fail(QStringLiteral("No document."));
+    }
+    QByteArray copy = data;
+    QBuffer buf(&copy);
+    buf.open(QIODevice::ReadOnly);
+    QImageReader reader(&buf);
+    const QByteArray type = reader.format().toLower();
+    QImage img = reader.read();
+    if (img.isNull()) {
+        const bool svg = data.left(512).contains("<svg");
+        return fail(svg ? QStringLiteral("This SVG can't be shown: Qt's SVG image plugin is not installed.")
+                        : QStringLiteral("That file is not an image zwriter can show."));
+    }
+    QString note;
+    const bool tooBig = img.width() > kMaxImageSide || img.height() > kMaxImageSide;
+    if (tooBig) {
+        const QSize from = img.size();
+        img = img.scaled(kMaxImageSide, kMaxImageSide, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        note = QStringLiteral("Image scaled down from %1×%2 to %3×%4.")
+                   .arg(from.width()).arg(from.height()).arg(img.width()).arg(img.height());
+    }
+    QByteArray bytes;
+    QString suffix;
+    const bool jpeg = type == "jpeg" || type == "jpg";
+    if (!tooBig && (type == "png" || jpeg)) {
+        bytes = data;
+        suffix = jpeg ? QStringLiteral("jpeg") : QStringLiteral("png");
+    } else {
+        QBuffer out(&bytes);
+        out.open(QIODevice::WriteOnly);
+        if (jpeg) {
+            img.save(&out, "JPEG", 90);
+            suffix = QStringLiteral("jpeg");
+        } else {
+            img.save(&out, "PNG");
+            suffix = QStringLiteral("png");
+        }
+    }
+    const QString name = addImageData(doc, bytes, suffix);
+    if (name.isEmpty()) {
+        return fail(QStringLiteral("That file is not an image zwriter can show."));
+    }
+    if (natural) {
+        *natural = img.size();
+    }
+    if (message) {
+        *message = note;
+    }
+    return name;
+}
+
+bool insertImage(QTextCursor &cursor, const QByteArray &data, QString *message)
+{
+    QTextDocument *doc = cursor.document();
+    QSize natural;
+    const QString name = addInsertableImage(doc, data, &natural, message);
+    if (name.isEmpty()) {
+        return false;
+    }
+    qreal w = natural.width();
+    qreal h = natural.height();
+    const qreal col = columnWidth(doc);
+    if (w > col) {
+        h = h * col / w;
+        w = col;
+    }
+    QTextImageFormat f;
+    f.setName(name);
+    f.setWidth(qRound(w));
+    f.setHeight(qRound(h));
+    cursor.beginEditBlock();
+    cursor.insertImage(f);
+    cursor.endEditBlock();
+    return true;
+}
+
+QTextCursor imageAt(QTextDocument *doc, int position)
+{
+    if (!doc || position < 0 || position >= doc->characterCount()) {
+        return QTextCursor();
+    }
+    QTextCursor c(doc);
+    c.setPosition(position);
+    c.setPosition(position + 1, QTextCursor::KeepAnchor);
+    if (!c.charFormat().isImageFormat() || c.selectedText() != QString(QChar::ObjectReplacementCharacter)) {
+        return QTextCursor();
+    }
+    return c;
+}
+
+Wrap wrapOf(const QTextDocument *doc, const QTextCharFormat &format)
+{
+    if (!doc || !format.isImageFormat() || format.objectIndex() < 0) {
+        return Wrap::Inline;
+    }
+    const auto *frame = qobject_cast<const QTextFrame *>(doc->object(format.objectIndex()));
+    if (!frame) {
+        return Wrap::Inline;
+    }
+    switch (frame->frameFormat().position()) {
+    case QTextFrameFormat::FloatLeft:
+        return Wrap::Left;
+    case QTextFrameFormat::FloatRight:
+        return Wrap::Right;
+    default:
+        return Wrap::Inline;
+    }
+}
+
+QTextCharFormat formatAt(const QTextDocument *doc, int position)
+{
+    if (!doc) {
+        return QTextCharFormat();
+    }
+    const QTextBlock b = doc->findBlock(position);
+    for (auto it = b.begin(); !it.atEnd(); ++it) {
+        const QTextFragment f = it.fragment();
+        if (position >= f.position() && position < f.position() + f.length()) {
+            return f.charFormat();
+        }
+    }
+    return QTextCharFormat();
+}
+
+Wrap wrapAt(const QTextDocument *doc, int position)
+{
+    return wrapOf(doc, formatAt(doc, position));
+}
+
+void applyImage(QTextCursor &selection, const QString &name, qreal width, qreal height, Wrap wrap)
+{
+    if (selection.isNull()) {
+        return;
+    }
+    const int at = qMin(selection.position(), selection.anchor());
+    selection.beginEditBlock();
+    selection.removeSelectedText();
+    if (wrap == Wrap::Inline) {
+        QTextImageFormat f;
+        f.setName(name);
+        f.setWidth(qRound(width));
+        f.setHeight(qRound(height));
+        selection.insertImage(f);
+    } else {
+        // A floating image is a positioned object (an empty float frame
+        // anchored to the image character); Qt's HTML importer is the public
+        // way to create one.
+        selection.insertHtml(QStringLiteral("<img src=\"%1\" width=\"%2\" height=\"%3\" style=\"float: %4\" />")
+                                 .arg(name.toHtmlEscaped())
+                                 .arg(qRound(width))
+                                 .arg(qRound(height))
+                                 .arg(wrap == Wrap::Left ? QStringLiteral("left") : QStringLiteral("right")));
+    }
+    selection.endEditBlock();
+    selection.setPosition(at);
+    selection.setPosition(at + 1, QTextCursor::KeepAnchor);
+}
+
+QSize naturalSize(const QTextDocument *doc, const QString &name)
+{
+    if (!doc) {
+        return QSize();
+    }
+    const QVariant v = doc->resource(QTextDocument::ImageResource, QUrl(name));
+    if (v.typeId() == QMetaType::QImage) {
+        return v.value<QImage>().size();
+    }
+    if (v.typeId() == QMetaType::QPixmap) {
+        return QSize();
+    }
+    QByteArray bytes = v.toByteArray();
+    QBuffer buf(&bytes);
+    buf.open(QIODevice::ReadOnly);
+    return QImageReader(&buf).size();
 }
 
 } // namespace Images
