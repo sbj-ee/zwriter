@@ -223,6 +223,10 @@ private:
     void syncViewActions();
     void saveLibrarySettings() const;
     void saveBookSettings() const;
+    // What the document looked like when it was opened / last saved; a
+    // "modification" that leaves it identical is not an unsaved change.
+    void captureCleanBaseline();
+    bool contentDiffersFromClean() const;
     void showSidebar(bool book); // Library and Book take turns in the same slot
     QTextTable *currentTable() const;
     void updateTableActions();
@@ -316,6 +320,10 @@ private:
     QSplitter *m_splitter = nullptr;
     LibrarySidebar *m_library = nullptr;
     BookSidebar *m_book = nullptr;
+    QString m_cleanText;
+    QString m_cleanHtml;
+    bool m_cleanRich = false;
+    bool m_metaDirty = false; // header/footer or properties edited (not in the text)
     PreviewPane *m_preview = nullptr;
     QAction *m_previewAction = nullptr;
     QAction *m_libraryAction = nullptr;

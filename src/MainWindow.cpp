@@ -359,10 +359,21 @@ MainWindow::MainWindow(QWidget *parent)
     // QSyntaxHighlighter::rehighlight() (spell check on/off, a word added to
     // the dictionary, colours) emits textChanged without touching the text, and
     // that used to make an untouched document ask "Save changes?" on close.
+    //
+    // And the flag alone is not trusted either (1.4.1): Qt also sets it for
+    // changes that leave the text and its formatting exactly as loaded (an
+    // input-method event that replaces text with the same text, an empty edit
+    // block, ...). Such a "modification" is compared with what was loaded and
+    // dropped; only a real difference makes the window dirty.
     connect(m_editor->document(), &QTextDocument::modificationChanged, this, [this](bool modified) {
-        if (modified && !(m_highlighter && m_highlighter->isRehighlighting())) {
-            markDirty();
+        if (!modified || (m_highlighter && m_highlighter->isRehighlighting()) || m_suppressDirty) {
+            return;
         }
+        if (!contentDiffersFromClean()) {
+            m_editor->document()->setModified(false); // nothing to save
+            return;
+        }
+        markDirty();
     });
     // Key sounds fire from the editor keyPress eventFilter (typing + Return),
     // not textChanged — avoids clicks on paste/programmatic edits/nav side-effects.
@@ -1751,6 +1762,25 @@ void MainWindow::scheduleStatusUpdate()
     }
 }
 
+void MainWindow::captureCleanBaseline()
+{
+    const QTextDocument *doc = m_editor->document();
+    m_cleanText = doc->toRawText();
+    // TXT / Markdown save the text only; ODT / RTF also keep the formatting.
+    m_cleanRich = m_currentFormat != DocumentIo::Format::Txt
+        && m_currentFormat != DocumentIo::Format::Markdown;
+    m_cleanHtml = m_cleanRich ? doc->toHtml() : QString();
+}
+
+bool MainWindow::contentDiffersFromClean() const
+{
+    const QTextDocument *doc = m_editor->document();
+    if (doc->toRawText() != m_cleanText) {
+        return true;
+    }
+    return m_cleanRich && doc->toHtml() != m_cleanHtml;
+}
+
 void MainWindow::markDirty()
 {
     if (m_suppressDirty) {
@@ -1786,6 +1816,8 @@ void MainWindow::setCurrentFile(const QString &path, DocumentIo::Format format)
     // Opened, created or just saved: the document is the saved state. (Save did
     // not clear it, so the next edit never re-fired modificationChanged.)
     m_editor->document()->setModified(false);
+    m_metaDirty = false;
+    captureCleanBaseline();
     updateWindowTitle();
     if (!path.isEmpty()) {
         addToRecentFiles(path);
@@ -2681,6 +2713,14 @@ void MainWindow::syncFormatActions()
 bool MainWindow::maybeSave()
 {
     if (!m_dirty) {
+        return true;
+    }
+    if (!m_metaDirty && !contentDiffersFromClean()) {
+        // Marked dirty, but the document is exactly what was opened or last
+        // saved (e.g. an edit typed and deleted again): nothing to lose.
+        m_dirty = false;
+        m_editor->document()->setModified(false);
+        updateWindowTitle();
         return true;
     }
     QMessageBox box(this);
@@ -3831,6 +3871,7 @@ void MainWindow::togglePageNumbers()
         m_pageNumberBandBefore.clear();
     }
     m_meta.headerFooterSeeded = true;
+    m_metaDirty = true;
     markDirty();
     syncViewActions();
     m_editor->viewport()->update();
@@ -3846,6 +3887,7 @@ void MainWindow::editHeaderFooter()
     dlg.applyTo(&m_meta);
     m_meta.headerFooterSeeded = true;
     forgetPageNumberState(); // the user edited the bands by hand
+    m_metaDirty = true;
     m_dirty = true;
     updateWindowTitle();
     syncViewActions();
@@ -3862,6 +3904,7 @@ void MainWindow::fileProperties()
         return;
     }
     m_meta = dlg.meta();
+    m_metaDirty = true;
     m_dirty = true;
     updateWindowTitle();
 }
@@ -4383,8 +4426,13 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
             write(bookDir + QStringLiteral("/chapters/the-letter.md"),
                   "# The Letter\n\n" + prose + prose);
             write(bookDir + QStringLiteral("/chapters/low-tide.md"), "# Low Tide\n\n" + prose);
-            write(bookDir + QStringLiteral("/chapters/the-lighthouse.md"),
-                  "# The Lighthouse\n\n" + prose + prose + prose);
+            {
+                // An .odt chapter (1.4.1) next to the Markdown ones.
+                QTextDocument odt;
+                odt.setPlainText(QString::fromUtf8("The Lighthouse\n\n" + prose + prose + prose));
+                DocumentIo::save(&odt, bookDir + QStringLiteral("/chapters/the-lighthouse.odt"),
+                                 DocumentIo::Format::Odt);
+            }
             write(bookDir + QStringLiteral("/notes.txt"), "keep the coat\n");
             BookManifest demo;
             demo.setBookDir(bookDir);
@@ -4397,7 +4445,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
                  "Mara meets the late ferry and sees her mother's coat.", 2500},
                 {"chapters/the-letter.md", "The Letter", "Draft", "Mara",
                  "The coat holds a letter addressed to no one.", 3000},
-                {"chapters/the-lighthouse.md", "The Lighthouse", "Draft", "Ivo", "", 3000},
+                {"chapters/the-lighthouse.odt", "The Lighthouse", "Draft", "Ivo", "", 3000},
                 {"chapters/low-tide.md", "Low Tide", "Outline", "", "", 0},
                 {"chapters/epilogue.md", "Epilogue", "Idea", "", "", 0}, // not written yet
             };
@@ -4490,6 +4538,12 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
             grab().save(dir + QStringLiteral("/book-sidebar-dark.png"), "PNG");
             m_themeId = QStringLiteral("paper");
             applyTheme();
+            // 1.4.1: an .odt chapter open from the book (word count from content.xml).
+            openPath(bookDir + QStringLiteral("/chapters/the-lighthouse.odt"));
+            statusBar()->clearMessage();
+            m_book->setCurrentFile(m_currentPath);
+            QApplication::processEvents();
+            grab().save(dir + QStringLiteral("/book-odt-chapter.png"), "PNG");
             m_book->hide();
             m_book->setRootPath(QString());
         }

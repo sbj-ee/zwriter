@@ -82,7 +82,7 @@ public:
 
     // Adds the file (absolute or relative) at the end, or at `at`. Returns the
     // new index, the existing index if it is already in the book, or -1 if it
-    // is outside the book folder (or not a .md / .txt path).
+    // is outside the book folder (or not a .md / .txt / .odt path).
     int add(const QString &path, int at = -1);
     // Drops the entry; the file is left alone.
     bool remove(int i);
@@ -94,7 +94,11 @@ public:
     // the end.
     void reorder(const QStringList &relativePaths);
 
-    // A fresh book for a folder: its .md / .txt files (subfolders included,
+    // Chapter files: .md, .txt and .odt (any case).
+    static QStringList chapterNameFilters();
+    static bool isChapterSuffix(const QString &suffix);
+
+    // A fresh book for a folder: its .md / .txt / .odt files (subfolders included,
     // hidden ones skipped), sorted by relative path with numbers compared as
     // numbers, the folder name as the title.
     static BookManifest fromFolder(const QString &bookDir);
@@ -113,7 +117,8 @@ private:
     QJsonObject m_extra;
 };
 
-// Words in a plain-text / Markdown file: whitespace-separated runs that hold
+// Words in a chapter file. .odt: the text DocumentIo::load() reads from
+// content.xml. Plain text / Markdown: whitespace-separated runs that hold
 // at least one letter or digit (Markdown markers alone do not count). -1 if
 // the file cannot be read.
 int countWordsInFile(const QString &path);

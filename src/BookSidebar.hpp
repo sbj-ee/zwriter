@@ -6,7 +6,7 @@
 #include <QPointer>
 #include <QWidget>
 
-class BookChapterDialog;
+#include "BookChapterDialog.hpp"
 class QComboBox;
 #include <QInputDialog>
 #include <QFileDialog>
@@ -30,7 +30,7 @@ class QToolButton;
 //   the order is saved to book.json at once.
 // - Right-click → Edit Details… for title, status, POV, tags, word target,
 //   synopsis and notes.
-// - "+" adds .md / .txt files; Remove from Book drops the entry only, never
+// - "+" adds .md / .txt / .odt files; Remove from Book drops the entry only, never
 //   the file. A chapter whose file is gone stays listed, marked missing.
 // - Click opens the chapter (the window's unsaved-changes prompt runs first).
 class BookSidebar : public QWidget
@@ -63,7 +63,7 @@ public:
 
     // Actions (also on the context menu); each saves book.json.
     // Writes <library>/<subfolder>/book.json (creating the folder if needed)
-    // with the .md / .txt files already in it, then shows it.
+    // with the .md / .txt / .odt files already in it, then shows it.
     bool createBook(const QString &subfolder);
     void chooseNewBook();                   // asks for the subfolder (non-blocking)
     // Library → Add to Book: the file joins the book of the subfolder it is
