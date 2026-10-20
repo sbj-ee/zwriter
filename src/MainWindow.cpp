@@ -2913,19 +2913,55 @@ bool MainWindow::confirmImagesDropped(const QTextDocument *doc, DocumentIo::Form
         return true;
     }
     QMessageBox box(QMessageBox::Warning, QStringLiteral("Images will be left out"),
-                    QStringLiteral("This document has %1 image%2. %3 files can't hold images, so %4 "
+                    QStringLiteral("This document has %1 image%2. TXT files can't hold images, so %3 "
                                    "left out of the saved file.")
                         .arg(n)
                         .arg(n == 1 ? QString() : QStringLiteral("s"))
-                        .arg(DocumentIo::formatName(format).toUpper())
                         .arg(n == 1 ? QStringLiteral("it will be") : QStringLiteral("they will be")),
                     QMessageBox::NoButton, this);
-    box.setInformativeText(QStringLiteral("Save as ODT to keep them."));
+    box.setInformativeText(QStringLiteral("Save as ODT or RTF to keep them in the file, or as Markdown "
+                                          "to copy them into a folder next to it."));
     QPushButton *save = box.addButton(QStringLiteral("Save Without Images"), QMessageBox::AcceptRole);
     box.addButton(QMessageBox::Cancel);
     box.setDefaultButton(QMessageBox::Cancel);
     box.exec();
     return box.clickedButton() == save;
+}
+
+int MainWindow::offerAssetCleanup(const QString &markdownPath, const QString &text)
+{
+    const QStringList unused = Images::unreferencedMarkdownAssets(markdownPath, text);
+    if (unused.isEmpty()) {
+        return 0;
+    }
+    QStringList shown = unused.mid(0, 15);
+    if (unused.size() > shown.size()) {
+        shown << QStringLiteral("… and %1 more").arg(unused.size() - shown.size());
+    }
+    QMessageBox box(QMessageBox::Question, QStringLiteral("Unused pictures"),
+                    QStringLiteral("%1 picture%2 in the assets folder %3 no longer used in this file:")
+                        .arg(unused.size())
+                        .arg(unused.size() == 1 ? QString() : QStringLiteral("s"))
+                        .arg(unused.size() == 1 ? QStringLiteral("is") : QStringLiteral("are")),
+                    QMessageBox::NoButton, this);
+    box.setInformativeText(shown.join(QLatin1Char('\n'))
+                           + QStringLiteral("\n\nDelete them? Only pictures zwriter added are listed."));
+    QPushButton *keep = box.addButton(QStringLiteral("Keep Files"), QMessageBox::RejectRole);
+    QPushButton *del = box.addButton(QStringLiteral("Delete Files"), QMessageBox::DestructiveRole);
+    box.setDefaultButton(keep);
+    box.setEscapeButton(keep);
+    box.exec();
+    if (box.clickedButton() != del) {
+        return 0;
+    }
+    const QDir base = QFileInfo(markdownPath).absoluteDir();
+    int removed = 0;
+    for (const QString &rel : unused) {
+        removed += QFile::remove(base.filePath(rel)) ? 1 : 0;
+    }
+    statusBar()->showMessage(QStringLiteral("Deleted %1 unused picture%2.")
+                                 .arg(removed).arg(removed == 1 ? QString() : QStringLiteral("s")), 4000);
+    return removed;
 }
 
 bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
@@ -2953,11 +2989,26 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
     if (!confirmImagesDropped(doc, format)) {
         return false;
     }
+    // A rich document saved as Markdown: its pictures go into <name>.assets/
+    // and the text gets links to them.
+    std::unique_ptr<QTextDocument> markdownCopy;
+    if (format == DocumentIo::Format::Markdown && !m_markdownMode && Images::hasImages(doc)) {
+        QString note;
+        markdownCopy.reset(Images::withPicturesAsMarkdownLinks(doc, path, &note));
+        doc = markdownCopy.get();
+        if (!note.isEmpty()) {
+            statusBar()->showMessage(note, 6000);
+        }
+    }
 
     QString error;
     if (!DocumentIo::save(doc, path, format, &error)) {
         QMessageBox::warning(this, QStringLiteral("Save failed"), error);
         return false;
+    }
+
+    if (format == DocumentIo::Format::Markdown && m_markdownMode) {
+        offerAssetCleanup(path, DocumentIo::markdownText(doc));
     }
 
     if (format == DocumentIo::Format::Odt) {

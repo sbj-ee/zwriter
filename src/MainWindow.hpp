@@ -194,6 +194,9 @@ private:
     bool maybeSave();
     // TXT/RTF/Markdown can't hold images: ask before saving without them.
     bool confirmImagesDropped(const QTextDocument *doc, DocumentIo::Format format);
+    // Markdown saved: offer to delete pictures zwriter put in <name>.assets/
+    // that the text no longer links to (default: keep). Returns files deleted.
+    int offerAssetCleanup(const QString &markdownPath, const QString &text);
     bool saveToPath(const QString &path, DocumentIo::Format format);
     void setCurrentFile(const QString &path, DocumentIo::Format format);
     bool openPath(const QString &path);

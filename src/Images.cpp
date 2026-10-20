@@ -5,6 +5,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+#include <QRegularExpression>
+#include <QTextBlock>
+#include <QTextFragment>
+#include <QPair>
 #include <QTextFrame>
 #include <QTextFrameFormat>
 #include <QImage>
@@ -78,8 +82,7 @@ bool hasImages(const QTextDocument *doc)
 
 bool formatKeepsImages(DocumentIo::Format format)
 {
-    return format == DocumentIo::Format::Odt || format == DocumentIo::Format::Rtf
-        || format == DocumentIo::Format::Unknown;
+    return format != DocumentIo::Format::Txt; // Markdown: pictures go to <name>.assets/
 }
 
 qreal odfLengthToPx(QStringView length)
@@ -378,6 +381,87 @@ QString markdownImageLink(const QString &relativePath, const QString &alt)
     QString text = alt.isEmpty() ? QFileInfo(relativePath).completeBaseName() : alt;
     text.replace(QLatin1Char('['), QStringLiteral("\\[")).replace(QLatin1Char(']'), QStringLiteral("\\]"));
     return QStringLiteral("![%1](%2)").arg(text, target);
+}
+
+QStringList unreferencedMarkdownAssets(const QString &markdownPath, const QString &text)
+{
+    QStringList out;
+    if (markdownPath.isEmpty()) {
+        return out;
+    }
+    const QFileInfo md(markdownPath);
+    const QString folderName = md.completeBaseName() + QStringLiteral(".assets");
+    const QDir folder(md.absoluteDir().filePath(folderName));
+    if (!folder.exists()) {
+        return out;
+    }
+    static const QRegularExpression ours(QStringLiteral("^image-\\d{3,}\\.(png|jpg)$"));
+    const QStringList files = folder.entryList(QDir::Files, QDir::Name);
+    for (const QString &f : files) {
+        if (!ours.match(f).hasMatch()) {
+            continue; // not a name zwriter gives: never offered for deletion
+        }
+        const QString rel = folderName + QLatin1Char('/') + f;
+        QString escaped = rel;
+        escaped.replace(QLatin1Char(' '), QStringLiteral("%20"))
+            .replace(QLatin1Char('('), QStringLiteral("%28"))
+            .replace(QLatin1Char(')'), QStringLiteral("%29"));
+        if (!text.contains(rel) && !text.contains(escaped)) {
+            out << rel;
+        }
+    }
+    return out;
+}
+
+QTextDocument *withPicturesAsMarkdownLinks(const QTextDocument *doc, const QString &markdownPath,
+                                           QString *message)
+{
+    if (!doc) {
+        return nullptr;
+    }
+    QTextDocument *copy = doc->clone();
+    // Positions of picture characters, last first so replacing keeps the rest valid.
+    QList<QPair<int, QString>> pictures;
+    for (QTextBlock b = copy->begin(); b.isValid(); b = b.next()) {
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (frag.charFormat().isImageFormat()) {
+                for (int k = 0; k < frag.length(); ++k) {
+                    pictures.prepend({frag.position() + k, frag.charFormat().toImageFormat().name()});
+                }
+            }
+        }
+    }
+    QStringList problems;
+    QList<QPair<int, QString>> links;
+    // Copy in document order so image-001 is the first picture.
+    for (auto it = pictures.crbegin(); it != pictures.crend(); ++it) {
+        const QVariant v = doc->resource(QTextDocument::ImageResource, QUrl(it->second));
+        QByteArray bytes = v.toByteArray();
+        if (v.typeId() == QMetaType::QImage) {
+            bytes.clear();
+            QBuffer buf(&bytes);
+            buf.open(QIODevice::WriteOnly);
+            v.value<QImage>().save(&buf, "PNG");
+        }
+        QString note;
+        const QString rel = copyToMarkdownAssets(markdownPath, bytes, &note);
+        if (rel.isEmpty()) {
+            problems << note;
+        }
+        links.prepend({it->first, rel.isEmpty() ? QString() : markdownImageLink(rel)});
+    }
+    for (const auto &l : std::as_const(links)) { // last first
+        QTextCursor c(copy);
+        c.setPosition(l.first);
+        c.setPosition(l.first + 1, QTextCursor::KeepAnchor);
+        c.insertText(l.second, QTextCharFormat());
+    }
+    if (message) {
+        problems.removeDuplicates();
+        *message = problems.join(QLatin1Char(' '));
+    }
+    return copy;
 }
 
 } // namespace Images

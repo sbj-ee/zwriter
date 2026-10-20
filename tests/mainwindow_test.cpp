@@ -22,6 +22,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QBuffer>
+#include <QAbstractButton>
 #include <QTextBrowser>
 #include <QTextBlock>
 #include <QMimeData>
@@ -460,7 +461,7 @@ void testInsertPictures(const QString &dir)
     check(small.wrap() == Images::Wrap::Right, "P wrap choice round-trips");
 }
 
-void testCaptionsPdfMarkdown(const QString &dir)
+void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
 {
     const QString file = dir + QStringLiteral("/k.png");
     {
@@ -538,6 +539,37 @@ void testCaptionsPdfMarkdown(const QString &dir)
             }
         }
         check(shown, "K Markdown preview shows the picture from the assets folder");
+        // Remove the second link and save: the unused image-002 is offered for
+        // deletion. Escape / default keeps it; Delete Files removes only it.
+        QString text = ed->toPlainText();
+        text.remove(QStringLiteral("![image-002](Field%20notes.assets/image-002.png)"));
+        ed->setPlainText(text);
+        prompts.seen = 0;
+        QMetaObject::invokeMethod(&win, "fileSave");
+        wait(200);
+        check(prompts.seen == 1 && QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-002.png")),
+              "K save offers cleanup of the unused picture; default keeps it",
+              QString::number(prompts.seen));
+        QTimer deleter;
+        deleter.setInterval(0);
+        QObject::connect(&deleter, &QTimer::timeout, [&] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                for (QAbstractButton *b : box->buttons()) {
+                    if (b->text() == QLatin1String("Delete Files")) {
+                        b->click();
+                        return;
+                    }
+                }
+            }
+        });
+        deleter.start();
+        ed->insertPlainText(QStringLiteral(" "));
+        QMetaObject::invokeMethod(&win, "fileSave");
+        wait(200);
+        deleter.stop();
+        check(!QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-002.png"))
+                  && QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-001.png")),
+              "K Delete Files removes only the unused picture");
         ed->document()->setModified(false);
         win.close();
     }
@@ -593,7 +625,7 @@ int main(int argc, char **argv)
     testTitle();
     testOdtImageOpens(dataDir.path());
     testInsertPictures(dataDir.path());
-    testCaptionsPdfMarkdown(dataDir.path());
+    testCaptionsPdfMarkdown(dataDir.path(), prompts);
     testPageGuidesContainText();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

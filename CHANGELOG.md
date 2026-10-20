@@ -21,8 +21,15 @@ Images in documents, part 3 of 3: captions, RTF and Markdown pictures, PDF.
   one number per picture) next to the `.md` file and type `![image-001](<name>.assets/…)`, with
   spaces escaped. Qt's Markdown reader drops images without alt text, so the file name is the
   default alt. An unsaved Markdown file asks to be saved first. The preview shows the
-  pictures, no wider than the pane, and fits them again when the pane is resized. Saving a rich
-  document as Markdown is still plain text and still warns before dropping pictures.
+  pictures, no wider than the pane, and fits them again when the pane is resized.
+- **Saving a rich document as Markdown keeps its pictures.** They are copied into
+  `<name>.assets/` in document order and the Markdown links to them. The open document is not
+  changed. Only TXT still warns before dropping pictures, and the warning now says Markdown
+  copies them into a folder next to the file.
+- **Cleanup of unused Markdown pictures.** After saving a Markdown file, pictures in
+  `<name>.assets/` that the text no longer links are listed in a dialog that defaults to
+  Keep Files. Only files named like zwriter's own (`image-001.png`, `image-002.jpg`, ...) are
+  ever listed or deleted.
 - **PDF export** embeds pictures at their full pixel size (checked by a test).
   File → Export as PDF now goes through `exportPdfTo()`, which the test uses.
 - Tests: `images_test` T (RTF round trip, Word-shaped `\shppict` file), M (assets naming,

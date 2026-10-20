@@ -29,8 +29,8 @@ QString addImageData(QTextDocument *doc, const QByteArray &data, const QString &
 QList<QTextImageFormat> imageFormats(const QTextDocument *doc);
 bool hasImages(const QTextDocument *doc);
 
-// Whether a save in this format keeps images (ODT and RTF do; TXT can't, and
-// a rich document saved as Markdown is plain text, so the window asks first).
+// Whether a save in this format keeps images: ODT and RTF embed them,
+// Markdown copies them into <name>.assets/; only TXT can't (the window asks).
 bool formatKeepsImages(DocumentIo::Format format);
 
 // An ODF length ("2.54cm", "1in", "72pt", "25.4mm", "96px", "3pc") in CSS px
@@ -87,5 +87,15 @@ QString copyToMarkdownAssets(const QString &markdownPath, const QByteArray &data
 // The Markdown for an image link: ![alt](path), with spaces / parentheses
 // escaped; alt defaults to the file name without extension.
 QString markdownImageLink(const QString &relativePath, const QString &alt = QString());
+
+// Pictures zwriter put in "<name>.assets/" (image-<nnn>.<type>) that the
+// Markdown text no longer links to. Paths relative to the .md file, sorted.
+QStringList unreferencedMarkdownAssets(const QString &markdownPath, const QString &text);
+
+// A rich document saved as Markdown: a copy of `doc` in which every picture
+// was copied into "<name>.assets/" and replaced by its ![alt](link). The
+// caller owns the copy. *message collects problems (pictures that failed).
+QTextDocument *withPicturesAsMarkdownLinks(const QTextDocument *doc, const QString &markdownPath,
+                                           QString *message);
 
 } // namespace Images

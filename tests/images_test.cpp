@@ -7,6 +7,7 @@
 //   N  inserting: column cap, 4000 px limit, PNG/JPEG bytes kept, others to
 //      PNG, refusals, one undo step; Image Properties apply (size, wrap) + undo
 //   T  RTF pictures: zwriter's own round trip and a Word-shaped \\shppict file
+//   X  a rich document saved as Markdown exports its pictures and links them
 //   M  Markdown assets folder: names, numbering, JPEG -> .jpg, link escaping
 //   L  a LibreOffice-shaped ODT: frame sized in cm, SVG with a PNG fallback,
 //      a missing picture member
@@ -29,6 +30,7 @@
 #include <QUrl>
 
 #include <cmath>
+#include <memory>
 #include <cstdio>
 
 namespace {
@@ -100,9 +102,8 @@ void testFormats()
 {
     check(Images::formatKeepsImages(DocumentIo::Format::Odt), "F ODT keeps images");
     check(Images::formatKeepsImages(DocumentIo::Format::Rtf), "F RTF keeps images");
-    check(!Images::formatKeepsImages(DocumentIo::Format::Txt)
-              && !Images::formatKeepsImages(DocumentIo::Format::Markdown),
-          "F TXT / rich-to-Markdown don't (the window asks before dropping them)");
+    check(Images::formatKeepsImages(DocumentIo::Format::Markdown), "F Markdown keeps them (assets folder)");
+    check(!Images::formatKeepsImages(DocumentIo::Format::Txt), "F only TXT drops them (the window asks)");
 }
 
 void testRoundTrip(const QString &dir)
@@ -386,8 +387,53 @@ void testMarkdownAssets(const QString &dir)
               && msg.contains(QLatin1String("Save")),
           "M an unsaved Markdown file asks to be saved first", msg);
     check(Images::copyToMarkdownAssets(md, QByteArrayLiteral("nope"), &msg).isEmpty(), "M non-image refused");
+    // Unreferenced: only zwriter's own names, only when the text doesn't link them.
+    {
+        QFile other(dir + QStringLiteral("/My notes.assets/diagram.png"));
+        other.open(QIODevice::WriteOnly);
+        other.write(encoded(solid(4, 4, Qt::gray), "PNG"));
+    }
+    const QString text = QStringLiteral("Intro\n\n") + Images::markdownImageLink(a) + QStringLiteral("\n\n![c](") + c + QStringLiteral(")\n");
+    const QStringList unused = Images::unreferencedMarkdownAssets(md, text);
+    check(unused == QStringList{b}, "M unreferenced: only image-002 (escaped and plain links count; diagram.png never listed)",
+          unused.join(QLatin1Char(',')));
+    check(Images::unreferencedMarkdownAssets(dir + QStringLiteral("/none.md"), QString()).isEmpty(),
+          "M no assets folder -> nothing to clean");
     check(Images::markdownImageLink(a) == QLatin1String("![image-001](My%20notes.assets/image-001.png)"),
           "M link escapes spaces", Images::markdownImageLink(a));
+}
+
+void testRichToMarkdown(const QString &dir)
+{
+    QTextDocument doc;
+    QTextCursor c(&doc);
+    c.insertText(QStringLiteral("Trail notes"));
+    c.insertBlock();
+    QTextImageFormat f;
+    f.setName(Images::addImageData(&doc, encoded(solid(30, 20, QColor(200, 40, 40)), "PNG")));
+    c.insertImage(f);
+    c.insertBlock();
+    QTextImageFormat g;
+    g.setName(Images::addImageData(&doc, encoded(solid(30, 20, QColor(40, 90, 200)), "JPEG")));
+    c.insertText(QStringLiteral("Photo: "));
+    c.insertImage(g);
+    const QString md = dir + QStringLiteral("/Rich export.md");
+    QString note;
+    std::unique_ptr<QTextDocument> copy(Images::withPicturesAsMarkdownLinks(&doc, md, &note));
+    check(copy && note.isEmpty(), "X rich document converted for Markdown", note);
+    QString err;
+    check(copy && DocumentIo::save(copy.get(), md, DocumentIo::Format::Markdown, &err), "X save as Markdown", err);
+    QFile file(md);
+    file.open(QIODevice::ReadOnly);
+    const QString text = QString::fromUtf8(file.readAll());
+    check(text.contains(QLatin1String("![image-001](Rich%20export.assets/image-001.png)"))
+              && text.contains(QLatin1String("Photo: ![image-002](Rich%20export.assets/image-002.jpg)")),
+          "X links in document order, PNG and JPEG", text);
+    check(QFileInfo::exists(dir + QStringLiteral("/Rich export.assets/image-001.png"))
+              && QFileInfo::exists(dir + QStringLiteral("/Rich export.assets/image-002.jpg")),
+          "X pictures exported next to the file");
+    check(Images::imageFormats(&doc).size() == 2, "X the open document keeps its pictures");
+    check(!text.contains(QChar(0xFFFC)), "X no object characters in the Markdown");
 }
 
 bool writeLibreOfficeImageOdt(const QString &path)
@@ -498,6 +544,7 @@ int main(int argc, char **argv)
     testInsert();
     testRtf(tmp.path());
     testMarkdownAssets(tmp.path());
+    testRichToMarkdown(tmp.path());
     testLibreOffice(tmp.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
