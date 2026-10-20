@@ -3,6 +3,31 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.4.0] — unreleased
+
+Book view: a sidebar for the chapters of a book, in book order.
+
+- View → Book Sidebar (`Ctrl+Alt+B`) shows the book in the library's place; the **Book** and
+  **Library** buttons in the sidebar headers switch between the two. The book folder defaults to the
+  library folder (`…` picks another); the choice and visibility are remembered.
+- The book lives in `book.json` in the book folder: human-readable JSON, chapter paths relative to
+  the folder, the array order is the book order. A folder without one offers **Create Book**
+  (its top-level `.md` / `.txt` files, numbers sorted as numbers). Unknown keys are kept on save; a
+  `book.json` that cannot be read is shown as an error and never overwritten. Saves are atomic.
+- Reorder by drag and drop or Move Up / Move Down (`Alt+Up` / `Alt+Down`, also on the right-click
+  menu); every change is saved at once.
+- Right-click → Edit Details…: title, status (Idea / Draft / Revised / Final), POV, tags, word-count
+  target with the current count and percentage, synopsis, notes. Each row shows status, words /
+  target and POV; the footer totals chapters and words.
+- **+** (or Add Chapters… on the menu, or Add to Book on a Library file's right-click menu) adds
+  `.md` / `.txt` files. Remove from Book drops the entry only; the file is never deleted. A chapter
+  whose file is missing stays in the book, listed in italics as missing.
+- Click a chapter to open it (the usual unsaved-changes prompt first). Word counts refresh when a
+  chapter is saved.
+- Compiling / exporting the whole book in book order is not part of this release (planned).
+- New `book_test`: manifest load/save, tolerant loading, missing files, reorder persistence,
+  metadata round-trip, remove-keeps-file, the sidebar's actions. Screenshots `book-*.png`.
+
 ## [1.3.1] — unreleased
 
 - **zwriter's own release key.** The updater now trusts minisign key `DBC46B23C3AF0EF3` (zwriter's

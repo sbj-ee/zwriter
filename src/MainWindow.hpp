@@ -38,6 +38,7 @@ class SpellChecker;
 class WritingHighlighter;
 class PreviewPane;
 class LibrarySidebar;
+class BookSidebar;
 class QSplitter;
 
 class MainWindow : public QMainWindow, public zwriter::UpdateHost
@@ -94,6 +95,7 @@ private slots:
     void toggleSpellCheck();
     void toggleMarkdownPreview();
     void toggleLibrary();
+    void toggleBook();
     void chooseLibraryFolder();
     void showFind();
     void showReplace();
@@ -212,6 +214,8 @@ private:
     bool findInDoc(bool forward);
     void syncViewActions();
     void saveLibrarySettings() const;
+    void saveBookSettings() const;
+    void showSidebar(bool book); // Library and Book take turns in the same slot
     QTextTable *currentTable() const;
     void updateTableActions();
     bool isPaperTheme() const;
@@ -303,10 +307,12 @@ private:
     // Side panes (PreviewPane.cpp / LibrarySidebar.cpp): library | desk | preview.
     QSplitter *m_splitter = nullptr;
     LibrarySidebar *m_library = nullptr;
+    BookSidebar *m_book = nullptr;
     PreviewPane *m_preview = nullptr;
     QAction *m_previewAction = nullptr;
     QAction *m_libraryAction = nullptr;
     QAction *m_chooseLibraryAction = nullptr;
+    QAction *m_bookAction = nullptr;
     bool m_previewWanted = false; // markdown/previewVisible; shown in Markdown mode only
 
     QString m_currentPath;

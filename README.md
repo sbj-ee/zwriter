@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.3.1** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.4.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -188,6 +188,19 @@ Library sidebar (`Ctrl+Shift+L`): folders plus the `.md` / `.txt` files of the f
 
 ![Library sidebar](docs/screenshots/library-sidebar.png)
 
+Book sidebar (`Ctrl+Alt+B`, or the **Book** / **Library** buttons in the sidebar headers): a book's
+chapters in book order, kept in a plain `book.json` in the book folder (paths relative to it). Drag a
+chapter, or use Move Up / Move Down (`Alt+Up` / `Alt+Down`), to reorder; right-click → Edit
+Details… for title, status (Idea / Draft / Revised / Final), POV, tags, word target, synopsis and
+notes. **+** adds `.md` / `.txt` files (or right-click a file in the Library → Add to Book);
+Remove from Book never deletes the file, and a chapter whose file is gone stays listed as missing.
+A folder without `book.json` offers **Create Book**, which lists its `.md` / `.txt` files in name
+order. The book folder defaults to the library folder.
+
+![Book sidebar](docs/screenshots/book-sidebar.png)
+
+![Book chapter menu](docs/screenshots/book-context-menu.png) ![Chapter details](docs/screenshots/book-chapter-details.png)
+
 ## Formats
 
 | Role | Formats |
@@ -207,7 +220,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.3.1 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.4.0 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:
@@ -296,6 +309,7 @@ at build time.
 | `Ctrl+Alt+N` | New Markdown document |
 | `Ctrl+Alt+P` | Toggle Markdown preview (Markdown documents; default off) |
 | `Ctrl+Shift+L` | Toggle library sidebar (default off; with no folder yet it shows a "Choose Folder…" button) |
+| `Ctrl+Alt+B` | Toggle book sidebar (takes the library's place; `Alt+Up` / `Alt+Down` move the selected chapter) |
 | `Ctrl+Shift+V` | Paste as plain text |
 | `Ctrl+Alt+G` | Toggle page guides |
 | `Ctrl+Enter` | Insert page break |
