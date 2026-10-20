@@ -358,10 +358,21 @@ MainWindow::MainWindow(QWidget *parent)
     // QSyntaxHighlighter::rehighlight() (spell check on/off, a word added to
     // the dictionary, colours) emits textChanged without touching the text, and
     // that used to make an untouched document ask "Save changes?" on close.
+    //
+    // And the flag alone is not trusted either (1.4.1): Qt also sets it for
+    // changes that leave the text and its formatting exactly as loaded (an
+    // input-method event that replaces text with the same text, an empty edit
+    // block, ...). Such a "modification" is compared with what was loaded and
+    // dropped; only a real difference makes the window dirty.
     connect(m_editor->document(), &QTextDocument::modificationChanged, this, [this](bool modified) {
-        if (modified && !(m_highlighter && m_highlighter->isRehighlighting())) {
-            markDirty();
+        if (!modified || (m_highlighter && m_highlighter->isRehighlighting()) || m_suppressDirty) {
+            return;
         }
+        if (!contentDiffersFromClean()) {
+            m_editor->document()->setModified(false); // nothing to save
+            return;
+        }
+        markDirty();
     });
     // Key sounds fire from the editor keyPress eventFilter (typing + Return),
     // not textChanged — avoids clicks on paste/programmatic edits/nav side-effects.
@@ -1750,6 +1761,25 @@ void MainWindow::scheduleStatusUpdate()
     }
 }
 
+void MainWindow::captureCleanBaseline()
+{
+    const QTextDocument *doc = m_editor->document();
+    m_cleanText = doc->toRawText();
+    // TXT / Markdown save the text only; ODT / RTF also keep the formatting.
+    m_cleanRich = m_currentFormat != DocumentIo::Format::Txt
+        && m_currentFormat != DocumentIo::Format::Markdown;
+    m_cleanHtml = m_cleanRich ? doc->toHtml() : QString();
+}
+
+bool MainWindow::contentDiffersFromClean() const
+{
+    const QTextDocument *doc = m_editor->document();
+    if (doc->toRawText() != m_cleanText) {
+        return true;
+    }
+    return m_cleanRich && doc->toHtml() != m_cleanHtml;
+}
+
 void MainWindow::markDirty()
 {
     if (m_suppressDirty) {
@@ -1785,6 +1815,8 @@ void MainWindow::setCurrentFile(const QString &path, DocumentIo::Format format)
     // Opened, created or just saved: the document is the saved state. (Save did
     // not clear it, so the next edit never re-fired modificationChanged.)
     m_editor->document()->setModified(false);
+    m_metaDirty = false;
+    captureCleanBaseline();
     updateWindowTitle();
     if (!path.isEmpty()) {
         addToRecentFiles(path);
@@ -2680,6 +2712,14 @@ void MainWindow::syncFormatActions()
 bool MainWindow::maybeSave()
 {
     if (!m_dirty) {
+        return true;
+    }
+    if (!m_metaDirty && !contentDiffersFromClean()) {
+        // Marked dirty, but the document is exactly what was opened or last
+        // saved (e.g. an edit typed and deleted again): nothing to lose.
+        m_dirty = false;
+        m_editor->document()->setModified(false);
+        updateWindowTitle();
         return true;
     }
     QMessageBox box(this);
@@ -3801,6 +3841,7 @@ void MainWindow::togglePageNumbers()
         m_pageNumberBandBefore.clear();
     }
     m_meta.headerFooterSeeded = true;
+    m_metaDirty = true;
     markDirty();
     syncViewActions();
     m_editor->viewport()->update();
@@ -3816,6 +3857,7 @@ void MainWindow::editHeaderFooter()
     dlg.applyTo(&m_meta);
     m_meta.headerFooterSeeded = true;
     forgetPageNumberState(); // the user edited the bands by hand
+    m_metaDirty = true;
     m_dirty = true;
     updateWindowTitle();
     syncViewActions();
@@ -3832,6 +3874,7 @@ void MainWindow::fileProperties()
         return;
     }
     m_meta = dlg.meta();
+    m_metaDirty = true;
     m_dirty = true;
     updateWindowTitle();
 }

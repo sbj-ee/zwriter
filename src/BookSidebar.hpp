@@ -6,7 +6,7 @@
 #include <QPointer>
 #include <QWidget>
 
-class BookChapterDialog;
+#include "BookChapterDialog.hpp"
 class QComboBox;
 #include <QInputDialog>
 #include <QFileDialog>

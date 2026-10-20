@@ -4,12 +4,18 @@
 //      does not ask "Save changes?"
 //   E  a real edit makes it dirty and closing asks; Cancel keeps the window
 //   S  after Save the window is clean again and closes without asking
+//   K  Book and Library sidebars (1.4.1 bug): clicking a .txt / .md / .odt
+//      chapter opens it clean, switching to another chapter never prompts, a
+//      real edit still prompts
 //   T  the title carries "zwriter <version> (<commit>)"
 //   G  with Page Guides on, typed text starts on the left guide and stays
 //      inside the guides in every theme, view, window width and sidebar state
 // Run: QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 #include "DocumentIo.hpp"
 #include "MainWindow.hpp"
+#include "BookManifest.hpp"
+#include "BookSidebar.hpp"
+#include "LibrarySidebar.hpp"
 #include "version.hpp"
 
 #include <QAction>
@@ -27,6 +33,11 @@
 #include <QTextDocument>
 #include <QTextEdit>
 #include <QTimer>
+#include <QInputMethodEvent>
+#include <QTest>
+#include <QFileSystemModel>
+#include <QListWidget>
+#include <QTreeView>
 
 #include <cstdio>
 #include <memory>
@@ -194,6 +205,145 @@ void testOpenClean(const QStringList &paths, PromptWatcher &prompts)
     }
 }
 
+
+// K: open chapters from the Book and the Library sidebars, the way a user does
+// (a click on the row), and switch between them.
+void testSidebarOpensClean(const QString &root, PromptWatcher &prompts, const QString &theme,
+                           bool fullPage)
+{
+    const QString lib = root + QStringLiteral("/lib-") + theme + (fullPage ? "-page" : "-cont");
+    const QString book = lib + QStringLiteral("/Testing Book");
+    QDir().mkpath(book);
+    writeFile(book + QStringLiteral("/Chapter 1.txt"), "Chapter 1"); // no final newline, as on vertex
+    writeFile(book + QStringLiteral("/Chapter 2.txt"), "Chapter 2\nThen there was more...");
+    writeFile(book + QStringLiteral("/Chapter 3.md"), "# Chapter 3\n\nSome *words*.\n");
+    {
+        QTextDocument doc;
+        doc.setPlainText(QStringLiteral("Chapter 4\n\nAn ODT chapter."));
+        DocumentIo::save(&doc, book + QStringLiteral("/Chapter 4.odt"), DocumentIo::Format::Odt);
+    }
+    BookManifest::fromFolder(book).save();
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("theme/id"), theme);
+        s.setValue(QStringLiteral("view/fullPageView"), fullPage);
+        s.setValue(QStringLiteral("library/rootPath"), lib);
+        s.setValue(QStringLiteral("library/visible"), false);
+        s.setValue(QStringLiteral("book/visible"), true);
+        s.setValue(QStringLiteral("book/current"), QStringLiteral("Testing Book"));
+        // The settings the bug was reported with (vertex, 1.4.0).
+        s.setValue(QStringLiteral("view/focusMode"), true);
+        s.setValue(QStringLiteral("view/focusSentence"), false);
+        s.setValue(QStringLiteral("view/typewriterScroll"), true);
+        s.setValue(QStringLiteral("view/fitPageWidth"), true);
+        s.setValue(QStringLiteral("view/spellCheck"), true);
+        s.setValue(QStringLiteral("view/smartQuotes"), false);
+        s.setValue(QStringLiteral("view/keySounds"), false);
+        s.setValue(QStringLiteral("view/chromePinned"), true);
+        s.sync();
+    }
+    const QString tag = theme + (fullPage ? QStringLiteral("/page") : QStringLiteral("/continuous"));
+    auto win = std::make_unique<MainWindow>();
+    win->resize(1024, 640);
+    win->show();
+    wait(100);
+    auto *side = win->findChild<BookSidebar *>();
+    QListWidget *list = side ? side->view() : nullptr;
+    check(list && list->count() == 4, qPrintable("K " + tag + ": book with 4 chapters shown"));
+    if (!list || list->count() != 4) {
+        return;
+    }
+    const auto clickRow = [&](int row) {
+        // A real mouse click on the row (press + release on the viewport), as
+        // on the desktop: the list takes focus, clicked/activated fire from
+        // the release.
+        const QPoint at = list->visualItemRect(list->item(row)).center();
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at);
+        wait(700);
+    };
+    prompts.seen = 0;
+    for (int row : {0, 1, 2, 3, 0}) {
+        clickRow(row);
+        QTextEdit *ed = editorOf(*win);
+        const QString name = list->item(row)->data(Qt::UserRole + 1).toString();
+        check(prompts.seen == 0 && !isDirty(*win) && ed && !ed->document()->isModified()
+                  && ed->document()->availableUndoSteps() == 0
+                  && win->windowTitle().contains(QFileInfo(name).fileName()),
+              qPrintable("K " + tag + ": Book click opens " + name + " clean, no prompt"),
+              QStringLiteral("prompts=%1 title=%2 undo=%3")
+                  .arg(prompts.seen)
+                  .arg(win->windowTitle())
+                  .arg(ed ? ed->document()->availableUndoSteps() : -1));
+    }
+
+    // Changes that are not edits must not make it dirty either: the modified
+    // flag set with the text unchanged, an input-method event that replaces a
+    // character with the same character (as IBus does on Wayland), an empty
+    // edit block. Switching chapters afterwards must not prompt.
+    for (int row : {0, 2, 3}) {
+        clickRow(row);
+        QTextEdit *ed = editorOf(*win);
+        ed->setFocus();
+        ed->document()->setModified(true);
+        {
+            QTextCursor c(ed->document());
+            c.beginEditBlock();
+            c.insertText(QString());
+            c.endEditBlock();
+        }
+        {
+            QTextCursor c(ed->document());
+            c.setPosition(1);
+            ed->setTextCursor(c);
+            const QString same = ed->document()->characterAt(1);
+            QInputMethodEvent im(QString(), {});
+            im.setCommitString(same, 0, 1);
+            QApplication::sendEvent(ed, &im);
+        }
+        wait(100);
+        const QString name = list->item(row)->data(Qt::UserRole + 1).toString();
+        check(!isDirty(*win), qPrintable("K " + tag + ": non-edits leave " + name + " clean"),
+              win->windowTitle());
+        prompts.seen = 0;
+        clickRow(row == 0 ? 1 : 0);
+        check(prompts.seen == 0, qPrintable("K " + tag + ": ... and switching away does not prompt"),
+              QStringLiteral("prompts=%1").arg(prompts.seen));
+    }
+
+    // Library view: the same files from the tree.
+    auto *libSide = win->findChild<LibrarySidebar *>();
+    QMetaObject::invokeMethod(win.get(), "toggleLibrary");
+    wait(300);
+    prompts.seen = 0;
+    for (const char *file : {"Chapter 2.txt", "Chapter 3.md", "Chapter 4.odt", "Chapter 1.txt"}) {
+        const QString path = book + QLatin1Char('/') + QLatin1String(file);
+        emit libSide->fileActivated(path); // what a click on the row emits
+        wait(700);
+        QTextEdit *ed = editorOf(*win);
+        check(prompts.seen == 0 && !isDirty(*win) && ed && !ed->document()->isModified()
+                  && win->windowTitle().contains(QLatin1String(file)),
+              qPrintable("K " + tag + ": Library opens " + QLatin1String(file) + " clean, no prompt"),
+              QStringLiteral("prompts=%1 title=%2").arg(prompts.seen).arg(win->windowTitle()));
+    }
+
+    // A real edit still prompts (Cancel keeps the document).
+    QTextEdit *ed = editorOf(*win);
+    ed->setFocus();
+    QTextCursor c(ed->document());
+    c.movePosition(QTextCursor::End);
+    ed->setTextCursor(c);
+    ed->insertPlainText(QStringLiteral(" edited"));
+    wait(50);
+    prompts.seen = 0;
+    emit libSide->fileActivated(book + QStringLiteral("/Chapter 2.txt"));
+    wait(300);
+    check(isDirty(*win) && prompts.seen == 1 && win->windowTitle().contains("Chapter 1.txt"),
+          qPrintable("K " + tag + ": a real edit prompts; Cancel keeps the chapter"),
+          QStringLiteral("prompts=%1 title=%2").arg(prompts.seen).arg(win->windowTitle()));
+    win.reset(); // destroyed without close(): no prompt left behind
+    prompts.seen = 0;
+}
+
 void testEditAndSave(const QString &dir, PromptWatcher &prompts)
 {
     const QString path = dir + QStringLiteral("/edit.txt");
@@ -358,6 +508,11 @@ int main(int argc, char **argv)
         s.setValue(QStringLiteral("view/fitPageWidth"), true);
         s.setValue(QStringLiteral("view/fullPageView"), false);
         s.sync();
+    }
+    for (const QString &theme : {QStringLiteral("dark"), QStringLiteral("paper")}) {
+        for (bool page : {false, true}) {
+            testSidebarOpensClean(dataDir.path(), prompts, theme, page);
+        }
     }
     testOpenClean(sample, prompts);
     {

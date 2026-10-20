@@ -433,6 +433,8 @@ if(TARGET Qt6::Widgets)
       set_property(TARGET mainwindow_test PROPERTY ${_prop} ${_val})
     endif()
   endforeach()
+  find_package(Qt6 REQUIRED COMPONENTS Test)
+  target_link_libraries(mainwindow_test PRIVATE Qt6::Test)
   add_test(NAME mainwindow COMMAND mainwindow_test)
   set_tests_properties(mainwindow PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion"
