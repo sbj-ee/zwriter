@@ -140,6 +140,12 @@ add_executable(zwriter
   src/PreviewPane.hpp
   src/LibrarySidebar.cpp
   src/LibrarySidebar.hpp
+  src/BookManifest.cpp
+  src/BookManifest.hpp
+  src/BookChapterDialog.cpp
+  src/BookChapterDialog.hpp
+  src/BookSidebar.cpp
+  src/BookSidebar.hpp
   src/icons.qrc
   src/ui.qrc
   src/fonts.qrc
@@ -415,6 +421,26 @@ if(TARGET Qt6::Widgets)
   target_link_libraries(library_test PRIVATE Qt6::Widgets)
   add_test(NAME library COMMAND library_test)
   set_tests_properties(library PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
+endif()
+
+# Book sidebar (1.4.0): book.json load/save, tolerant loading, missing files,
+# reorder persistence, metadata round-trip, remove keeps files.
+if(TARGET Qt6::Widgets)
+  add_executable(book_test
+    tests/book_test.cpp
+    src/BookManifest.cpp
+    src/BookManifest.hpp
+    src/BookChapterDialog.cpp
+    src/BookChapterDialog.hpp
+    src/BookSidebar.cpp
+    src/BookSidebar.hpp
+    src/Theme.cpp
+    src/Theme.hpp
+  )
+  target_include_directories(book_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ZWRITER_GENERATED_DIR})
+  target_link_libraries(book_test PRIVATE Qt6::Widgets)
+  add_test(NAME book COMMAND book_test)
+  set_tests_properties(book PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-book_test")
 endif()
 
 # Whole-window tests: the real MainWindow, offscreen. Built from the same

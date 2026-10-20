@@ -1,6 +1,6 @@
 # Screenshots
 
-Captured from the real MainWindow via `./build/zwriter --capture-screenshots docs/screenshots` (xvfb-run on CI/headless). Page numbers are off by default; shots that show them turn them on explicitly.
+Captured from the real MainWindow via `./build/zwriter --capture-screenshots docs/screenshots` (headless: `QT_QPA_PLATFORM=offscreen`, or xvfb-run). Page numbers are off by default; shots that show them turn them on explicitly.
 
 | File | Shows |
 |---|---|
@@ -21,3 +21,9 @@ Captured from the real MainWindow via `./build/zwriter --capture-screenshots doc
 | `markdown-preview-dark.png` | The same in the Dark room theme — the preview follows the theme (page colours, code / link / quote inks) |
 | `library-sidebar.png` | View → Library Sidebar (`Ctrl+Shift+L`) — a demo library folder; only folders and `.md` / `.txt` files are listed (its `.odt`, `.png` and `.docx` files are hidden); the open document is highlighted |
 | `library-and-preview.png` | Library sidebar, editor and preview together |
+| `book-sidebar.png` | View → Book Sidebar (`Ctrl+Alt+B`, 1.4.0) — a demo library with two books (one `book.json` per subfolder), "The Harbor" shown, chapters in book order with status · words / target · POV, a missing chapter in italics, chapter totals in the footer |
+| `book-context-menu.png` | Right-click a chapter — Open, Edit Details…, Move Up / Move Down, Remove from Book, Add Chapters… (the popup is painted onto the window grab) |
+| `book-picker.png` | The book picker open — one entry per book subfolder, by title (the popup is painted onto the window grab) |
+| `book-new.png` | New Book — pick a library subfolder without a book, or type a new name |
+| `book-chapter-details.png` | Chapter Details — title, status (Idea / Outline / Draft / Revised / Final), POV, tags, word target with the current count, synopsis, notes |
+| `book-sidebar-dark.png` | The Book sidebar in the Dark room theme |
