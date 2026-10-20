@@ -434,6 +434,8 @@ if(TARGET Qt6::Widgets)
     src/BookSidebar.hpp
     src/DocumentIo.cpp
     src/DocumentIo.hpp
+    src/Images.cpp
+    src/Images.hpp
     src/Alignment.cpp
     src/Alignment.hpp
     src/Theme.cpp
