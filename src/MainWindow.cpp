@@ -10,6 +10,9 @@
 #include "WritingHighlighter.hpp"
 #include "InsertTableDialog.hpp"
 #include "LibrarySidebar.hpp"
+#include "BookSidebar.hpp"
+#include "BookChapterDialog.hpp"
+#include "BookManifest.hpp"
 #include "PageWidgets.hpp"
 #include "PreviewPane.hpp"
 #include "PrintLayout.hpp"
@@ -46,7 +49,9 @@
 #include <QTextListFormat>
 #include <QTextList>
 #include <QGuiApplication>
+#include <QAbstractItemView>
 #include <QComboBox>
+#include <QInputDialog>
 #include <QClipboard>
 #include <QMimeData>
 #include <QTextDocumentFragment>
@@ -54,6 +59,7 @@
 #include <QKeySequence>
 #include <QToolButton>
 #include <QLabel>
+#include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -222,25 +228,56 @@ MainWindow::MainWindow(QWidget *parent)
     m_library = new LibrarySidebar(m_splitter);
     m_library->hide();
     m_splitter->addWidget(m_library);
+    // Book sidebar: same slot as the library (only one of the two is shown).
+    m_book = new BookSidebar(m_splitter);
+    m_book->hide();
+    m_splitter->addWidget(m_book);
     m_splitter->addWidget(m_desk);
     m_preview = new PreviewPane(m_splitter);
     m_preview->hide();
     m_splitter->addWidget(m_preview);
     m_splitter->setStretchFactor(0, 0);
-    m_splitter->setStretchFactor(1, 3);
-    m_splitter->setStretchFactor(2, 2);
+    m_splitter->setStretchFactor(1, 0);
+    m_splitter->setStretchFactor(2, 3);
+    m_splitter->setStretchFactor(3, 2);
     m_preview->attachEditor(m_editor);
     m_previewWanted = PreviewPane::loadVisibleSetting();
     {
         const LibrarySidebar::Settings lib = LibrarySidebar::loadSettings();
         m_library->setRootPath(lib.rootPath);
         m_library->setVisible(lib.visible);
+        const BookSidebar::Settings book = BookSidebar::loadSettings();
+        m_book->selectBookOnLoad(book.currentBook);
+        m_book->setRootPath(lib.rootPath); // books are subfolders of the library
+        m_book->setVisible(book.visible && !lib.visible);
     }
+    connect(m_library, &LibrarySidebar::switchToBook, this, [this]() { showSidebar(true); });
+    connect(m_book, &BookSidebar::switchToLibrary, this, [this]() { showSidebar(false); });
+    connect(m_library, &LibrarySidebar::addToBookRequested, this, [this](const QString &path) {
+        const QString err = m_book->addFileToBook(path);
+        if (!err.isEmpty()) {
+            statusBar()->showMessage(err, 6000);
+            return;
+        }
+        showSidebar(true);
+    });
+    connect(m_book, &BookSidebar::currentBookChanged, this, [this]() { saveBookSettings(); });
+    connect(m_book, &BookSidebar::chooseLibraryRequested, this, &MainWindow::chooseLibraryFolder);
+    connect(m_book, &BookSidebar::message, this,
+            [this](const QString &text) { statusBar()->showMessage(text, 6000); });
+    connect(m_book, &BookSidebar::fileActivated, this, [this](const QString &path) {
+        if (m_currentPath.isEmpty() || QFileInfo(path) != QFileInfo(m_currentPath)) {
+            openExternalFile(path);
+        }
+        m_book->setCurrentFile(m_currentPath);
+        m_editor->setFocus(Qt::OtherFocusReason);
+    });
     connect(m_library, &LibrarySidebar::rootPathChosen, this, [this]() {
         if (!m_library->isVisibleTo(this)) {
             m_library->setVisible(true);
         }
         m_library->setCurrentFile(m_currentPath);
+        m_book->setRootPath(m_library->rootPath());
         saveLibrarySettings();
         syncViewActions();
     });
@@ -916,13 +953,21 @@ void MainWindow::buildViewMenu()
     m_chooseLibraryAction = m_viewMenu->addAction(QStringLiteral("Choose Library &Folder…"));
     connect(m_chooseLibraryAction, &QAction::triggered, this, &MainWindow::chooseLibraryFolder);
 
+    m_bookAction = m_viewMenu->addAction(QStringLiteral("Boo&k Sidebar"));
+    m_bookAction->setCheckable(true);
+    m_bookAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_B));
+    m_bookAction->setToolTip(QStringLiteral(
+        "Show the book's chapters in book order; drag to reorder, right-click for details "
+        "(Ctrl+Alt+B)"));
+    connect(m_bookAction, &QAction::triggered, this, &MainWindow::toggleBook);
+
     auto *fullscreenAct = m_viewMenu->addAction(QStringLiteral("Full Sc&reen"));
     fullscreenAct->setShortcut(QKeySequence(Qt::Key_F11));
     connect(fullscreenAct, &QAction::triggered, this, &MainWindow::toggleFullscreen);
 
     for (QAction *a : {m_typewriterScrollAction, m_focusModeAction, m_fullPageViewAction,
                        m_fitPageWidthAction, m_pageGuidesAction, m_keySoundsAction, fullscreenAct,
-                       m_previewAction, m_libraryAction}) {
+                       m_previewAction, m_libraryAction, m_bookAction}) {
         addAction(a);
     }
 }
@@ -1277,6 +1322,10 @@ void MainWindow::syncViewActions()
         const QSignalBlocker b(m_libraryAction);
         m_libraryAction->setChecked(m_library->isVisibleTo(this));
     }
+    if (m_bookAction && m_book) {
+        const QSignalBlocker b(m_bookAction);
+        m_bookAction->setChecked(m_book->isVisibleTo(this));
+    }
 }
 
 void MainWindow::toggleMarkdownPreview()
@@ -1289,6 +1338,10 @@ void MainWindow::toggleMarkdownPreview()
 void MainWindow::toggleLibrary()
 {
     const bool show = !m_library->isVisibleTo(this);
+    if (show && m_book->isVisibleTo(this)) {
+        m_book->hide();
+        saveBookSettings();
+    }
     m_library->setVisible(show);
     // No folder yet: the pane shows a hint and a "Choose Folder…" button
     // instead of popping a dialog the user did not ask for.
@@ -1309,6 +1362,43 @@ void MainWindow::chooseLibraryFolder()
 void MainWindow::saveLibrarySettings() const
 {
     LibrarySidebar::saveSettings({m_library->rootPath(), m_library->isVisibleTo(this)});
+}
+
+void MainWindow::saveBookSettings() const
+{
+    BookSidebar::saveSettings({m_book->currentBook(), m_book->isVisibleTo(this)});
+}
+
+void MainWindow::showSidebar(bool book)
+{
+    if (book) {
+        m_library->hide();
+        if (m_book->rootPath() != m_library->rootPath()) {
+            m_book->setRootPath(m_library->rootPath());
+        } else {
+            m_book->reload(); // picks up books / edits made outside zwriter
+        }
+        m_book->show();
+        m_book->setCurrentFile(m_currentPath);
+    } else {
+        m_book->hide();
+        m_library->show();
+        m_library->setCurrentFile(m_currentPath);
+    }
+    saveLibrarySettings();
+    saveBookSettings();
+    syncViewActions();
+}
+
+void MainWindow::toggleBook()
+{
+    if (m_book->isVisibleTo(this)) {
+        m_book->hide();
+        saveBookSettings();
+        syncViewActions();
+    } else {
+        showSidebar(true);
+    }
 }
 
 void MainWindow::buildFormatToolbar()
@@ -1544,6 +1634,7 @@ void MainWindow::applyTheme()
                                       .arg(c.border.name()));
         m_preview->applyTheme(c, markdownFont());
         m_library->applyTheme(c);
+        m_book->applyTheme(c);
     }
 
     // Typed text carries no explicit colour, so it follows the theme.
@@ -1702,6 +1793,10 @@ void MainWindow::setCurrentFile(const QString &path, DocumentIo::Format format)
     if (m_preview) {
         m_preview->setBaseDirectory(path.isEmpty() ? QString() : QFileInfo(path).absolutePath());
         m_library->setCurrentFile(path);
+        if (m_book->isVisibleTo(this) && !path.isEmpty() && m_book->book().indexOf(path) >= 0) {
+            m_book->reload(); // fresh word counts after a save
+        }
+        m_book->setCurrentFile(path);
     }
 }
 
@@ -3811,6 +3906,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
     // Side panes stay off until their own shots, whatever the user's settings.
     m_previewWanted = false;
     m_library->hide();
+    m_book->hide();
     m_themeId = QStringLiteral("paper");
     m_fullPageView = true;
     applyDocumentDefaults();
@@ -4220,7 +4316,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         // a) Editor + preview.
         m_previewWanted = true; // not saved: capture leaves the settings alone
         syncViewActions();
-        m_splitter->setSizes({0, 720, 560});
+        m_splitter->setSizes({0, 0, 720, 560});
         m_preview->renderNow();
         QApplication::processEvents();
         grab().save(dir + QStringLiteral("/markdown-preview.png"), "PNG");
@@ -4238,7 +4334,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         m_library->setRootPath(lib);
         m_library->show();
         syncViewActions();
-        m_splitter->setSizes({250, 1030, 0});
+        m_splitter->setSizes({250, 0, 1030, 0});
         QElapsedTimer loading;
         loading.start();
         const QModelIndex chapters = m_library->model()->index(lib + QStringLiteral("/Chapters"));
@@ -4256,10 +4352,147 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         // d) Everything: library, editor, preview.
         m_previewWanted = true;
         syncViewActions();
-        m_splitter->setSizes({250, 560, 470});
+        m_splitter->setSizes({250, 0, 560, 470});
         m_preview->renderNow();
         QApplication::processEvents();
         grab().save(dir + QStringLiteral("/library-and-preview.png"), "PNG");
+
+        // e) Book sidebar (1.4.0): a demo book with book.json, chapters in book
+        //    order (not name order), details per chapter, one missing file.
+        {
+            // A library holding two books (one book.json per subfolder) and a
+            // plain folder that could become one.
+            const QString shelf = demoDir.path() + QStringLiteral("/Shelf");
+            const QString bookDir = shelf + QStringLiteral("/The Harbor");
+            QDir().mkpath(shelf + QStringLiteral("/Short Pieces"));
+            write(shelf + QStringLiteral("/Short Pieces/fog.md"), "# Fog\n\nA short piece.\n");
+            QDir().mkpath(shelf + QStringLiteral("/Salt Roads/parts"));
+            write(shelf + QStringLiteral("/Salt Roads/parts/01 Inland.md"), "# Inland\n");
+            write(shelf + QStringLiteral("/Salt Roads/parts/02 The Pass.md"), "# The Pass\n");
+            {
+                BookManifest other = BookManifest::fromFolder(shelf + QStringLiteral("/Salt Roads"));
+                other.save();
+            }
+            QDir().mkpath(bookDir + QStringLiteral("/chapters"));
+            const QByteArray prose =
+                "The ferry came in low and late, its lamps smeared by the rain. Mara counted the "
+                "passengers as they stepped onto the quay, the way her father had taught her, and "
+                "lost count at the eleventh because the eleventh was carrying her mother's coat.\n\n"
+                "She did not call out. The harbor had a way of keeping words for itself.\n\n";
+            write(bookDir + QStringLiteral("/chapters/harbor.md"), "# Harbor\n\n" + prose);
+            write(bookDir + QStringLiteral("/chapters/the-letter.md"),
+                  "# The Letter\n\n" + prose + prose);
+            write(bookDir + QStringLiteral("/chapters/low-tide.md"), "# Low Tide\n\n" + prose);
+            write(bookDir + QStringLiteral("/chapters/the-lighthouse.md"),
+                  "# The Lighthouse\n\n" + prose + prose + prose);
+            write(bookDir + QStringLiteral("/notes.txt"), "keep the coat\n");
+            BookManifest demo;
+            demo.setBookDir(bookDir);
+            demo.setTitle(QStringLiteral("The Harbor"));
+            const struct {
+                const char *path, *title, *status, *pov, *synopsis;
+                int target;
+            } rows[] = {
+                {"chapters/harbor.md", "Harbor", "Revised", "Mara",
+                 "Mara meets the late ferry and sees her mother's coat.", 2500},
+                {"chapters/the-letter.md", "The Letter", "Draft", "Mara",
+                 "The coat holds a letter addressed to no one.", 3000},
+                {"chapters/the-lighthouse.md", "The Lighthouse", "Draft", "Ivo", "", 3000},
+                {"chapters/low-tide.md", "Low Tide", "Outline", "", "", 0},
+                {"chapters/epilogue.md", "Epilogue", "Idea", "", "", 0}, // not written yet
+            };
+            for (const auto &r : rows) {
+                BookChapter c;
+                c.path = QString::fromUtf8(r.path);
+                c.title = QString::fromUtf8(r.title);
+                c.status = QString::fromUtf8(r.status);
+                c.pov = QString::fromUtf8(r.pov);
+                c.synopsis = QString::fromUtf8(r.synopsis);
+                c.wordTarget = r.target;
+                if (c.title == QLatin1String("Harbor")) {
+                    c.tags = {QStringLiteral("opening"), QStringLiteral("sea")};
+                    c.notes = QStringLiteral("Trim the second paragraph.");
+                }
+                demo.setChapter(demo.add(c.path), c);
+            }
+            demo.save();
+
+            m_previewWanted = false;
+            m_library->hide();
+            openPath(bookDir + QStringLiteral("/chapters/the-letter.md"));
+            statusBar()->clearMessage();
+            m_book->setRootPath(shelf);
+            m_book->selectBook(QStringLiteral("The Harbor"));
+            m_book->show();
+            m_book->setCurrentFile(m_currentPath);
+            syncViewActions();
+            m_splitter->setSizes({0, 270, 1010, 0});
+            QApplication::processEvents();
+            grab().save(dir + QStringLiteral("/book-sidebar.png"), "PNG");
+
+            // Right-click menu on chapter 2, drawn over the window grab (a popup
+            // is its own window, so grab() alone would not show it).
+            {
+                QMenu *menu = m_book->buildContextMenu(1);
+                menu->ensurePolished();
+                menu->adjustSize();
+                const QRect itemRect = m_book->view()->visualItemRect(m_book->view()->item(1));
+                const QPoint at = m_book->view()->viewport()->mapTo(
+                    this, itemRect.center() + QPoint(-40, 0));
+                menu->show();
+                QApplication::processEvents();
+                QPixmap shot = grab();
+                {
+                    QPainter p(&shot);
+                    p.drawPixmap(at, menu->grab());
+                }
+                menu->hide();
+                delete menu;
+                shot.save(dir + QStringLiteral("/book-context-menu.png"), "PNG");
+            }
+
+            // The book picker open: one entry per book subfolder.
+            {
+                QComboBox *picker = m_book->picker();
+                picker->showPopup();
+                QApplication::processEvents();
+                QWidget *popup = picker->view()->window();
+                const QPoint at = mapFromGlobal(popup->mapToGlobal(QPoint(0, 0)));
+                QPixmap shot = grab();
+                {
+                    QPainter p(&shot);
+                    p.drawPixmap(at, popup->grab());
+                }
+                picker->hidePopup();
+                shot.save(dir + QStringLiteral("/book-picker.png"), "PNG");
+            }
+
+            // New Book…: pick a subfolder (or type a new name).
+            m_book->chooseNewBook();
+            if (QInputDialog *nb = m_book->newBookDialog()) {
+                QApplication::processEvents();
+                nb->grab().save(dir + QStringLiteral("/book-new.png"), "PNG");
+                nb->reject();
+            }
+
+            // Edit Details… on chapter 1.
+            m_book->editChapter(0);
+            if (BookChapterDialog *dlg = m_book->chapterDialog()) {
+                QApplication::processEvents();
+                dlg->grab().save(dir + QStringLiteral("/book-chapter-details.png"), "PNG");
+                dlg->reject();
+            }
+
+            // Dark room theme.
+            m_themeId = QStringLiteral("dark");
+            applyTheme();
+            QApplication::processEvents();
+            grab().save(dir + QStringLiteral("/book-sidebar-dark.png"), "PNG");
+            m_themeId = QStringLiteral("paper");
+            applyTheme();
+            m_book->hide();
+            m_book->setRootPath(QString());
+        }
 
         m_previewWanted = false;
         m_library->hide();

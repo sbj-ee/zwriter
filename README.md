@@ -188,6 +188,21 @@ Library sidebar (`Ctrl+Shift+L`): folders plus the `.md` / `.txt` files of the f
 
 ![Library sidebar](docs/screenshots/library-sidebar.png)
 
+Book sidebar (`Ctrl+Alt+B`, or the **Book** / **Library** buttons in the sidebar headers): a book's
+chapters in book order. Each book is a subfolder of the library with its own plain `book.json`
+(chapter paths relative to it), so one library can hold several books; the picker at the top
+switches between them and **New** makes a book of an existing or new subfolder. Drag a chapter, or
+use Move Up / Move Down (`Alt+Up` / `Alt+Down`), to reorder; right-click → Edit Details… for title,
+status (Idea / Outline / Draft / Revised / Final), POV, tags, word target, synopsis and notes. **+**
+adds `.md` / `.txt` files from the book's folder (or right-click a file in the Library → Add to
+Book); files outside the book folder are refused. Remove from Book never deletes the file, and a
+chapter whose file is gone stays listed as missing. Exporting a book in book order (EPUB / PDF) is
+planned.
+
+![Book sidebar](docs/screenshots/book-sidebar.png)
+
+![Book picker](docs/screenshots/book-picker.png) ![Book chapter menu](docs/screenshots/book-context-menu.png) ![Chapter details](docs/screenshots/book-chapter-details.png)
+
 ## Formats
 
 | Role | Formats |
@@ -296,6 +311,7 @@ at build time.
 | `Ctrl+Alt+N` | New Markdown document |
 | `Ctrl+Alt+P` | Toggle Markdown preview (Markdown documents; default off) |
 | `Ctrl+Shift+L` | Toggle library sidebar (default off; with no folder yet it shows a "Choose Folder…" button) |
+| `Ctrl+Alt+B` | Toggle book sidebar (takes the library's place; `Alt+Up` / `Alt+Down` move the selected chapter) |
 | `Ctrl+Shift+V` | Paste as plain text |
 | `Ctrl+Alt+G` | Toggle page guides |
 | `Ctrl+Enter` | Insert page break |
