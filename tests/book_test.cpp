@@ -18,6 +18,7 @@
 #include "BookChapterDialog.hpp"
 #include "BookManifest.hpp"
 #include "BookSidebar.hpp"
+#include "DocumentIo.hpp"
 #include "version.hpp"
 
 #include <QApplication>
@@ -36,6 +37,7 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
+#include <QTextDocument>
 
 #include <cstdio>
 
@@ -204,14 +206,14 @@ void outsideTests()
     const QString dir = tmp.path() + "/book";
     write(dir + "/in.md", "in\n");
     write(tmp.path() + "/out.md", "out\n");
-    write(dir + "/notes.odt", "x");
+    write(dir + "/notes.docx", "x");
     BookManifest b;
     b.setBookDir(dir);
     check(b.add(dir + "/in.md") == 0, "O  file inside the book folder is added");
     check(b.add(tmp.path() + "/out.md") == -1, "O  absolute path outside is refused");
     check(b.add("../out.md") == -1 && b.add("sub/../../out.md") == -1, "O  ../ paths are refused");
     check(b.add("/etc/passwd.md") == -1 && b.add("C:/x.md") == -1, "O  root / drive paths refused");
-    check(b.add("notes.odt") == -1, "O  only .md / .txt");
+    check(b.add("notes.docx") == -1, "O  only .md / .txt / .odt");
     check(b.count() == 1, "O  ... nothing else was added");
 
     write(BookManifest::manifestPath(dir),
@@ -224,6 +226,73 @@ void outsideTests()
     b.save();
     check(QString::fromUtf8(readAll(BookManifest::manifestPath(dir))).contains("../out.md"),
           "O  ... and not dropped on save");
+}
+
+bool writeOdt(const QString &path, const QString &text)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QTextDocument doc;
+    doc.setPlainText(text);
+    return DocumentIo::save(&doc, path, DocumentIo::Format::Odt);
+}
+
+// D: .odt chapters (1.4.1): discovery, add, count via the ODT load path,
+// targets, open, missing.
+void odtTests()
+{
+    QTemporaryDir tmp;
+    const QString lib = tmp.path() + "/Library";
+    const QString dir = lib + "/Mixed";
+    check(writeOdt(dir + "/02 Second.odt", "One two three four five.\n\nSix seven."),
+          "D  wrote a real .odt (DocumentIo::save)");
+    write(dir + "/01 First.md", "# First\n\nalpha beta\n");
+    write(dir + "/03 Third.txt", "gamma\n");
+    write(dir + "/04 Notes.docx", "x");
+    check(countWordsInFile(dir + "/02 Second.odt") == 7, "D  .odt word count from content.xml",
+          QString::number(countWordsInFile(dir + "/02 Second.odt")));
+    write(dir + "/broken.odt", "not a zip");
+    check(countWordsInFile(dir + "/broken.odt") == -1, "D  unreadable .odt: -1");
+    QFile::remove(dir + "/broken.odt");
+
+    const BookManifest found = BookManifest::fromFolder(dir);
+    check(order(found) == QStringList({"01 First.md", "02 Second.odt", "03 Third.txt"}),
+          "D  Create/New Book discovers .odt with .md/.txt in name order", order(found).join(","));
+
+    QMainWindow win;
+    auto *side = new BookSidebar(&win);
+    win.setCentralWidget(side);
+    win.show();
+    side->setRootPath(lib);
+    check(side->createBook("Mixed") && side->view()->count() == 3, "D  New Book lists the .odt");
+    check(side->view()->item(1)->text().contains("Draft · 7 words"), "D  row shows the .odt count",
+          side->view()->item(1)->text());
+    BookChapter c = side->book().at(1);
+    c.wordTarget = 14;
+    side->setChapter(1, c);
+    check(side->view()->item(1)->text().contains("7 / 14 words"), "D  .odt target", side->view()->item(1)->text());
+    side->editChapter(1);
+    if (BookChapterDialog *dlg = side->chapterDialog()) {
+        check(dlg->progressLabel()->text() == "7 words of 14 (50%)", "D  details dialog .odt progress",
+              dlg->progressLabel()->text());
+        dlg->reject();
+    }
+    QStringList opened;
+    QObject::connect(side, &BookSidebar::fileActivated, [&opened](const QString &p) { opened << p; });
+    emit side->view()->itemClicked(side->view()->item(1));
+    check(opened == QStringList({QDir::cleanPath(dir + "/02 Second.odt")}), "D  clicking opens the .odt",
+          opened.join(","));
+
+    side->removeChapter(1);
+    check(side->addChapters({dir + "/02 Second.odt", dir + "/04 Notes.docx"}) == 1
+              && onDisk(dir).last() == "02 Second.odt",
+          "D  Add Chapters takes .odt, still refuses other types");
+    QFile::remove(dir + "/02 Second.odt");
+    side->reload();
+    check(side->view()->item(2)->text().contains("Missing: 02 Second.odt"), "D  missing .odt marked",
+          side->view()->item(2)->text());
+    opened.clear();
+    emit side->view()->itemClicked(side->view()->item(2));
+    check(opened.isEmpty(), "D  a missing .odt is not opened");
 }
 
 void wordTests()
@@ -426,9 +495,10 @@ int main(int argc, char **argv)
     manifestTests();
     tolerantTests();
     outsideTests();
+    odtTests();
     wordTests();
     sidebarTests();
-    check(QString::fromLatin1(zwriter::kVersionString) == "1.4.0", "V  version 1.4.0",
+    check(QString::fromLatin1(zwriter::kVersionString) == "1.4.1", "V  version 1.4.1",
           QString::fromLatin1(zwriter::kVersionString));
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures,
                 g_failures == 1 ? "" : "s");

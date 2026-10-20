@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.4.0 LANGUAGES CXX)
+project(zwriter VERSION 1.4.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -407,6 +407,10 @@ if(TARGET Qt6::Widgets)
     src/BookChapterDialog.hpp
     src/BookSidebar.cpp
     src/BookSidebar.hpp
+    src/DocumentIo.cpp
+    src/DocumentIo.hpp
+    src/Alignment.cpp
+    src/Alignment.hpp
     src/Theme.cpp
     src/Theme.hpp
   )
@@ -429,6 +433,8 @@ if(TARGET Qt6::Widgets)
       set_property(TARGET mainwindow_test PROPERTY ${_prop} ${_val})
     endif()
   endforeach()
+  find_package(Qt6 REQUIRED COMPONENTS Test)
+  target_link_libraries(mainwindow_test PRIVATE Qt6::Test)
   add_test(NAME mainwindow COMMAND mainwindow_test)
   set_tests_properties(mainwindow PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion"

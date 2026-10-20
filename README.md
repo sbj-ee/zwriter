@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.4.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.4.1** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -194,12 +194,14 @@ chapters in book order. Each book is a subfolder of the library with its own pla
 switches between them and **New** makes a book of an existing or new subfolder. Drag a chapter, or
 use Move Up / Move Down (`Alt+Up` / `Alt+Down`), to reorder; right-click → Edit Details… for title,
 status (Idea / Outline / Draft / Revised / Final), POV, tags, word target, synopsis and notes. **+**
-adds `.md` / `.txt` files from the book's folder (or right-click a file in the Library → Add to
+adds `.md` / `.txt` / `.odt` files from the book's folder (or right-click a file in the Library → Add to
 Book); files outside the book folder are refused. Remove from Book never deletes the file, and a
 chapter whose file is gone stays listed as missing. Exporting a book in book order (EPUB / PDF) is
 planned.
 
 ![Book sidebar](docs/screenshots/book-sidebar.png)
+
+![ODT chapter open from a book](docs/screenshots/book-odt-chapter.png)
 
 ![Book picker](docs/screenshots/book-picker.png) ![Book chapter menu](docs/screenshots/book-context-menu.png) ![Chapter details](docs/screenshots/book-chapter-details.png)
 
@@ -222,7 +224,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.4.0 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.4.1 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:
