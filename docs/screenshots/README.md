@@ -27,3 +27,4 @@ Captured from the real MainWindow via `./build/zwriter --capture-screenshots doc
 | `book-new.png` | New Book — pick a library subfolder without a book, or type a new name |
 | `book-chapter-details.png` | Chapter Details — title, status (Idea / Outline / Draft / Revised / Final), POV, tags, word target with the current count, synopsis, notes |
 | `book-sidebar-dark.png` | The Book sidebar in the Dark room theme |
+| `book-odt-chapter.png` | An `.odt` chapter ("The Lighthouse", 1.4.1) opened from the Book sidebar; its row count (179 words) matches the status bar |
