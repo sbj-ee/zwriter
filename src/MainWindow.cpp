@@ -3141,7 +3141,17 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
 bool MainWindow::openPath(const QString &path)
 {
     QString error;
-    if (!DocumentIo::load(m_editor->document(), path, &error)) {
+    // The highlighter keeps per-block state in QTextBlock::userState, which
+    // the ODT import also uses to mark paragraphs (a kept table of contents):
+    // load without it, then let it run over the loaded text.
+    if (m_highlighter) {
+        m_highlighter->setDocument(nullptr);
+    }
+    const bool loaded = DocumentIo::load(m_editor->document(), path, &error);
+    if (m_highlighter) {
+        m_highlighter->setDocument(m_editor->document());
+    }
+    if (!loaded) {
         QMessageBox::warning(this, QStringLiteral("Open failed"), error);
         return false;
     }
