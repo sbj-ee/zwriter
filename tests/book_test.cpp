@@ -479,6 +479,30 @@ void usabilityTests()
     check(side->addButton()->text() == "+ Chapter" && side->addButton()->isVisibleTo(side)
               && !side->findChild<QToolButton *>("bookNew")->isVisibleTo(side),
           "U  one labelled '+ Chapter' button; no second 'New' button");
+    {
+        // Double-click and Enter open a chapter; each row shows its status and
+        // word count, and the footer the book total.
+        QStringList opened;
+        auto conn = QObject::connect(side, &BookSidebar::fileActivated, [&opened](const QString &p) { opened << p; });
+        QApplication::setActiveWindow(&win);
+        QTest::qWaitForWindowExposed(&win);
+        list->scrollToItem(list->item(2));
+        const QRect r = list->visualItemRect(list->item(2));
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, r.center());
+        const int afterClick = opened.size();
+        QTest::mouseDClick(list->viewport(), Qt::LeftButton, {}, r.center());
+        const int afterDouble = int(opened.size());
+        list->setCurrentRow(1);
+        emit list->itemActivated(list->item(1)); // Enter / Return
+        QObject::disconnect(conn);
+        check(afterClick == 1 && afterDouble == 2 && opened.value(1) == QDir::cleanPath(dir + "/03 Raptors.md")
+                  && opened.value(2) == QDir::cleanPath(dir + "/02_Songbirds.md"),
+              "U  click, double-click and Enter open the chapter (once each)", opened.join(","));
+        check(list->item(0)->text().contains("Draft · 1 word"), "U  row badge: status and word count", list->item(0)->text());
+        auto *footer = side->findChild<QLabel *>("bookFooter");
+        check(footer && footer->text().startsWith("4 chapters · 5 words"), "U  footer: book total",
+              footer ? footer->text() : QString());
+    }
     check(list->focusPolicy() == Qt::StrongFocus, "U  the list takes keyboard focus (Tab)");
     {
         auto *files = side->findChild<QToolButton *>("bookToLibrary");
