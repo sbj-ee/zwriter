@@ -991,6 +991,7 @@ void MainWindow::buildViewMenu()
 
     m_fitPageWidthAction = m_viewMenu->addAction(QStringLiteral("Fit Page to &Width"));
     m_fitPageWidthAction->setCheckable(true);
+    m_fitPageWidthAction->setObjectName(QStringLiteral("viewFitWidth"));
     m_fitPageWidthAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_W));
     m_fitPageWidthAction->setToolTip(QStringLiteral(
         "Zoom the page to fill the window width (Ctrl+Shift+W); lines still break as they print"));
@@ -1089,7 +1090,7 @@ void MainWindow::buildViewMenu()
 
     m_viewMenu->addSeparator();
 
-    m_alwaysShowChromeAction = m_viewMenu->addAction(QStringLiteral("Always Show Tool&bar"));
+    m_alwaysShowChromeAction = m_viewMenu->addAction(QStringLiteral("Always Show Tool&bar\tEsc"));
     m_alwaysShowChromeAction->setCheckable(true);
     m_alwaysShowChromeAction->setToolTip(
         QStringLiteral("Keep the toolbar, menus and status bar visible (Esc); off = hide-away"));
@@ -3325,6 +3326,30 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
     return true;
 }
 
+// A LibreOffice table of contents is kept verbatim (it is written back as it
+// was); in the editor its "entry<TAB>page" lines get a right-aligned tab at
+// the text column's edge, so the page numbers line up on the right.
+int MainWindow::alignKeptTocTabs()
+{
+    QTextDocument *doc = m_editor->document();
+    const QTextFrameFormat ff = doc->rootFrame()->frameFormat();
+    const qreal column = doc->textWidth() - ff.leftMargin() - ff.rightMargin() - 2 * (ff.border() + ff.padding());
+    if (column <= 0) {
+        return 0;
+    }
+    int n = 0;
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        QTextBlockFormat f = b.blockFormat();
+        if (!f.hasProperty(DocumentIo::TocProperty) || !b.text().contains(QLatin1Char('\t'))) {
+            continue;
+        }
+        f.setTabPositions({QTextOption::Tab(column - f.leftMargin() - f.rightMargin() - 2, QTextOption::RightTab)});
+        QTextCursor(b).setBlockFormat(f);
+        ++n;
+    }
+    return n;
+}
+
 bool MainWindow::openPath(const QString &path)
 {
     QString error;
@@ -3374,6 +3399,7 @@ bool MainWindow::openPath(const QString &path)
         if (markdown) {
             applyMarkdownBlockFormat();
         }
+        alignKeptTocTabs();
     }
     // Show the top of the document, caret at the start (loading leaves it at the end).
     m_editor->moveCursor(QTextCursor::Start);
@@ -3705,6 +3731,22 @@ bool MainWindow::bookReadyForExport()
     return true;
 }
 
+// Export Book opens in the folder used last time; the very first time, the
+// book's own folder.
+QString MainWindow::bookExportStartDir() const
+{
+    const QString last = QSettings().value(QStringLiteral("export/bookDir")).toString();
+    if (!last.isEmpty() && QFileInfo(last).isDir()) {
+        return last;
+    }
+    return m_book ? m_book->book().bookDir() : QString();
+}
+
+void MainWindow::rememberBookExportDir(const QString &exportedFile)
+{
+    QSettings().setValue(QStringLiteral("export/bookDir"), QFileInfo(exportedFile).absolutePath());
+}
+
 QString MainWindow::runBookExportPath(const QString &title, const QString &filter, const QString &suffix)
 {
     QFileDialog dlg(this, title);
@@ -3714,13 +3756,16 @@ QString MainWindow::runBookExportPath(const QString &title, const QString &filte
     dlg.setNameFilters({filter});
     dlg.setDefaultSuffix(suffix);
     const BookManifest &b = m_book->book();
-    dlg.setDirectory(b.bookDir());
+    const QString dir = bookExportStartDir();
+    dlg.setDirectory(dir);
     const QString name = b.title().trimmed().isEmpty() ? QFileInfo(b.bookDir()).fileName() : b.title().trimmed();
-    dlg.selectFile(QDir(b.bookDir()).filePath(name + QLatin1Char('.') + suffix));
+    dlg.selectFile(QDir(dir).filePath(name + QLatin1Char('.') + suffix));
     if (dlg.exec() != QDialog::Accepted || dlg.selectedFiles().isEmpty()) {
         return QString();
     }
-    return dlg.selectedFiles().constFirst();
+    const QString path = dlg.selectedFiles().constFirst();
+    rememberBookExportDir(path);
+    return path;
 }
 
 void MainWindow::exportBookPdf()
@@ -3807,6 +3852,9 @@ bool MainWindow::exportBookPdfTo(const QString &path, const BookExport::Options 
     int n = 0;
     const bool ok = BookExport::writePdf(m_book->book(), options, m_printer->pageLayout(),
                                          m_editor->document()->defaultFont(), path, &n, &err);
+    if (ok) {
+        rememberBookExportDir(path);
+    }
     if (pages) {
         *pages = n;
     }
@@ -3824,6 +3872,9 @@ bool MainWindow::exportBookEpubTo(const QString &path, const BookExport::Options
     QString err;
     QStringList skipped;
     const bool ok = BookExport::writeEpub(m_book->book(), options, path, &err, &skipped);
+    if (ok) {
+        rememberBookExportDir(path);
+    }
     statusBar()->showMessage(ok ? QStringLiteral("Exported book EPUB: %1").arg(QFileInfo(path).fileName()) : err, 5000);
     return ok;
 }

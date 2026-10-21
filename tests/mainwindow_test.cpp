@@ -37,6 +37,9 @@
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QPointer>
+#include <QPushButton>
+#include <QStyleOptionButton>
 #include <QMouseEvent>
 #include "BookSidebar.hpp"
 #include "LibrarySidebar.hpp"
@@ -101,6 +104,9 @@ struct PromptWatcher {
     {
         timer.setInterval(10);
         QObject::connect(&timer, &QTimer::timeout, [this] {
+            if (qApp->property("zwHoldPrompts").toBool()) {
+                return; // a test is inspecting the box itself
+            }
             if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
                 ++seen;
                 box->reject();
@@ -1014,7 +1020,7 @@ void testParagraphFormatting()
 QAction *actionNamed(MainWindow &w, const QString &text)
 {
     for (QAction *a : w.findChildren<QAction *>()) {
-        if (a->text().remove(QLatin1Char('&')) == text) {
+        if (a->text().remove(QLatin1Char('&')).section(QLatin1Char('\t'), 0, 0) == text) {
             return a;
         }
     }
@@ -1228,6 +1234,24 @@ void testBookToc(const QString &root)
         inMenu = inMenu || a->text() == QLatin1String("Insert/Update Table of Contents");
     }
     check(inMenu, "T also in the Book sidebar menu");
+
+    // Rename a chapter: the entry takes the new name, and its sections
+    // stay (the old title heading in the file is not listed as a section).
+    side->renameChapter(0); // the menu's Rename; F2 calls the same (group Q)
+    QApplication::processEvents();
+    if (auto *line = side->view()->findChild<QLineEdit *>()) {
+        line->selectAll();
+        QTest::keyClicks(line, QStringLiteral("Wetlands"));
+        QTest::keyClick(line, Qt::Key_Return);
+    }
+    wait(50);
+    check(collect() == QLatin1String("1. Wetlands | Rails | 2. Prairie | Meadowlarks"), "T a rename updates it", collect());
+    // A changed heading in a chapter file shows up too (the book saves when the file does).
+    put(dir + QStringLiteral("/01 Prairie.md"), "# Prairie\n\n## Larks and Meadowlarks\n");
+    side->setChapter(1, side->book().at(1)); // what saving a chapter does: the book is saved, bookChanged follows
+    QApplication::processEvents();
+    check(collect() == QLatin1String("1. Wetlands | Rails | 2. Prairie | Larks and Meadowlarks"),
+          "T a changed heading updates it", collect());
     ed->document()->setModified(false);
 }
 
@@ -1503,6 +1527,348 @@ void testBookFocus(const QString &root)
     ed->document()->setModified(false);
 }
 
+// 1.10.3 (G5): ruler drags map to the right place in Full Page view (also
+// fitted to the width), keep a sane text width, and undo as one step.
+void testRulerDrag()
+{
+    for (const bool fit : {false, true}) {
+        {
+            QSettings s;
+            s.setValue(QStringLiteral("view/fullPageView"), true);
+            s.sync();
+        }
+        MainWindow w;
+        w.resize(1280, 800);
+        w.show();
+        wait(100);
+        if (fit) {
+            if (QAction *a = w.findChild<QAction *>(QStringLiteral("viewFitWidth"))) {
+                if (!a->isChecked()) {
+                    a->trigger();
+                }
+            }
+            wait(200);
+        }
+        const char *tag = fit ? "fit" : "full";
+        QTextEdit *ed = editorOf(w);
+        ed->setPlainText(QStringLiteral("A paragraph long enough to wrap over a few lines of the page so the indents show."));
+        QTextCursor c(ed->document());
+        QTextBlockFormat g;
+        g.setRightMargin(48); // 1.27 cm
+        ParagraphStyles::setGeometry(c, g);
+        ed->setTextCursor(c);
+        ed->document()->setModified(false);
+        QAction *ruler = w.findChild<QAction *>(QStringLiteral("viewRuler"));
+        if (!ruler || !w.ruler()) {
+            check(false, "R ruler");
+            return;
+        }
+        if (!ruler->isChecked()) {
+            ruler->trigger();
+        }
+        wait(100);
+        Ruler *r = w.ruler();
+        const int y = r->height() - 3;
+        const auto drag = [&](int from, int to) {
+            QTest::mousePress(r, Qt::LeftButton, {}, QPoint(from, y));
+            for (int k = 1; k <= 4; ++k) {
+                QTest::mouseMove(r, QPoint(from + (to - from) * k / 4, y));
+            }
+            QTest::mouseRelease(r, Qt::LeftButton, {}, QPoint(to, y));
+        };
+        const int undoBefore = ed->document()->availableUndoSteps();
+        const int right = r->markerX(Ruler::Marker::Right);
+        drag(right, right - 44);
+        const qreal rm = ed->document()->firstBlock().blockFormat().rightMargin();
+        // 44 screen px; when the page is zoomed the document moves less or more.
+        const qreal zoom = r->zoom();
+        check(qAbs(rm - (48 + 44 / zoom)) <= ParagraphStyles::cmToPx(0.25) + 1,
+              qPrintable(QStringLiteral("R (%1) dragging the right marker 44 px left adds ~44 px of right indent").arg(tag)),
+              QStringLiteral("%1 cm (zoom %2)").arg(ParagraphStyles::pxToCm(rm), 0, 'f', 2).arg(zoom));
+        QTest::keyClick(ed, Qt::Key_Z, Qt::ControlModifier);
+        check(qAbs(ed->document()->firstBlock().blockFormat().rightMargin() - 48) < 0.5
+                  && ed->document()->availableUndoSteps() == undoBefore,
+              qPrintable(QStringLiteral("R (%1) one Ctrl+Z undoes the whole drag").arg(tag)),
+              QString::number(ed->document()->availableUndoSteps() - undoBefore));
+        // Dragging far past the left marker keeps a usable column.
+        drag(r->markerX(Ruler::Marker::Right), r->originX() + 5);
+        const QTextBlockFormat f = ed->document()->firstBlock().blockFormat();
+        const qreal width = r->columnWidth() - f.leftMargin() - f.rightMargin();
+        check(width >= ParagraphStyles::cmToPx(3.0) - 1,
+              qPrintable(QStringLiteral("R (%1) the text keeps at least 3 cm").arg(tag)),
+              QString::number(ParagraphStyles::pxToCm(width)));
+        ed->document()->undo();
+        // Markers that touch: the lower half left of the middle grabs Left, right of it Right.
+        QTextBlockFormat narrow;
+        narrow.setLeftMargin(r->columnWidth() / 2 - 20);
+        narrow.setRightMargin(r->columnWidth() / 2 - 20 - ParagraphStyles::cmToPx(3.0) + 40);
+        ParagraphStyles::setGeometry(QTextCursor(ed->document()), narrow);
+        wait(50);
+        const int lx = r->markerX(Ruler::Marker::Left);
+        const int rx = r->markerX(Ruler::Marker::Right);
+        check(r->hitTest(QPoint(lx - 3, y)) == Ruler::Marker::Left && r->hitTest(QPoint(rx + 3, y)) == Ruler::Marker::Right,
+              qPrintable(QStringLiteral("R (%1) left and right markers have separate grab areas").arg(tag)),
+              QStringLiteral("%1 %2").arg(lx).arg(rx));
+        ed->document()->setModified(false);
+    }
+}
+
+// 1.10.3: G3 Alt+Up/Down moves the chapter open in the editor; G2 the
+// Remove Chapter buttons show their whole text; G6 the style list drops
+// down below the box.
+void testUsabilityFixes(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/lib-usab");
+    const QString book = lib + QStringLiteral("/Usab Book");
+    QDir().mkpath(book);
+    writeFile(book + QStringLiteral("/01 Intro.md"), "# Intro\n");
+    writeFile(book + QStringLiteral("/02 Songbirds.md"), "# Songbirds\n");
+    writeFile(book + QStringLiteral("/03 Raptors.md"), "# Raptors\n");
+    BookManifest::fromFolder(book).save();
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("view/fullPageView"), false);
+        s.setValue(QStringLiteral("library/rootPath"), lib);
+        s.setValue(QStringLiteral("library/visible"), false);
+        s.setValue(QStringLiteral("book/visible"), true);
+        s.setValue(QStringLiteral("book/current"), QStringLiteral("Usab Book"));
+        s.sync();
+    }
+    auto win = std::make_unique<MainWindow>();
+    win->resize(1024, 640);
+    win->show();
+    win->activateWindow();
+    QApplication::setActiveWindow(win.get());
+    wait(100);
+    auto *side = win->findChild<BookSidebar *>();
+    QListWidget *list = side ? side->view() : nullptr;
+    if (!list || list->count() != 3) {
+        check(false, "U3 book");
+        return;
+    }
+    check(win->openPathForTest(book + QStringLiteral("/03 Raptors.md")), "U3 chapter 3 open");
+    list->setCurrentRow(0); // the sidebar selection differs from the open chapter
+    QTextEdit *ed = editorOf(*win);
+    ed->setFocus();
+    QTest::keyClick(ed, Qt::Key_Up, Qt::AltModifier);
+    wait(100);
+    check(side->book().at(1).path.startsWith(QLatin1String("03")) && side->book().at(0).path.startsWith(QLatin1String("01")),
+          "U3 Alt+Up moves the chapter open in the editor, not the selected one",
+          side->book().at(0).path + QLatin1Char(',') + side->book().at(1).path);
+    check(list->currentRow() == 1, "U3 ... and the open chapter stays selected", QString::number(list->currentRow()));
+
+    qApp->setProperty("zwHoldPrompts", true);
+    side->confirmRemoveChapter(0);
+    QApplication::processEvents();
+    // A QPointer: the dialog deletes itself on close.
+    QPointer<QMessageBox> box = win->findChild<QMessageBox *>(QStringLiteral("bookRemoveDialog"));
+    QStringList cut;
+    if (box) {
+        // The report's desktop squeezed the dialog; ask for a narrow one.
+        box->resize(160, box->height());
+        QApplication::processEvents();
+        for (QPushButton *b : box->findChildren<QPushButton *>()) {
+            const int need = b->fontMetrics().horizontalAdvance(b->text().remove(QLatin1Char('&')));
+            QStyleOptionButton opt;
+            opt.initFrom(b);
+            const QRect content = b->style()->subElementRect(QStyle::SE_PushButtonContents, &opt, b);
+            if (b->isVisible() && (b->width() < b->sizeHint().width() || content.width() < need)) {
+                cut << QStringLiteral("%1 (%2<%3)").arg(b->text()).arg(content.width()).arg(need);
+            }
+        }
+        const bool alive = !box.isNull();
+        if (box) {
+            box->reject();
+        }
+        check(alive && cut.isEmpty(), "U2 Remove Chapter buttons show their whole text", cut.join(QStringLiteral(", ")));
+    } else {
+        check(false, "U2 Remove Chapter dialog shown");
+    }
+    qApp->setProperty("zwHoldPrompts", false);
+    wait(100);
+
+    if (auto *combo = win->findChild<QComboBox *>(QStringLiteral("styleCombo"))) {
+        combo->setCurrentIndex(qMin(4, combo->count() - 1));
+        combo->showPopup();
+        wait(300);
+        QWidget *popup = combo->view()->window();
+        const int comboBottom = combo->mapToGlobal(QPoint(0, combo->height())).y();
+        check(popup && popup->isVisible() && popup->geometry().top() >= comboBottom - 2,
+              "U6 the style list drops down below the box",
+              popup ? QStringLiteral("%1 vs %2").arg(popup->geometry().top()).arg(comboBottom) : QString());
+        combo->hidePopup();
+    }
+
+    // Export Book starts in the book folder the first time, then where you exported last.
+    QSettings().remove(QStringLiteral("export/bookDir"));
+    check(QFileInfo(win->bookExportStartDir()) == QFileInfo(book), "U7 first Export Book opens in the book folder",
+          win->bookExportStartDir());
+    const QString elsewhere = root + QStringLiteral("/exports-here");
+    QDir().mkpath(elsewhere);
+    win->exportBookEpubTo(elsewhere + QStringLiteral("/Usab.epub"), BookExport::Options());
+    check(QFileInfo(win->bookExportStartDir()) == QFileInfo(elsewhere), "U7 then the folder used last",
+          win->bookExportStartDir());
+
+    // The toolbar stays by default; the menu shows Esc next to the option.
+    QAction *pin = actionNamed(*win, QStringLiteral("Always Show Toolbar"));
+    check(pin && pin->isChecked() && pin->text().endsWith(QLatin1String("\tEsc")),
+          "U8 Always Show Toolbar on by default, menu shows its Esc key", pin ? pin->text() : QString());
+
+    // A LibreOffice table of contents: page numbers on a right tab at the column edge.
+    const QString copy = root + QStringLiteral("/toc-tabs.odt");
+    QFile::remove(copy);
+    QFile::copy(QStringLiteral(ZW_SOURCE_DIR "/tests/data/toc-libreoffice.odt"), copy);
+    check(win->openPathForTest(copy), "U9 open a LibreOffice file with a ToC");
+    ed = editorOf(*win);
+    int tabbed = 0, right = 0;
+    for (QTextBlock b = ed->document()->begin(); b.isValid(); b = b.next()) {
+        if (b.blockFormat().hasProperty(DocumentIo::TocProperty) && b.text().contains(QLatin1Char('\t'))) {
+            ++tabbed;
+            const auto tabs = b.blockFormat().tabPositions();
+            right += (!tabs.isEmpty() && tabs.first().type == QTextOption::RightTab && tabs.first().position > 200) ? 1 : 0;
+        }
+    }
+    check(tabbed > 0 && right == tabbed && !ed->document()->isModified() && !ed->document()->isUndoAvailable(),
+          "U9 its page numbers sit on a right-aligned tab; opening is still clean",
+          QStringLiteral("%1/%2").arg(right).arg(tabbed));
+
+    // G9: no two actions share a shortcut (an ambiguous key does nothing, or
+    // the wrong thing), and Ctrl+S is Save only.
+    QHash<QString, QStringList> byKey;
+    for (QAction *a : win->findChildren<QAction *>()) {
+        for (const QKeySequence &k : a->shortcuts()) {
+            if (!k.isEmpty() && a->shortcutContext() != Qt::WidgetShortcut) {
+                byKey[k.toString()] << a->text().remove(QLatin1Char('&')).section(QLatin1Char('\t'), 0, 0);
+            }
+        }
+    }
+    QStringList dup;
+    for (auto it = byKey.cbegin(); it != byKey.cend(); ++it) {
+        QStringList names = it.value();
+        names.removeDuplicates();
+        if (it.value().size() > 1) {
+            dup << it.key() + QLatin1Char('=') + it.value().join(QLatin1Char('/'));
+        }
+    }
+    // The chapter context menu's Rename (F2) is only live while that menu is open.
+    dup.removeIf([](const QString &d) { return d.startsWith(QLatin1String("F2=")); });
+    check(dup.isEmpty(), "U10 no shortcut is bound twice", dup.join(QStringLiteral("; ")));
+    check(byKey.value(QKeySequence(QKeySequence::Save).toString()) == QStringList{QStringLiteral("Save")},
+          "U10 Ctrl+S is Save only", byKey.value(QKeySequence(QKeySequence::Save).toString()).join(QLatin1Char('/')));
+
+    // Heading 1-3 and Bibliography from the style list: they apply, show, save to
+    // ODT and come back; switching from Bibliography to a heading drops the hanging indent.
+    {
+        QTemporaryDir t;
+        const QString path = t.filePath(QStringLiteral("styles.odt"));
+        MainWindow w3;
+        w3.resize(1000, 700);
+        w3.show();
+        wait(50);
+        QTextEdit *e3 = editorOf(w3);
+        auto *cb = w3.findChild<QComboBox *>(QStringLiteral("styleCombo"));
+        const QStringList names{QStringLiteral("Heading 1"), QStringLiteral("Heading 2"), QStringLiteral("Heading 3"),
+                                QStringLiteral("Bibliography"), QStringLiteral("Heading 1")};
+        QStringList bad;
+        QTextCursor c(e3->document());
+        for (int i = 0; i < names.size(); ++i) {
+            if (i > 0) {
+                c.movePosition(QTextCursor::End);
+                c.insertBlock(QTextBlockFormat(), QTextCharFormat());
+            }
+            c.insertText(QStringLiteral("Line %1").arg(i + 1));
+            e3->setTextCursor(c);
+            if (i == 4) { // the last line: Bibliography first, then Heading 1
+                const int b = cb->findText(QStringLiteral("Bibliography"));
+                cb->setCurrentIndex(b);
+                cb->activated(b);
+            }
+            const int k = cb ? cb->findText(names.at(i)) : -1;
+            if (k < 0) {
+                bad << names.at(i) + QStringLiteral(" missing");
+                continue;
+            }
+            cb->setCurrentIndex(k);
+            cb->activated(k);
+            QApplication::processEvents();
+            c = e3->textCursor();
+        }
+        auto verify = [&](QTextEdit *e, QComboBox *box, const QString &when) {
+            QTextBlock b = e->document()->begin();
+            const qreal body = e->document()->defaultFont().pointSizeF();
+            for (int i = 0; i < names.size() && b.isValid(); ++i, b = b.next()) {
+                const int level = names.at(i).startsWith(QLatin1String("Heading")) ? names.at(i).back().digitValue() : 0;
+                QTextCursor at(b);
+                at.movePosition(QTextCursor::EndOfBlock);
+                e->setTextCursor(at);
+                QApplication::processEvents();
+                const qreal pt = QTextCursor(b).charFormat().fontPointSize();
+                const bool ok = b.blockFormat().headingLevel() == level && box->currentText() == names.at(i)
+                    && (level == 0 ? b.blockFormat().textIndent() < 0 : (b.blockFormat().textIndent() >= 0 && pt > body))
+                    && (level == 0 || b.blockFormat().leftMargin() < 1);
+                if (!ok) {
+                    bad << QStringLiteral("%1 line %2: level %3 shown '%4' %5pt indent %6/%7")
+                               .arg(when).arg(i + 1).arg(b.blockFormat().headingLevel()).arg(box->currentText())
+                               .arg(pt).arg(b.blockFormat().leftMargin()).arg(b.blockFormat().textIndent());
+                }
+            }
+        };
+        verify(e3, cb, QStringLiteral("applied"));
+        DocumentIo::save(e3->document(), path, DocumentIo::Format::Odt);
+        e3->document()->setModified(false);
+        MainWindow w4;
+        w4.resize(1000, 700);
+        w4.show();
+        check(w4.openPathForTest(path), "U12 reopen the styled file");
+        verify(editorOf(w4), w4.findChild<QComboBox *>(QStringLiteral("styleCombo")), QStringLiteral("reopened"));
+        check(bad.isEmpty(), "U12 Heading 1-3 and Bibliography apply, show and round-trip", bad.join(QStringLiteral("; ")));
+        editorOf(w4)->document()->setModified(false);
+    }
+
+    // G10: typing stays fast in a long chapter of an open book (no whole-book
+    // work per keystroke).
+    QString longText;
+    for (int i = 0; i < 600; ++i) {
+        longText += QStringLiteral("The kestrel hovered over the verge, tail fanned, head perfectly still. ");
+        if (i % 6 == 5) {
+            longText += QLatin1Char('\n');
+        }
+    }
+    {
+        QTextDocument d;
+        d.setPlainText(QStringLiteral("Hawks"));
+        DocumentIo::save(&d, book + QStringLiteral("/04 Hawks.odt"), DocumentIo::Format::Odt);
+    }
+    side->addChapters({book + QStringLiteral("/04 Hawks.odt")});
+    check(win->openPathForTest(book + QStringLiteral("/04 Hawks.odt")), "U11 ODT chapter open");
+    ed = editorOf(*win);
+    ed->setPlainText(longText);
+    QTextCursor end(ed->document());
+    end.movePosition(QTextCursor::End);
+    ed->setTextCursor(end);
+    ed->setFocus();
+    QElapsedTimer t;
+    t.start();
+    const QString typed = QStringLiteral("a quick line of typing to time the editor with the book open. ");
+    qint64 worst = 0;
+    for (const QChar ch : typed) {
+        QElapsedTimer one;
+        one.start();
+        QTest::keyClick(ed, ch.toLatin1());
+        QApplication::processEvents(); // whatever the keystroke triggers, including repaint
+        worst = qMax(worst, one.elapsed());
+    }
+    wait(400); // debounced work (figure numbers, stats) runs too
+    QElapsedTimer settle;
+    settle.start();
+    QApplication::processEvents();
+    worst = qMax(worst, settle.elapsed());
+    const qreal perKey = t.elapsed() / qreal(typed.size());
+    std::printf("      U11 typing: %.1f ms per key incl. 400 ms idle, worst single step %lld ms\n", perKey, worst);
+    check(worst < 100, "U11 no keystroke blocks the window", QStringLiteral("worst %1 ms").arg(worst));
+    editorOf(*win)->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -1518,6 +1884,16 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_USAB")) { // quick local runs
+        testUsabilityFixes(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_RULER")) { // quick local runs
+        testRulerDrag();
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_FOCUS")) { // quick local runs
         testBookFocus(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -1601,6 +1977,8 @@ int main(int argc, char **argv)
     testFigureNumbers(dataDir.path());
     testBookExport(dataDir.path());
     testBookFocus(dataDir.path());
+    testRulerDrag();
+    testUsabilityFixes(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

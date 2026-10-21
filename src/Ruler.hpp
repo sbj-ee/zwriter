@@ -19,7 +19,9 @@ public:
     // Marker position in ruler coordinates (for tests).
     int markerX(Marker m) const;
     int originX() const;      // x of the text column's left edge
-    qreal columnWidth() const; // px
+    qreal columnWidth() const; // px, document coordinates
+    qreal zoom() const;        // View > Fit Page to Width scale (1 = none)
+    Marker hitTest(const QPoint &p) const { return hit(p); }
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -32,4 +34,5 @@ private:
     void dragTo(int x);
     QTextEdit *m_editor;
     Marker m_drag = Marker::None;
+    bool m_dragChanged = false; // a drag's first change opens the undo step, later ones join it
 };

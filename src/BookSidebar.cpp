@@ -226,14 +226,18 @@ BookSidebar::BookSidebar(QWidget *parent)
     // Window-wide, so Alt+Up/Down also move the open chapter while the editor
     // has focus. Qt only fires it while the sidebar is visible.
     up->setShortcutContext(Qt::WindowShortcut);
+    // They move the chapter open in the editor (the one you are working
+    // on), not whatever row happens to be selected in the list.
     connect(up, &QAction::triggered, this, [this]() {
-        moveChapter(currentRow(), currentRow() - 1);
+        const int row = shortcutRow();
+        moveChapter(row, row - 1);
     });
     auto *down = new QAction(QStringLiteral("Move Down"), this);
     down->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
     down->setShortcutContext(Qt::WindowShortcut);
     connect(down, &QAction::triggered, this, [this]() {
-        moveChapter(currentRow(), currentRow() + 1);
+        const int row = shortcutRow();
+        moveChapter(row, row + 1);
     });
     // F2 renames the current chapter from anywhere in the window (clicking a
     // chapter opens it and puts the focus in the editor), like Alt+Up/Down.
@@ -242,7 +246,7 @@ BookSidebar::BookSidebar(QWidget *parent)
     rename->setShortcutContext(Qt::WindowShortcut);
     connect(rename, &QAction::triggered, this, [this]() {
         if (m_renamingRow < 0) {
-            renameChapter(currentRow());
+            renameChapter(shortcutRow());
         }
     });
     addAction(up);
@@ -275,6 +279,18 @@ void BookSidebar::saveSettings(const Settings &settings)
 
 int BookSidebar::currentRow() const
 {
+    return m_view->currentRow();
+}
+
+int BookSidebar::shortcutRow() const
+{
+    // The list has the keyboard: its current row. Otherwise the open chapter.
+    if (!m_view->hasFocus() && !m_currentFile.isEmpty()) {
+        const int open = m_book.indexOf(QFileInfo(m_currentFile).absoluteFilePath());
+        if (open >= 0) {
+            return open;
+        }
+    }
     return m_view->currentRow();
 }
 
@@ -965,6 +981,17 @@ void BookSidebar::renameChapter(int row)
     m_view->editItem(item);
 }
 
+// The theme gives dialog buttons generous padding; QMessageBox sizes them
+// before that style is applied, which cut "Remove from Book" to "nove from B…".
+static void fitButtons(QMessageBox *box)
+{
+    box->ensurePolished();
+    for (QPushButton *b : box->findChildren<QPushButton *>()) {
+        b->ensurePolished();
+        b->setMinimumWidth(b->sizeHint().width());
+    }
+}
+
 void BookSidebar::confirmRemoveChapter(int row)
 {
     if (row < 0 || row >= m_book.count() || m_removeDialog) {
@@ -983,6 +1010,7 @@ void BookSidebar::confirmRemoveChapter(int row)
     QPushButton *del = box->addButton(QStringLiteral("Delete File…"), QMessageBox::DestructiveRole);
     box->addButton(QMessageBox::Cancel);
     box->setDefaultButton(remove);
+    fitButtons(box);
     connect(box, &QMessageBox::buttonClicked, this, [this, box, remove, del, path](QAbstractButton *b) {
         const int i = m_book.indexOf(path);
         if (i < 0) {
@@ -1004,6 +1032,7 @@ void BookSidebar::confirmRemoveChapter(int row)
             QPushButton *no = sure->addButton(QMessageBox::Cancel);
             sure->setDefaultButton(no);
             sure->setEscapeButton(no);
+            fitButtons(sure);
             connect(sure, &QMessageBox::buttonClicked, this, [this, yes, path](QAbstractButton *c) {
                 const int j = m_book.indexOf(path);
                 if (c == yes && j >= 0) {

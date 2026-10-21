@@ -103,8 +103,22 @@ QList<Entry> entries(const BookManifest &book, int maxLevel, const QString &skip
             continue;
         }
         QList<QPair<int, QString>> hs = headingsOf(path);
-        if (!hs.isEmpty() && hs.first().second.compare(title, Qt::CaseInsensitive) == 0) {
-            hs.removeFirst();
+        // The chapter's title heading is the entry itself, not a section. That is the
+        // first heading when it matches the title, or (after a rename in the sidebar,
+        // which leaves the file alone) when it is the only one at the top level.
+        if (!hs.isEmpty()) {
+            int sameLevel = 0;
+            int top = 99;
+            for (const auto &h : std::as_const(hs)) {
+                top = qMin(top, h.first);
+            }
+            for (const auto &h : std::as_const(hs)) {
+                sameLevel += h.first == top ? 1 : 0;
+            }
+            if (hs.first().second.compare(title, Qt::CaseInsensitive) == 0
+                || (hs.first().first == top && sameLevel == 1 && hs.size() > 1)) {
+                hs.removeFirst();
+            }
         }
         // The chapter's top level of heading becomes level 2.
         int top = 99;

@@ -87,6 +87,9 @@ public:
     // Delete: asks first. "Remove from Book" (the default) keeps the file;
     // "Delete File…" asks again before moving the file to the trash.
     void confirmRemoveChapter(int row);
+    // Row Alt+Up/Down and F2 act on: the open chapter, or the list's current
+    // row while the list has focus.
+    int shortcutRow() const;
     bool deleteChapterFile(int row); // no questions: moves the file to the trash, removes the row
 
     QListWidget *view() const { return m_view; }
