@@ -48,12 +48,12 @@ BookSidebar::BookSidebar(QWidget *parent)
     // Two rows: the book picker gets the full width (long titles stay
     // readable), the buttons go under it.
     auto *hv = new QVBoxLayout(header);
-    hv->setContentsMargins(12, 8, 6, 4);
-    hv->setSpacing(2);
+    hv->setContentsMargins(10, 8, 8, 6);
+    hv->setSpacing(6);
     auto *hl = new QHBoxLayout;
-    hl->setSpacing(4);
+    hl->setSpacing(6);
     auto *bl = new QHBoxLayout;
-    bl->setSpacing(4);
+    bl->setSpacing(8);
     hv->addLayout(hl);
     hv->addLayout(bl);
     m_title = new QLabel(header);
@@ -235,8 +235,19 @@ BookSidebar::BookSidebar(QWidget *parent)
     connect(down, &QAction::triggered, this, [this]() {
         moveChapter(currentRow(), currentRow() + 1);
     });
+    // F2 renames the current chapter from anywhere in the window (clicking a
+    // chapter opens it and puts the focus in the editor), like Alt+Up/Down.
+    auto *rename = new QAction(QStringLiteral("Rename Chapter"), this);
+    rename->setShortcut(QKeySequence(Qt::Key_F2));
+    rename->setShortcutContext(Qt::WindowShortcut);
+    connect(rename, &QAction::triggered, this, [this]() {
+        if (m_renamingRow < 0) {
+            renameChapter(currentRow());
+        }
+    });
     addAction(up);
     addAction(down);
+    addAction(rename);
 
     setRootPath(QString());
 }
@@ -780,18 +791,29 @@ void BookSidebar::applyTheme(const ThemeColors &c)
         "#bookCreate, #bookChooseFolder, #bookEmptyNewChapter, #bookEmptyAdd { color: %2; background-color: %4; border: none;"
         " border-radius: 4px; padding: 4px 12px; }"
         "#bookToLibrary, #bookAdd, #bookNew { color: %2; border: none; border-radius: 4px;"
-        " padding: 1px 6px; }"
+        " padding: 3px 8px; }"
+        // "+ Chapter" opens a menu: its arrow gets its own space at the right
+        // (without this the macOS style drew it over the text).
+        "#bookAdd { padding-right: 20px; }"
+        "#bookAdd::menu-indicator { subcontrol-origin: padding; subcontrol-position: center right;"
+        " right: 6px; width: 8px; height: 8px; }"
         "#bookToLibrary:hover, #bookAdd:hover, #bookNew:hover { background-color: %4; }"
         "QComboBox#bookPicker { color: %2; background-color: %1; border: none; font-size: 9pt;"
-        " font-weight: 600; padding: 1px 4px; }"
+        " font-weight: 600; padding: 3px 22px 3px 4px; }"
+        // The drop-down arrow sits in its own 18 px area inside the box.
+        "QComboBox#bookPicker::drop-down { subcontrol-origin: padding; subcontrol-position: center right;"
+        " width: 18px; border: none; }"
+        "QComboBox#bookPicker::down-arrow { image: url(:/ui/arrow-down-%9.png); width: 10px; height: 6px; }"
         "QComboBox#bookPicker:hover { background-color: %4; }"
-        "QListWidget#bookList { background-color: %1; color: %2; border: none; outline: 0;"
+        "QListWidget#bookList { background-color: %1; color: %2; border: 2px solid transparent; outline: 0;"
         " font-size: 10pt; }"
-        "QListWidget#bookList::item { padding: 4px 8px; border-bottom: 1px solid %7; }"
+        // Focus ring: the list shows when it has the keyboard (arrows, Enter, F2, Delete).
+        "QListWidget#bookList:focus { border: 2px solid %8; }"
+        "QListWidget#bookList::item { padding: 6px 10px; border-bottom: 1px solid %7; }"
         "QListWidget#bookList::item:hover { background-color: %4; }"
         "QListWidget#bookList::item:selected { background-color: %5; color: %6; }")
                       .arg(c.barBg.name(), c.fg.name(), c.muted.name(), c.hover.name(),
-                           c.accentSoft.name(), c.accentFg.name(), c.border.name()));
+                           c.accentSoft.name(), c.accentFg.name(), c.border.name(), c.accent.name(), c.id == QLatin1String("paper") ? QStringLiteral("paper") : QStringLiteral("dark")));
 }
 
 QString BookSidebar::chapterFileName(int number, const QString &title, const QString &suffix)

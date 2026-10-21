@@ -251,6 +251,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_splitter->setStretchFactor(2, 3);
     m_splitter->setStretchFactor(3, 2);
     m_preview->attachEditor(m_editor);
+    // Focus moves from the editor straight to the chapter list (Ctrl+Tab;
+    // Tab itself types a tab in the document), not to the sidebar header.
+    QWidget::setTabOrder(m_editor, m_book->view());
     m_previewWanted = PreviewPane::loadVisibleSetting();
     {
         const LibrarySidebar::Settings lib = LibrarySidebar::loadSettings();
@@ -5288,6 +5291,23 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 
     if (watched == m_editor && event->type() == QEvent::KeyPress) {
         auto *ke = static_cast<QKeyEvent *>(event);
+        // Tab types a tab; Ctrl+Tab / Ctrl+Shift+Tab leave the editor (to the
+        // chapter list when the Book sidebar is shown). Physical Ctrl is
+        // MetaModifier on macOS, where Cmd+Tab belongs to the system.
+        if ((ke->key() == Qt::Key_Tab || ke->key() == Qt::Key_Backtab)
+            && (ke->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))
+            && !(ke->modifiers() & Qt::AltModifier)) {
+            const bool back = ke->key() == Qt::Key_Backtab || (ke->modifiers() & Qt::ShiftModifier);
+            QWidget *w = back ? m_editor->previousInFocusChain() : m_editor->nextInFocusChain();
+            while (w && w != m_editor
+                   && !((w->focusPolicy() & Qt::TabFocus) && w->isVisibleTo(this) && w->isEnabled())) {
+                w = back ? w->previousInFocusChain() : w->nextInFocusChain();
+            }
+            if (w && w != m_editor) {
+                w->setFocus(back ? Qt::BacktabFocusReason : Qt::TabFocusReason);
+            }
+            return true;
+        }
         if (m_fullPageView && m_pageScroll
             && (ke->key() == Qt::Key_PageDown || ke->key() == Qt::Key_PageUp)
             && !(ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {

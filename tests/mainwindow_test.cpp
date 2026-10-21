@@ -1394,6 +1394,115 @@ void testBookExport(const QString &root)
           "X Export Book > EPUB");
 }
 
+// 1.10.2 (G1): F2 renames the current chapter from anywhere while the Book
+// sidebar is shown; the chapter list keeps its row when it gets focus, shows
+// a focus ring, and Tab goes editor -> chapter list.
+void testBookFocus(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/lib-focus");
+    const QString book = lib + QStringLiteral("/Focus Book");
+    QDir().mkpath(book);
+    writeFile(book + QStringLiteral("/01 Intro.md"), "# Intro\n\nOne.\n");
+    writeFile(book + QStringLiteral("/02 Songbirds.md"), "# Songbirds\n\nTwo.\n");
+    writeFile(book + QStringLiteral("/03 Raptors.md"), "# Raptors\n\nThree.\n");
+    BookManifest::fromFolder(book).save();
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("view/fullPageView"), false);
+        s.setValue(QStringLiteral("library/rootPath"), lib);
+        s.setValue(QStringLiteral("library/visible"), false);
+        s.setValue(QStringLiteral("book/visible"), true);
+        s.setValue(QStringLiteral("book/current"), QStringLiteral("Focus Book"));
+        s.sync();
+    }
+    auto win = std::make_unique<MainWindow>();
+    win->resize(1024, 640);
+    win->show();
+    win->activateWindow();
+    QApplication::setActiveWindow(win.get());
+    wait(100);
+    auto *side = win->findChild<BookSidebar *>();
+    QListWidget *list = side ? side->view() : nullptr;
+    check(list && list->count() == 3, "Q book has 3 chapters");
+    if (!list || list->count() != 3) {
+        return;
+    }
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, list->visualItemRect(list->item(0)).center());
+    wait(200);
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, list->visualItemRect(list->item(2)).center());
+    wait(300);
+    QTextEdit *ed = editorOf(*win);
+    check(win->windowTitle().contains(QLatin1String("03 Raptors")) && list->currentRow() == 2,
+          "Q click opens chapter 3", QString::number(list->currentRow()));
+    ed->setFocus();
+    wait(50);
+    QTest::keyClick(ed, Qt::Key_F2);
+    wait(100);
+    auto *editor = qobject_cast<QLineEdit *>(QApplication::focusWidget());
+    check(editor && list->isAncestorOf(editor)
+              && list->currentRow() == 2 && editor->text() == QLatin1String("Raptors"),
+          "Q F2 in the editor renames the current chapter", editor ? editor->text() : QStringLiteral("no editor"));
+    if (editor) {
+        QTest::keyClick(editor, Qt::Key_Escape);
+    }
+    wait(100);
+    check(ed->toPlainText().contains(QLatin1String("Raptors")) && !ed->document()->isModified(),
+          "Q ... and types nothing into the document");
+
+    ed->setFocus();
+    wait(50);
+    list->setFocus(Qt::TabFocusReason);
+    wait(50);
+    check(list->hasFocus() && list->currentRow() == 2 && list->currentItem() && list->currentItem()->isSelected(),
+          "Q the list keeps the current row when it gets focus", QString::number(list->currentRow()));
+    list->setFocus(Qt::MouseFocusReason);
+    ed->setFocus();
+    list->setFocus(Qt::OtherFocusReason);
+    wait(50);
+    check(list->currentRow() == 2, "Q ... for any focus reason", QString::number(list->currentRow()));
+    check(side->styleSheet().contains(QLatin1String("#bookList:focus")), "Q the list draws a focus ring");
+
+    ed->setFocus();
+    wait(50);
+    QWidget *next = ed->nextInFocusChain();
+    while (next && next != ed && !(next->focusPolicy() & Qt::TabFocus && next->isVisible() && next->isEnabled())) {
+        next = next->nextInFocusChain();
+    }
+    check(next == list, "Q Tab order: editor, then the chapter list",
+          next ? QString::fromLatin1(next->metaObject()->className()) + QLatin1Char(' ') + next->objectName() : QString());
+    // Tab types a tab in the document; Ctrl+Tab moves on (Qt's rule for text editors).
+    const int before = ed->toPlainText().size();
+    QTest::keyClick(ed, Qt::Key_Tab, Qt::ControlModifier);
+    wait(50);
+    check(QApplication::focusWidget() == list && ed->toPlainText().size() == before && list->currentRow() == 2,
+          "Q Ctrl+Tab from the editor reaches the chapter list, on the open chapter",
+          QApplication::focusWidget() ? QApplication::focusWidget()->objectName() : QString());
+    QTest::keyClick(list, Qt::Key_F2);
+    wait(100);
+    auto *ed2 = qobject_cast<QLineEdit *>(QApplication::focusWidget());
+    check(ed2 && list->isAncestorOf(ed2) && ed2->text() == QLatin1String("Raptors"), "Q F2 in the list still renames");
+    if (ed2) {
+        ed2->setText(QStringLiteral("Hawks"));
+        QTest::keyClick(ed2, Qt::Key_Return);
+    }
+    wait(200);
+    check(side->book().displayTitle(2) == QLatin1String("Hawks"), "Q the new title is saved", side->book().displayTitle(2));
+    check(list->currentRow() == 2, "Q renaming keeps the row", QString::number(list->currentRow()));
+    list->clearFocus();
+    wait(50);
+    QTest::keyClick(ed, Qt::Key_Tab, Qt::ControlModifier); // focus comes back from the editor
+    wait(50);
+    check(list->hasFocus() && list->currentRow() == 2, "Q focus back into the list keeps the row",
+          QString::number(list->currentRow()));
+    ed->setFocus();
+    wait(50);
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, list->visualItemRect(list->item(2)).center());
+    wait(300);
+    check(list->currentRow() == 2 && side->book().at(2).path.startsWith(QLatin1String("03")),
+          "Q clicking the open chapter again keeps it (no move, no jump)", QString::number(list->currentRow()));
+    ed->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -1409,6 +1518,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_FOCUS")) { // quick local runs
+        testBookFocus(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_EXPORT")) { // quick local runs
         testBookExport(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -1486,6 +1600,7 @@ int main(int argc, char **argv)
     testBookToc(dataDir.path());
     testFigureNumbers(dataDir.path());
     testBookExport(dataDir.path());
+    testBookFocus(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

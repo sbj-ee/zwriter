@@ -45,6 +45,15 @@ jobs:
           java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book.epub
           java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book-bare.epub
 
+      - name: Book sidebar header screenshot (offscreen)
+        run: QT_QPA_PLATFORM=offscreen ZW_SHOT_DIR="$PWD/shots" ./build/book_test > /dev/null
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v7
+        with:
+          name: zwriter-linux-screenshots
+          path: shots/
+
       - name: Package .deb
         run: |
           cd build
@@ -90,6 +99,15 @@ jobs:
           QT_QPA_PLATFORM=offscreen ZW_EPUB_OUT="$PWD/book.epub" ./build/book_export_test > /dev/null
           java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book.epub
           java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book-bare.epub
+
+      - name: Book sidebar header in the native macOS style (overlap test + screenshot)
+        run: ZW_SHOT_DIR="$PWD/shots" ./build/book_test > /dev/null
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v7
+        with:
+          name: zwriter-macos-screenshots
+          path: shots/
 
       - name: Package .dmg (zwriter.app, macdeployqt, ad-hoc sign)
         run: |
