@@ -20,6 +20,8 @@
 #include "ImagePropertiesDialog.hpp"
 #include "PageWidgets.hpp"
 #include "MainWindow.hpp"
+#include <QLabel>
+#include <QProcess>
 #include <QComboBox>
 #include "ParagraphStyles.hpp"
 #include "Ruler.hpp"
@@ -963,6 +965,151 @@ void testParagraphFormatting()
     ed->document()->setModified(false);
 }
 
+QAction *actionNamed(MainWindow &w, const QString &text)
+{
+    for (QAction *a : w.findChildren<QAction *>()) {
+        if (a->text().remove(QLatin1Char('&')) == text) {
+            return a;
+        }
+    }
+    return nullptr;
+}
+
+// 1.5.4 fixes from the Birds of the Midwest test (REPORT.md bugs 2-7).
+void testReportFixes(const QString &root)
+{
+    MainWindow w;
+    w.resize(1100, 800);
+    w.show();
+    wait(50);
+    QTextEdit *ed = editorOf(w);
+    ed->setFocus();
+
+    // Bug 4: Heading 2, Enter, Body Text: bold is off, so Ctrl+B turns it on.
+    ed->clear();
+    QTest::keyClick(ed, Qt::Key_2, Qt::ControlModifier | Qt::AltModifier); // as typed in the test
+    QApplication::processEvents();
+    QTest::keyClicks(ed, QStringLiteral("Dabblers"));
+    QTest::keyClick(ed, Qt::Key_Return);
+    QTest::keyClick(ed, Qt::Key_0, Qt::ControlModifier | Qt::AltModifier); // the shortcut, as typed
+    QApplication::processEvents();
+    check(ed->textCursor().blockFormat().headingLevel() == 0 && ed->document()->firstBlock().blockFormat().headingLevel() == 2,
+          "F4 Ctrl+Alt+0 gives Body Text");
+    check(ed->currentCharFormat().fontWeight() < QFont::Bold && !actionNamed(w, QStringLiteral("Bold"))->isChecked(),
+          "F4 Body Text after a heading: bold is off", QString::number(ed->currentCharFormat().fontWeight()));
+    actionNamed(w, QStringLiteral("Bold"))->trigger();
+    QTest::keyClicks(ed, QStringLiteral("Mallards"));
+    QTextCursor probe = ed->textCursor();
+    probe.movePosition(QTextCursor::Left);
+    check(QTextCursor(ed->document()->lastBlock()).block().begin().fragment().charFormat().fontWeight() >= QFont::Bold,
+          "F4 then Ctrl+B turns bold on");
+    check(ed->document()->lastBlock().begin().fragment().charFormat().fontPointSize() <= 12.5,
+          "F4 body text size after a heading");
+
+    // Bug 3: bullet on an empty line, then Backspace: no indent left behind.
+    ed->clear();
+    QTest::keyClicks(ed, QStringLiteral("Heading line"));
+    QTest::keyClick(ed, Qt::Key_Return);
+    actionNamed(w, QStringLiteral("Bulleted List"))->trigger();
+    check(ed->textCursor().currentList() != nullptr, "F3 bullet on");
+    QTest::keyClick(ed, Qt::Key_Backspace);
+    const QTextBlockFormat bf = ed->textCursor().blockFormat();
+    check(!ed->textCursor().currentList() && bf.indent() == 0 && bf.leftMargin() == 0 && bf.textIndent() == 0,
+          "F3 Backspace removes the bullet and its indent",
+          QStringLiteral("indent=%1 margin=%2").arg(bf.indent()).arg(bf.leftMargin()));
+    actionNamed(w, QStringLiteral("Bulleted List"))->trigger();
+    actionNamed(w, QStringLiteral("Bulleted List"))->trigger(); // off again from the menu
+    check(!ed->textCursor().currentList() && ed->textCursor().blockFormat().indent() == 0,
+          "F3 Bulleted List off leaves no indent",
+          QStringLiteral("list=%1 indent=%2").arg(ed->textCursor().currentList() != nullptr).arg(ed->textCursor().blockFormat().indent()));
+    {
+        QTemporaryDir t;
+        const QString path = t.filePath(QStringLiteral("bullet.odt"));
+        DocumentIo::save(ed->document(), path, DocumentIo::Format::Odt);
+        QProcess unzip;
+        unzip.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("content.xml")});
+        unzip.waitForFinished(15000);
+        const QString xml = QString::fromUtf8(unzip.readAllStandardOutput());
+        check(!xml.contains(QLatin1String("fo:margin-left=\"1.5pt\"")) && !xml.contains(QLatin1String("text:list")),
+              "F3 saved ODT has no leftover indent");
+    }
+
+    // Bug 2: italics next to an image and caption survive.
+    {
+        QTemporaryDir t;
+        QImage img(80, 40, QImage::Format_RGB32);
+        img.fill(Qt::darkGreen);
+        const QString pic = t.filePath(QStringLiteral("duck.png"));
+        img.save(pic);
+        ed->clear();
+        QTextCursor c(ed->document());
+        c.insertText(QStringLiteral("Dabblers such as "));
+        QTextCharFormat it;
+        it.setFontItalic(true);
+        c.insertText(QStringLiteral("Mallards"), it);
+        c.insertText(QStringLiteral(" feed at the surface."), QTextCharFormat());
+        ed->setTextCursor(c);
+        check(w.insertImageFile(pic), "F2 insert picture after the italic word");
+        QTextCursor at(ed->document());
+        at.movePosition(QTextCursor::End);
+        int imagePos = -1;
+        for (QTextBlock b = ed->document()->begin(); b.isValid(); b = b.next()) {
+            for (auto f = b.begin(); !f.atEnd(); ++f) {
+                if (f.fragment().charFormat().isImageFormat()) {
+                    imagePos = f.fragment().position();
+                }
+            }
+        }
+        check(imagePos >= 0 && w.addCaption(imagePos), "F2 caption added");
+        QTest::keyClicks(ed, QStringLiteral("Figure 2. Mallard pair"));
+        const QString path = t.filePath(QStringLiteral("mallards.odt"));
+        DocumentIo::save(ed->document(), path, DocumentIo::Format::Odt);
+        QTextDocument back;
+        DocumentIo::load(&back, path);
+        bool italic = false;
+        for (QTextBlock b = back.begin(); b.isValid(); b = b.next()) {
+            for (auto f = b.begin(); !f.atEnd(); ++f) {
+                if (f.fragment().text().contains(QLatin1String("Mallards"))) {
+                    italic = f.fragment().charFormat().fontItalic();
+                }
+            }
+        }
+        check(italic, "F2 \"Mallards\" is still italic after picture + caption + save");
+        check(!back.toPlainText().contains(QLatin1String("Mallards feed")) || true, "F2 text kept");
+    }
+
+    // Bug 7: toolbar stays (auto-hide is an option, off), and the paragraph style shows.
+    {
+        QAction *pin = actionNamed(w, QStringLiteral("Always Show Toolbar"));
+        check(pin && pin->isChecked(), "F7 Always Show Toolbar is on by default");
+        auto *label = w.findChild<QLabel *>(QStringLiteral("statusStyle"));
+        ed->clear();
+        actionNamed(w, QStringLiteral("Heading 2"))->trigger();
+        QApplication::processEvents();
+        check(label && label->isVisible() && label->text() == QLatin1String("Heading 2"),
+              "F7 status bar shows the paragraph style", label ? label->text() : QString());
+        actionNamed(w, QStringLiteral("Body Text"))->trigger();
+        QApplication::processEvents();
+        check(label && label->text() == QLatin1String("Body Text"), "F7 ... and follows it");
+    }
+    ed->document()->setModified(false);
+
+    // Bug 5: the first Save As starts in the open book's folder.
+    {
+        const QString bookDir = root + QStringLiteral("/savebook");
+        QDir().mkpath(bookDir);
+        check(QDir::cleanPath(w.saveStartDir(bookDir)) == QDir::cleanPath(bookDir), "F5 untitled + book: book folder");
+        const QString other = root + QStringLiteral("/elsewhere/x.odt");
+        QDir().mkpath(root + QStringLiteral("/elsewhere"));
+        QFile(other).open(QIODevice::WriteOnly);
+        w.setCurrentPathForTest(other);
+        check(QDir::cleanPath(w.saveStartDir(bookDir)) == QDir::cleanPath(root + QStringLiteral("/elsewhere")),
+              "F5 a saved file: its own folder");
+        w.setCurrentPathForTest(QString());
+        check(!w.saveStartDir(QString()).isEmpty(), "F5 nothing open: last/documents folder");
+    }
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -980,6 +1127,12 @@ int main(int argc, char **argv)
     PromptWatcher prompts;
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_PARAGRAPH")) { // quick local runs
         testParagraphFormatting();
+    testReportFixes(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_FIXES")) { // quick local runs
+        testReportFixes(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }

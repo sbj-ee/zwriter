@@ -123,4 +123,6 @@ private:
 // at least one letter or digit (Markdown markers alone do not count). -1 if
 // the file cannot be read.
 int countWordsInFile(const QString &path);
+// Times a chapter file was actually read to count words (cache misses; for tests).
+int wordCountFileReads();
 int countWords(const QString &text);

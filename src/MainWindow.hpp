@@ -85,6 +85,10 @@ public:
     // A caption paragraph right under the picture at `position`: centred,
     // italic, 2 pt smaller than body text, "Caption" selected for typing.
     bool addCaption(int position);
+    // Folder the Save dialog opens in: the file's own folder, else the open
+    // book's folder (bookDir), else the last-used / Documents folder.
+    QString saveStartDir(const QString &bookDir) const;
+    void setCurrentPathForTest(const QString &path) { m_currentPath = path; }
     // File → Export as PDF without the dialog (also used by tests).
     bool exportPdfTo(const QString &path);
     // Markdown mode: copy the picture into "<name>.assets/" and type a link.
@@ -286,6 +290,7 @@ private:
     QFrame *m_pageFrame = nullptr;
     FindReplaceBar *m_findBar = nullptr;
     QLabel *m_statsLabel = nullptr;
+    QLabel *m_styleLabel = nullptr;
     QToolBar *m_formatBar = nullptr;
     QMenu *m_fileMenu = nullptr;
     QMenu *m_viewMenu = nullptr;

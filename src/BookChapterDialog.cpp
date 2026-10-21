@@ -83,6 +83,14 @@ BookChapterDialog::BookChapterDialog(const BookChapter &chapter, int currentWord
 
     connect(m_target, &QSpinBox::valueChanged, this, &BookChapterDialog::updateProgress);
     updateProgress();
+    // Typing goes to the title first, and Tab walks the fields in the order shown.
+    setTabOrder(m_title, m_status);
+    setTabOrder(m_status, m_pov);
+    setTabOrder(m_pov, m_tags);
+    setTabOrder(m_tags, m_target);
+    setTabOrder(m_target, m_synopsis);
+    setTabOrder(m_synopsis, m_notes);
+    m_title->setFocus(Qt::OtherFocusReason);
     resize(460, sizeHint().height());
 }
 

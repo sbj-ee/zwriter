@@ -327,6 +327,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_editor, &QWidget::customContextMenuRequested,
             this, &MainWindow::showEditorContextMenu);
 
+    // The paragraph style at the caret, always visible (the toolbar may be hidden).
+    m_styleLabel = new QLabel(QStringLiteral("Body Text"), this);
+    m_styleLabel->setObjectName(QStringLiteral("statusStyle"));
+    m_styleLabel->setToolTip(QStringLiteral("Paragraph style at the cursor"));
+    statusBar()->addPermanentWidget(m_styleLabel);
     m_pageLabel = new QLabel(this);
     statusBar()->addPermanentWidget(m_pageLabel);
     m_statsLabel = new QLabel(this);
@@ -444,7 +449,7 @@ void MainWindow::loadSettings()
     m_fitPageWidth = s.value(QStringLiteral("view/fitPageWidth"), false).toBool();
     m_odtFullPageView = m_fullPageView;
     m_odtChromePinned = m_hideAwayPinned;
-    m_markdownChromePinned = s.value(QStringLiteral("markdown/chromePinned"), false).toBool();
+    m_markdownChromePinned = s.value(QStringLiteral("markdown/chromePinned"), true).toBool();
     m_themeId = s.value(QStringLiteral("theme/id"), QStringLiteral("paper")).toString();
     if (m_themeId != QLatin1String("dark") && m_themeId != QLatin1String("inverse")) {
         m_themeId = QStringLiteral("paper");
@@ -2701,9 +2706,28 @@ void MainWindow::applyList(int style, bool on)
         listFmt.setStyle(static_cast<QTextListFormat::Style>(style));
         cursor.createList(listFmt);
     } else {
-        QTextBlockFormat plain;
-        plain.setObjectIndex(-1);
-        cursor.mergeBlockFormat(plain);
+        // Leave the list without the indent Qt would keep in its place (it is
+        // saved as a margin). An indent the paragraph had before the list
+        // (moved into the list's indent by createList above) comes back.
+        // (Merging objectIndex -1 does not take a block out of its list:
+        // setObjectIndex(-1) clears the property, so the merge keeps it.)
+        QTextDocument *doc = m_editor->document();
+        QTextBlock b = doc->findBlock(cursor.selectionStart());
+        const QTextBlock end = doc->findBlock(cursor.selectionEnd());
+        while (b.isValid()) {
+            if (QTextList *list = b.textList()) {
+                const int before = qMax(0, list->format().indent() - 1);
+                list->remove(b);
+                QTextCursor bc(b);
+                QTextBlockFormat bf = bc.blockFormat();
+                bf.setIndent(before);
+                bc.setBlockFormat(bf);
+            }
+            if (b == end) {
+                break;
+            }
+            b = b.next();
+        }
     }
     cursor.endEditBlock();
     syncFormatActions();
@@ -2920,8 +2944,10 @@ void MainWindow::applyHeading()
     }
     cursor.endEditBlock();
 
-    // Keep typing in the new style.
+    // Keep typing in the new style, and show it (Bold must not stay checked
+    // from the heading, or Ctrl+B would turn bold off instead of on).
     m_editor->mergeCurrentCharFormat(charFmt);
+    syncFormatActions();
     m_editor->setFocus();
 }
 
@@ -3287,6 +3313,18 @@ QString MainWindow::documentsStartDir() const
     return QDir::homePath();
 }
 
+QString MainWindow::saveStartDir(const QString &bookDir) const
+{
+    // A saved file: next to it. Untitled with a book open: the book folder.
+    if (!m_currentPath.isEmpty() && QFileInfo(m_currentPath).absoluteDir().exists()) {
+        return QFileInfo(m_currentPath).absolutePath();
+    }
+    if (!bookDir.isEmpty() && QDir(bookDir).exists()) {
+        return bookDir;
+    }
+    return documentsStartDir();
+}
+
 void MainWindow::rememberDocDir(const QString &path)
 {
     if (path.isEmpty()) {
@@ -3371,7 +3409,7 @@ QString MainWindow::runSaveDocumentDialog(DocumentIo::Format *outFormat)
     dlg.setAcceptMode(QFileDialog::AcceptSave);
     dlg.setFileMode(QFileDialog::AnyFile);
     dlg.setNameFilters(DocumentIo::saveFilter().split(QStringLiteral(";;")));
-    dlg.setDirectory(documentsStartDir());
+    dlg.setDirectory(saveStartDir(m_book && m_book->hasBook() ? m_book->book().bookDir() : QString()));
 
     // New documents start as ODT (the native format); an existing file keeps
     // its own format. The type last used for some other file doesn't carry over.
@@ -5086,6 +5124,22 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         }
         if (ke->key() == Qt::Key_Backspace && !chord) {
             QTextCursor c = m_editor->textCursor();
+            if (!c.hasSelection() && c.atBlockStart() && c.currentList()) {
+                // Backspace at the start of a list item ends the list there.
+                // Qt keeps an indent in the bullet's place, which is saved as
+                // a left margin; drop it instead.
+                QTextList *list = c.currentList();
+                const int before = qMax(0, list->format().indent() - 1);
+                c.beginEditBlock();
+                list->remove(c.block());
+                QTextBlockFormat bf = c.blockFormat();
+                bf.setIndent(before);
+                bf.setObjectIndex(-1);
+                c.setBlockFormat(bf);
+                c.endEditBlock();
+                syncFormatActions();
+                return true;
+            }
             const QTextBlock prev = c.block().previous();
             if (!c.hasSelection() && c.atBlockStart() && !c.currentList() && !c.currentTable()
                 && c.blockFormat().indent() == 0
@@ -5189,6 +5243,9 @@ void MainWindow::syncStyleControls()
     if (m_styleCombo) {
         const QSignalBlocker b(m_styleCombo);
         m_styleCombo->setCurrentIndex(index);
+    }
+    if (m_styleLabel) {
+        m_styleLabel->setText(m_markdownMode || !m_styleCombo ? QString() : m_styleCombo->itemText(index));
     }
 }
 

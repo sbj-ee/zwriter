@@ -25,6 +25,7 @@
 #include <QSettings>
 #include <QSplitter>
 #include <QTemporaryDir>
+#include <QToolButton>
 #include <QTreeView>
 
 #include <cstdio>
@@ -161,6 +162,12 @@ void testBigLibrary(const QString &root)
     LibrarySidebar side;
     side.resize(260, 600);
     side.show();
+    {
+        auto *books = side.findChild<QToolButton *>(QStringLiteral("libraryToBook"));
+        auto *folder = side.findChild<QToolButton *>(QStringLiteral("libraryChoose"));
+        check(books && books->text() == QLatin1String("Books") && folder && folder->text() == QStringLiteral("Folder…"),
+              "U header buttons say Books and Folder… (not Book and …)");
+    }
 
     QElapsedTimer t;
     t.start();
