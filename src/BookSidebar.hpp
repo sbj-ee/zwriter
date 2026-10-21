@@ -5,6 +5,7 @@
 
 #include <QPointer>
 #include <QMessageBox>
+#include <QColor>
 #include <QWidget>
 
 #include "BookChapterDialog.hpp"
@@ -90,6 +91,13 @@ public:
     // Row Alt+Up/Down and F2 act on: the open chapter, or the list's current
     // row while the list has focus.
     int shortcutRow() const;
+    // Item data: the chapter open in the editor; the row a context menu is open for.
+    static constexpr int OpenRole = Qt::UserRole + 20;
+    static constexpr int ContextRole = Qt::UserRole + 21;
+    int openRow() const;
+    int contextRow() const { return m_contextRow; }
+    void setContextRow(int row);
+    QColor accentColor() const { return m_accent; }
     bool deleteChapterFile(int row); // no questions: moves the file to the trash, removes the row
 
     QListWidget *view() const { return m_view; }
@@ -129,6 +137,8 @@ signals:
     void printBookRequested();
 
 private:
+    int m_contextRow = -1;
+    QColor m_accent = QColor(0x3b, 0x6e, 0xa8);
     void loadCurrent();
     void scanBooks();
     void rebuild(int selectRow = -1);
