@@ -1,4 +1,7 @@
 #include "MainWindow.hpp"
+#include "ParagraphDialog.hpp"
+#include "ParagraphStyles.hpp"
+#include "Ruler.hpp"
 #include "Images.hpp"
 #include "ImagePropertiesDialog.hpp"
 #include "AlignmentActions.hpp"
@@ -201,6 +204,9 @@ MainWindow::MainWindow(QWidget *parent)
     // QScrollArea auto-fills its widget; let the desk colour show through instead.
     m_pageCanvas->setAutoFillBackground(false);
     m_pageScroll->viewport()->setAutoFillBackground(false);
+    m_ruler = new Ruler(m_editor, m_desk);
+    m_ruler->setVisible(QSettings().value(QStringLiteral("view/ruler"), false).toBool());
+    deskLayout->addWidget(m_ruler);
     deskLayout->addWidget(m_pageScroll, 1);
 
     // Pages appear as the document grows: keep the paper exactly N pages tall.
@@ -751,7 +757,47 @@ void MainWindow::createFormatActions()
         styleGroup->addAction(a);
         *s.slot = a;
     }
-    connect(styleGroup, &QActionGroup::triggered, this, [this](QAction *) { applyHeading(); });
+    // Named paragraph styles (1.7.0), in the same exclusive group.
+    for (const ParagraphStyles::Style &st : ParagraphStyles::named()) {
+        QAction *a = new QAction(st.display, this);
+        a->setCheckable(true);
+        a->setData(-1);
+        a->setProperty("zwStyle", st.name);
+        a->setToolTip(st.display);
+        styleGroup->addAction(a);
+        m_namedStyleActions << a;
+    }
+    connect(styleGroup, &QActionGroup::triggered, this, [this](QAction *a) {
+        if (a->property("zwStyle").isValid()) {
+            applyNamedStyle(a->property("zwStyle").toString());
+        } else {
+            applyHeading();
+        }
+    });
+
+    // Paragraph… dialog and indent steps.
+    m_paragraphDialogAction = new QAction(QStringLiteral("&Paragraph…"), this);
+    m_paragraphDialogAction->setObjectName(QStringLiteral("formatParagraph"));
+    m_paragraphDialogAction->setToolTip(QStringLiteral("Indents, spacing, line spacing and alignment"));
+    connect(m_paragraphDialogAction, &QAction::triggered, this, &MainWindow::showParagraphDialog);
+    m_indentAction = new QAction(QStringLiteral("&Increase Indent"), this);
+    m_indentAction->setObjectName(QStringLiteral("formatIndent"));
+    m_indentAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_M));
+    m_indentAction->setToolTip(QStringLiteral("Increase indent (Ctrl+M)"));
+    connect(m_indentAction, &QAction::triggered, this, [this]() {
+        ParagraphStyles::changeIndent(m_editor->textCursor(), 1);
+        m_editor->setFocus();
+    });
+    m_outdentAction = new QAction(QStringLiteral("&Decrease Indent"), this);
+    m_outdentAction->setObjectName(QStringLiteral("formatOutdent"));
+    m_outdentAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M));
+    m_outdentAction->setToolTip(QStringLiteral("Decrease indent (Ctrl+Shift+M)"));
+    connect(m_outdentAction, &QAction::triggered, this, [this]() {
+        ParagraphStyles::changeIndent(m_editor->textCursor(), -1);
+        m_editor->setFocus();
+    });
+    addAction(m_indentAction);
+    addAction(m_outdentAction);
 
     // Alignment (exclusive group, checked state follows the cursor).
     m_alignActions = new Alignment::Actions(m_editor, this);
@@ -806,6 +852,13 @@ void MainWindow::buildFormatMenu()
     for (QAction *a : {m_paragraphAction, m_h1Action, m_h2Action, m_h3Action}) {
         styleMenu->addAction(a);
     }
+    styleMenu->addSeparator();
+    for (QAction *a : m_namedStyleActions) {
+        styleMenu->addAction(a);
+    }
+    m_formatMenu->addAction(m_paragraphDialogAction);
+    m_formatMenu->addAction(m_indentAction);
+    m_formatMenu->addAction(m_outdentAction);
     auto *alignMenu = m_formatMenu->addMenu(QStringLiteral("&Align"));
     for (QAction *a : {m_alignLeftAction, m_alignCenterAction, m_alignRightAction,
                        m_alignJustifyAction}) {
@@ -886,6 +939,17 @@ void MainWindow::buildViewMenu()
         "Zoom the page to fill the window width (Ctrl+Shift+W); lines still break as they print"));
     connect(m_fitPageWidthAction, &QAction::triggered, this, &MainWindow::toggleFitPageWidth);
 
+    m_rulerAction = m_viewMenu->addAction(QStringLiteral("&Ruler"));
+    m_rulerAction->setObjectName(QStringLiteral("viewRuler"));
+    m_rulerAction->setCheckable(true);
+    m_rulerAction->setChecked(QSettings().value(QStringLiteral("view/ruler"), false).toBool());
+    m_rulerAction->setToolTip(QStringLiteral("Show the paragraph indents above the page; drag them to change"));
+    connect(m_rulerAction, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue(QStringLiteral("view/ruler"), on);
+        if (m_ruler) {
+            m_ruler->setVisible(on && !m_markdownMode);
+        }
+    });
     m_pageGuidesAction = m_viewMenu->addAction(QStringLiteral("Page &Guides"));
     m_pageGuidesAction->setCheckable(true);
     // Ctrl+G is Find Next on Linux; keep guides on their own chord.
@@ -1517,6 +1581,16 @@ void MainWindow::buildFormatToolbar()
         }
     }
 
+    m_formatBar->addAction(m_outdentAction);
+    m_formatBar->addAction(m_indentAction);
+    for (QAction *a : {m_outdentAction, m_indentAction}) {
+        if (auto *b = qobject_cast<QToolButton *>(m_formatBar->widgetForAction(a))) {
+            b->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            b->setText(a == m_indentAction ? QStringLiteral("Indent") : QStringLiteral("Outdent"));
+            b->setObjectName(a == m_indentAction ? QStringLiteral("indentButton") : QStringLiteral("outdentButton"));
+        }
+    }
+
     m_formatBar->addSeparator();
 
     m_styleCombo = new QComboBox(m_formatBar);
@@ -1524,12 +1598,17 @@ void MainWindow::buildFormatToolbar()
     m_styleCombo->setToolTip(QStringLiteral("Paragraph style"));
     m_styleCombo->addItems({QStringLiteral("Body Text"), QStringLiteral("Heading 1"),
                             QStringLiteral("Heading 2"), QStringLiteral("Heading 3")});
+    for (const ParagraphStyles::Style &st : ParagraphStyles::named()) {
+        m_styleCombo->addItem(st.display, st.name);
+    }
     m_styleCombo->setFixedWidth(118);
     m_formatBar->addWidget(m_styleCombo);
     connect(m_styleCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
         QAction *targets[] = {m_paragraphAction, m_h1Action, m_h2Action, m_h3Action};
         if (index >= 0 && index < 4) {
             targets[index]->trigger();
+        } else if (index >= 4 && index - 4 < m_namedStyleActions.size()) {
+            m_namedStyleActions.at(index - 4)->trigger();
         }
     });
 }
@@ -2137,6 +2216,7 @@ bool MainWindow::addCaption(int position)
     QTextBlockFormat bf;
     bf.setAlignment(Qt::AlignHCenter);
     bf.setHeadingLevel(0);
+    bf.setProperty(ParagraphStyles::StyleNameProperty, QStringLiteral("Caption"));
     QTextCharFormat cf;
     // The caption uses the face of the text around the picture.
     for (QTextBlock b = doc->findBlock(position); b.isValid(); b = b.previous()) {
@@ -2683,6 +2763,14 @@ void MainWindow::setMarkdownMode(bool on)
         m_hideAwayPinned = m_odtChromePinned;
     }
     m_markdownMode = on;
+    if (m_ruler) {
+        m_ruler->setVisible(!on && m_rulerAction && m_rulerAction->isChecked());
+    }
+    for (QAction *a : {m_paragraphDialogAction, m_indentAction, m_outdentAction}) {
+        if (a) {
+            a->setEnabled(!on);
+        }
+    }
 
     // Switching modes restyles the view; it is not an edit.
     const QScopedValueRollback guard(m_suppressDirty, true);
@@ -2789,6 +2877,8 @@ void MainWindow::applyHeading()
     }
 
     const int level = act->data().toInt();
+    // Body Text / Heading replaces a named style (Title, Bibliography, ...).
+    ParagraphStyles::apply(m_editor->textCursor(), QString());
 
     QTextCharFormat charFmt;
     if (level == 0) {
@@ -2912,10 +3002,7 @@ void MainWindow::syncFormatActions()
         const QSignalBlocker b(a);
         a->setChecked(a == checked);
     }
-    if (m_styleCombo) {
-        const QSignalBlocker b(m_styleCombo);
-        m_styleCombo->setCurrentIndex(qBound(0, level, 3));
-    }
+    syncStyleControls();
 }
 
 bool MainWindow::maybeSave()
@@ -5069,4 +5156,58 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     }
 
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::applyNamedStyle(const QString &name)
+{
+    ParagraphStyles::apply(m_editor->textCursor(), name);
+    syncStyleControls();
+    m_editor->setFocus();
+}
+
+void MainWindow::syncStyleControls()
+{
+    const QTextBlockFormat bf = m_editor->textCursor().blockFormat();
+    const QString named = ParagraphStyles::styleOf(bf);
+    const int level = bf.headingLevel();
+    int index = qBound(0, level, 3);
+    for (int i = 0; i < m_namedStyleActions.size(); ++i) {
+        QAction *a = m_namedStyleActions.at(i);
+        const QSignalBlocker b(a);
+        const bool on = a->property("zwStyle").toString() == named;
+        if (on) {
+            index = 4 + i;
+            for (QAction *h : {m_paragraphAction, m_h1Action, m_h2Action, m_h3Action}) {
+                if (h) {
+                    const QSignalBlocker hb(h);
+                    h->setChecked(false);
+                }
+            }
+        }
+        a->setChecked(on);
+    }
+    if (m_styleCombo) {
+        const QSignalBlocker b(m_styleCombo);
+        m_styleCombo->setCurrentIndex(index);
+    }
+}
+
+void MainWindow::showParagraphDialog()
+{
+    if (m_markdownMode) {
+        return;
+    }
+    if (m_paragraphDialog) {
+        m_paragraphDialog->raise();
+        return;
+    }
+    auto *dlg = new ParagraphDialog(m_editor->textCursor().blockFormat(), this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+    dlg->setWindowModality(Qt::WindowModal);
+    connect(dlg, &QDialog::accepted, this, [this, dlg]() {
+        ParagraphStyles::setGeometry(m_editor->textCursor(), dlg->format());
+        m_editor->setFocus();
+    });
+    m_paragraphDialog = dlg;
+    dlg->open();
 }

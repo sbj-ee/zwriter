@@ -1,5 +1,6 @@
 #include "DocumentIo.hpp"
 #include "Images.hpp"
+#include "ParagraphStyles.hpp"
 #include "Alignment.hpp"
 
 #include <QStringView>
@@ -83,6 +84,7 @@ QString htmlEscaped(QStringView text)
     return out;
 }
 
+constexpr int kNamedStyleState = 0x5A000; // + index into ParagraphStyles::named()
 constexpr char16_t kRtfBlankParagraphMark = 0xE000; // same as kBlankParagraphMark below
 
 // RTF -> simple HTML for QTextDocument: paragraphs, bold / italic / underline,
@@ -99,6 +101,8 @@ QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = 
         int halfPoints = 24;
         int uc = 1; // chars to skip after \uN
         char align = 'l'; // paragraph alignment: \ql \qc \qr \qj (reset by \pard)
+        int li = 0, ri = 0, fi = 0, sb = 0, sa = 0, sl = 0; // twips; sl with \slmult1 = 240 per line
+        bool slmult = false;
         bool pict = false; // inside a \pict group: text is hex picture data
     };
     // The picture being read (\pict ... hex ... }).
@@ -202,6 +206,18 @@ QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = 
         if (pendingBreak) {
             css += QStringLiteral("page-break-before:always;");
             pendingBreak = false;
+        }
+        {
+            const State &ps = stack.last();
+            auto px = [](int twips) { return QString::number(twips / 15.0, 'f', 2) + QStringLiteral("px"); };
+            if (ps.li) css += QStringLiteral("margin-left:%1;").arg(px(ps.li));
+            if (ps.ri) css += QStringLiteral("margin-right:%1;").arg(px(ps.ri));
+            if (ps.fi) css += QStringLiteral("text-indent:%1;").arg(px(ps.fi));
+            if (ps.sb) css += QStringLiteral("margin-top:%1;").arg(px(ps.sb));
+            if (ps.sa) css += QStringLiteral("margin-bottom:%1;").arg(px(ps.sa));
+            if (ps.slmult && ps.sl > 0 && ps.sl != 240) {
+                css += QStringLiteral("line-height:%1%;").arg(qRound(ps.sl * 100.0 / 240));
+            }
         }
         const QString body = paraHasText ? para : QString(QChar(kRtfBlankParagraphMark));
         para.clear();
@@ -461,6 +477,22 @@ QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = 
         } else if (word == "pard") {
             inTable = false;
             st.align = 'l';
+            st.li = st.ri = st.fi = st.sb = st.sa = st.sl = 0;
+            st.slmult = false;
+        } else if (word == "li" && hasParam) {
+            st.li = param;
+        } else if (word == "ri" && hasParam) {
+            st.ri = param;
+        } else if (word == "fi" && hasParam) {
+            st.fi = param;
+        } else if (word == "sb" && hasParam) {
+            st.sb = param;
+        } else if (word == "sa" && hasParam) {
+            st.sa = param;
+        } else if (word == "sl" && hasParam) {
+            st.sl = qAbs(param);
+        } else if (word == "slmult") {
+            st.slmult = on;
         } else if (word == "ql" || word == "qc" || word == "qr" || word == "qj") {
             st.align = word.at(1);
         } else if (word == "qd") {
@@ -601,6 +633,28 @@ QString documentToRtf(const QTextDocument *doc)
         case Alignment::Kind::Left:
             out += QStringLiteral("\\ql");
             break;
+        }
+        // Indents and spacing in twips (15 per px at 96 dpi); line spacing as
+        // a multiple of single (\sl240\slmult1 = single).
+        auto tw = [](qreal px) { return qRound(px * 15.0); };
+        if (bf.leftMargin() != 0) {
+            out += QStringLiteral("\\li%1").arg(tw(bf.leftMargin()));
+        }
+        if (bf.rightMargin() != 0) {
+            out += QStringLiteral("\\ri%1").arg(tw(bf.rightMargin()));
+        }
+        if (bf.textIndent() != 0) {
+            out += QStringLiteral("\\fi%1").arg(tw(bf.textIndent()));
+        }
+        if (bf.topMargin() != 0) {
+            out += QStringLiteral("\\sb%1").arg(tw(bf.topMargin()));
+        }
+        if (bf.bottomMargin() != 0) {
+            out += QStringLiteral("\\sa%1").arg(tw(bf.bottomMargin()));
+        }
+        if (bf.lineHeightType() == QTextBlockFormat::ProportionalHeight && bf.lineHeight() > 0
+            && bf.lineHeight() != 100) {
+            out += QStringLiteral("\\sl%1\\slmult1").arg(qRound(240 * bf.lineHeight() / 100.0));
         }
         out += QStringLiteral("\\f0\\fs%1 ").arg(qRound(basePt * 2));
         if (const QTextList *list = block.textList()) {
@@ -859,6 +913,7 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
         QString parent;         // style:parent-style-name
         bool breakBefore = false; // manual page break before the paragraph
         int headingLevel = 0;     // from a Heading_20_N (parent) style
+        QString geometryCss;      // margins, text-indent, line-height (1.7.0)
     };
 
     struct ListInfo {
@@ -960,6 +1015,31 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                     if (attrs.value(QStringLiteral("fo:break-before")).toString().toLower()
                         == QLatin1String("page")) {
                         info.breakBefore = true;
+                    }
+                    // Indents and spacing (fo:margin-*, fo:text-indent) and
+                    // line spacing as CSS for Qt's HTML importer.
+                    static const char *const geo[][2] = {
+                        {"fo:margin-left", "margin-left"}, {"fo:margin-right", "margin-right"},
+                        {"fo:margin-top", "margin-top"},   {"fo:margin-bottom", "margin-bottom"},
+                        {"fo:text-indent", "text-indent"}};
+                    for (const auto &g : geo) {
+                        const QStringView v = attrs.value(QLatin1String(g[0]));
+                        if (!v.isEmpty()) {
+                            const bool neg = v.startsWith(QLatin1Char('-'));
+                            const double px = Images::odfLengthToPx(neg ? v.mid(1) : v);
+                            info.geometryCss += QStringLiteral("%1:%2px;").arg(QLatin1String(g[1]))
+                                                    .arg(neg ? -px : px, 0, 'f', 2);
+                        }
+                    }
+                    QString lh = attrs.value(QStringLiteral("fo:line-height")).toString();
+                    if (lh.isEmpty()) {
+                        lh = attrs.value(QStringLiteral("style:line-height")).toString();
+                    }
+                    if (lh.endsWith(QLatin1Char('%'))) {
+                        const int pct = lh.chopped(1).toInt();
+                        if (pct > 0 && pct != 100) {
+                            info.geometryCss += QStringLiteral("line-height:%1%;").arg(pct);
+                        }
                     }
                     styles.insert(currentStyle, info);
                 }
@@ -1113,6 +1193,15 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
         }
         if (info.breakBefore) {
             css += QStringLiteral("page-break-before:always;");
+        }
+        css += info.geometryCss; // after the 0px defaults, so it wins
+        // A zwriter named style (Title, Bibliography, ...) rides through the
+        // HTML import as the block's user state; load() turns it back into
+        // the block property.
+        for (int i = 0; i < ParagraphStyles::named().size(); ++i) {
+            if (ParagraphStyles::named().at(i).name == info.parent) {
+                css += QStringLiteral("-qt-user-state:%1;").arg(kNamedStyleState + i);
+            }
         }
         return css;
     };
@@ -1632,6 +1721,19 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
     }
     restyleTables(doc->rootFrame());
     normaliseImportedBlocks(doc);
+    {
+        QTextCursor c(doc);
+        for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+            const int i = b.userState() - kNamedStyleState;
+            if (b.userState() >= kNamedStyleState && i < ParagraphStyles::named().size()) {
+                QTextBlockFormat bf = b.blockFormat();
+                bf.setProperty(ParagraphStyles::StyleNameProperty, ParagraphStyles::named().at(i).name);
+                c.setPosition(b.position());
+                c.setBlockFormat(bf);
+                b.setUserState(-1);
+            }
+        }
+    }
     // The clean-up above is part of loading, not an edit: nothing to undo.
     doc->clearUndoRedoStacks();
     doc->setModified(false);
@@ -1835,7 +1937,20 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
             }
         }
     }
-    if (headingStyles.isEmpty() && tables.isEmpty() && textStyleFamilies.isEmpty() && !anyFloat) {
+    // Named paragraph styles (Title, Bibliography, ...) by automatic style,
+    // and whether any paragraph has a line spacing (Qt writes the
+    // non-standard style:line-height; ODF readers want fo:line-height).
+    QHash<QString, QString> namedStyles;
+    bool anyLineHeight = false;
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        const QString named = ParagraphStyles::styleOf(b.blockFormat());
+        if (!named.isEmpty()) {
+            namedStyles.insert(QStringLiteral("p%1").arg(b.blockFormatIndex()), named);
+        }
+        anyLineHeight = anyLineHeight || b.blockFormat().hasProperty(QTextFormat::LineHeight);
+    }
+    if (headingStyles.isEmpty() && tables.isEmpty() && textStyleFamilies.isEmpty() && !anyFloat
+        && namedStyles.isEmpty() && !anyLineHeight) {
         return true;
     }
     auto fail = [error](const QString &msg) {
@@ -1883,10 +1998,67 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
         out += QStringView(patched).mid(last);
         patched = out;
     }
+    for (auto it = namedStyles.constBegin(); it != namedStyles.constEnd(); ++it) {
+        const QString tag = QStringLiteral("<style:style style:name=\"%1\" style:family=\"paragraph\"").arg(it.key());
+        const qsizetype at = patched.indexOf(tag);
+        if (at >= 0) {
+            patched.insert(at + tag.size(), QStringLiteral(" style:parent-style-name=\"%1\"").arg(it.value()));
+        }
+    }
+    if (anyLineHeight) {
+        patched.replace(QLatin1String(" style:line-height=\""), QLatin1String(" fo:line-height=\""));
+    }
     if (patched == original) {
         return true;
     }
+    QStringList members{QStringLiteral("content.xml")};
     QTemporaryDir dir;
+    if (!namedStyles.isEmpty() && dir.isValid()) {
+        // styles.xml with the named styles (LibreOffice lists them by name),
+        // and its manifest entry.
+        QString defs;
+        for (const ParagraphStyles::Style &st : ParagraphStyles::named()) {
+            auto pt = [](qreal px) { return QString::number(ParagraphStyles::pxToPt(px), 'f', 2) + QStringLiteral("pt"); };
+            const Qt::Alignment a = st.align & Qt::AlignHorizontal_Mask;
+            defs += QStringLiteral("<style:style style:name=\"%1\" style:display-name=\"%2\" style:family=\"paragraph\" "
+                                   "style:class=\"text\"><style:paragraph-properties fo:margin-left=\"%3\" "
+                                   "fo:margin-right=\"%4\" fo:text-indent=\"%5\" fo:margin-top=\"%6\" "
+                                   "fo:margin-bottom=\"%7\" fo:text-align=\"%8\"/><style:text-properties "
+                                   "fo:font-size=\"%9pt\" fo:font-weight=\"%10\" fo:font-style=\"%11\"/></style:style>")
+                        .arg(st.name, st.display, pt(st.left), pt(st.right), pt(st.indent), pt(st.top), pt(st.bottom),
+                             a & Qt::AlignHCenter ? QStringLiteral("center") : a & Qt::AlignRight ? QStringLiteral("end") : QStringLiteral("start"))
+                        .arg(st.pointSize)
+                        .arg(st.weight >= 600 ? QStringLiteral("bold") : QStringLiteral("normal"),
+                             st.italic ? QStringLiteral("italic") : QStringLiteral("normal"));
+        }
+        QFile styles(dir.filePath(QStringLiteral("styles.xml")));
+        if (styles.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            styles.write(QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                                        "<office:document-styles xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+                                        "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" "
+                                        "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" "
+                                        "office:version=\"1.2\"><office:styles>%1</office:styles></office:document-styles>\n")
+                             .arg(defs).toUtf8());
+            styles.close();
+            members << QStringLiteral("styles.xml");
+            QProcess man;
+            man.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("META-INF/manifest.xml")});
+            if (man.waitForFinished(15000) && man.exitCode() == 0) {
+                QString manifest = QString::fromUtf8(man.readAllStandardOutput());
+                if (!manifest.contains(QLatin1String("\"styles.xml\""))) {
+                    manifest.replace(QLatin1String("</manifest:manifest>"),
+                                     QLatin1String("<manifest:file-entry manifest:media-type=\"text/xml\" "
+                                                   "manifest:full-path=\"styles.xml\"/></manifest:manifest>"));
+                    QDir(dir.path()).mkpath(QStringLiteral("META-INF"));
+                    QFile mf(dir.filePath(QStringLiteral("META-INF/manifest.xml")));
+                    if (mf.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                        mf.write(manifest.toUtf8());
+                        members << QStringLiteral("META-INF/manifest.xml");
+                    }
+                }
+            }
+        }
+    }
     QFile content(dir.filePath(QStringLiteral("content.xml")));
     if (!dir.isValid() || !content.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         return fail(QStringLiteral("Headings/tables saved unpatched (temp dir unavailable)."));
@@ -1896,8 +2068,8 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
     // Replace just that member; the stored "mimetype" member stays first.
     QProcess zip;
     zip.setWorkingDirectory(dir.path());
-    zip.start(QStringLiteral("zip"), {QStringLiteral("-X"), QStringLiteral("-q"),
-                                      QFileInfo(path).absoluteFilePath(), QStringLiteral("content.xml")});
+    zip.start(QStringLiteral("zip"), QStringList{QStringLiteral("-X"), QStringLiteral("-q"),
+                                                 QFileInfo(path).absoluteFilePath()} + members);
     if (!zip.waitForFinished(30000) || zip.exitStatus() != QProcess::NormalExit || zip.exitCode() != 0) {
         return fail(QStringLiteral("Headings/tables saved unpatched (zip unavailable)."));
     }

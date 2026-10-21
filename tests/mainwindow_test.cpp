@@ -20,6 +20,9 @@
 #include "ImagePropertiesDialog.hpp"
 #include "PageWidgets.hpp"
 #include "MainWindow.hpp"
+#include <QComboBox>
+#include "ParagraphStyles.hpp"
+#include "Ruler.hpp"
 #include "BookManifest.hpp"
 #include <QFileDialog>
 #include <QInputDialog>
@@ -897,6 +900,69 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
           "B Library lists .odt files");
 }
 
+// Paragraph formatting in the window: Ctrl+M, the style combo, the ruler.
+void testParagraphFormatting()
+{
+    MainWindow w;
+    w.resize(1100, 800);
+    w.show();
+    wait(50);
+    QTextEdit *ed = editorOf(w);
+    ed->setPlainText(QStringLiteral("First paragraph.\nSecond paragraph."));
+    QTextCursor c(ed->document());
+    ed->setTextCursor(c);
+    QAction *indent = w.findChild<QAction *>(QStringLiteral("formatIndent"));
+    QAction *outdent = w.findChild<QAction *>(QStringLiteral("formatOutdent"));
+    check(indent && indent->shortcut() == QKeySequence(QStringLiteral("Ctrl+M")) && outdent
+              && outdent->shortcut() == QKeySequence(QStringLiteral("Ctrl+Shift+M")),
+          "G Increase/Decrease Indent with Ctrl+M / Ctrl+Shift+M");
+    if (indent) {
+        indent->trigger();
+        indent->trigger();
+    }
+    check(qAbs(ed->document()->firstBlock().blockFormat().leftMargin() - 2 * ParagraphStyles::kIndentStep) < 0.5,
+          "G Increase Indent twice", QString::number(ed->document()->firstBlock().blockFormat().leftMargin()));
+    if (outdent) {
+        outdent->trigger();
+    }
+    check(qAbs(ed->document()->firstBlock().blockFormat().leftMargin() - ParagraphStyles::kIndentStep) < 0.5,
+          "G Decrease Indent once");
+
+    QAction *ruler = w.findChild<QAction *>(QStringLiteral("viewRuler"));
+    check(ruler && ruler->isCheckable() && !ruler->isChecked() && w.ruler() && !w.ruler()->isVisible(),
+          "G ruler off by default");
+    if (ruler && w.ruler()) {
+        ruler->trigger();
+        wait(50);
+        Ruler *r = w.ruler();
+        check(r->isVisible(), "G View > Ruler shows it");
+        const int left = r->markerX(Ruler::Marker::Left);
+        check(qAbs(left - r->originX() - ParagraphStyles::kIndentStep) <= 1, "G ruler shows the left indent",
+              QStringLiteral("%1 %2").arg(left).arg(r->originX()));
+        const int target = left + qRound(ParagraphStyles::cmToPx(1.0));
+        const int y = r->height() - 3;
+        QTest::mousePress(r, Qt::LeftButton, {}, QPoint(left, y));
+        QTest::mouseMove(r, QPoint(target, y));
+        QTest::mouseRelease(r, Qt::LeftButton, {}, QPoint(target, y));
+        const QTextBlockFormat f = ed->document()->firstBlock().blockFormat();
+        check(qAbs(f.leftMargin() - ParagraphStyles::cmToPx(2.27)) < 3,
+              "G dragging the left marker 1 cm moves the indent", QString::number(f.leftMargin()));
+        ruler->trigger();
+    }
+    QComboBox *combo = w.findChild<QComboBox *>(QStringLiteral("styleCombo"));
+    const int bib = combo ? combo->findText(QStringLiteral("Bibliography")) : -1;
+    check(bib >= 0 && combo->findText(QStringLiteral("Block Quote")) >= 0 && combo->findText(QStringLiteral("Title")) >= 0,
+          "G style list has Title, Block Quote, Bibliography");
+    if (bib >= 0) {
+        combo->setCurrentIndex(bib);
+        combo->activated(bib);
+        check(ParagraphStyles::styleOf(ed->textCursor().blockFormat()) == QLatin1String("Bibliography")
+                  && ed->textCursor().blockFormat().textIndent() < 0,
+              "G choosing Bibliography gives a hanging indent");
+    }
+    ed->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -912,6 +978,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_PARAGRAPH")) { // quick local runs
+        testParagraphFormatting();
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_FEEDBACK")) { // quick local runs
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         testBookFeedback(dataDir.path(), prompts);
@@ -959,6 +1030,7 @@ int main(int argc, char **argv)
     testCaptionsPdfMarkdown(dataDir.path(), prompts);
     testBookFeedback(dataDir.path(), prompts);
     testPageGuidesContainText();
+    testParagraphFormatting();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

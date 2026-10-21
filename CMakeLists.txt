@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.6.0 LANGUAGES CXX)
+project(zwriter VERSION 1.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -102,6 +102,9 @@ add_executable(zwriter
   src/MainWindow.hpp
   src/DocumentIo.cpp
   src/Images.cpp
+  src/ParagraphStyles.cpp
+  src/ParagraphDialog.cpp
+  src/Ruler.cpp
   src/Images.hpp
   src/DocumentIo.hpp
   src/DocumentMeta.cpp
@@ -284,6 +287,7 @@ if(ZWRITER_BUILD_TESTS)
     tests/odt_roundtrip_test.cpp
     src/DocumentIo.cpp
     src/Images.cpp
+    src/ParagraphStyles.cpp
     src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
@@ -300,6 +304,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/DocumentIo.hpp
     src/Images.cpp
+    src/ParagraphStyles.cpp
     src/Images.hpp
     src/Alignment.cpp
     src/Alignment.hpp
@@ -309,11 +314,25 @@ if(ZWRITER_BUILD_TESTS)
   add_test(NAME images COMMAND images_test)
   set_tests_properties(images PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+  add_executable(paragraph_test
+    tests/paragraph_test.cpp
+    src/DocumentIo.cpp
+    src/Images.cpp
+    src/ParagraphStyles.cpp
+    src/ParagraphDialog.cpp
+    src/Alignment.cpp
+  )
+  target_include_directories(paragraph_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(paragraph_test PRIVATE Qt6::Widgets)
+  add_test(NAME paragraph COMMAND paragraph_test)
+  set_tests_properties(paragraph PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
   # GUI-test regressions: print scale, ODT manifest/styles, RTF import/export, tables.
   add_executable(regression_test
     tests/regression_test.cpp
     src/DocumentIo.cpp
     src/Images.cpp
+    src/ParagraphStyles.cpp
     src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
@@ -338,6 +357,7 @@ if(ZWRITER_BUILD_TESTS)
     src/AlignmentActions.hpp
     src/DocumentIo.cpp
     src/Images.cpp
+    src/ParagraphStyles.cpp
     src/Images.hpp
     src/DocumentIo.hpp
     src/PrintLayout.cpp
@@ -354,6 +374,7 @@ if(ZWRITER_BUILD_TESTS)
     tests/markdown_test.cpp
     src/DocumentIo.cpp
     src/Images.cpp
+    src/ParagraphStyles.cpp
     src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
@@ -437,6 +458,7 @@ if(TARGET Qt6::Widgets)
     src/DocumentIo.cpp
     src/DocumentIo.hpp
     src/Images.cpp
+    src/ParagraphStyles.cpp
     src/Images.hpp
     src/Alignment.cpp
     src/Alignment.hpp
