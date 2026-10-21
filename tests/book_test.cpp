@@ -17,6 +17,7 @@
 //   V  version
 #include "BookChapterDialog.hpp"
 #include <QTest>
+#include <memory>
 #include "BookManifest.hpp"
 #include "BookSidebar.hpp"
 #include "DocumentIo.hpp"
@@ -39,6 +40,9 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
+#include <QAbstractButton>
+#include <QTest>
+#include <QMessageBox>
 #include <QDialog>
 #include <QTextBlock>
 #include <QToolButton>
@@ -313,7 +317,9 @@ QStringList chooserText(BookSidebar *side)
 {
     QStringList out;
     for (int i = 0; i < side->picker()->count(); ++i) {
-        out << side->picker()->itemText(i);
+        if (!side->picker()->itemData(i).toString().isEmpty()) { // books only (not "New Book…")
+            out << side->picker()->itemText(i);
+        }
     }
     return out;
 }
@@ -439,6 +445,182 @@ void newChapterTests()
           "N  '+' opens a menu: New Chapter…, Add Existing Chapters…", addTexts.join(" | "));
 }
 
+// 1.6.0 usability: titles without the file's number prefix, "+ Chapter",
+// the picker's New Book… entry, the empty state, F2 rename, Delete with
+// confirmation (remove by default, delete the file only after a second yes),
+// keyboard focus and the drag message.
+void usabilityTests()
+{
+    QTemporaryDir tmp;
+    qputenv("XDG_DATA_HOME", (tmp.path() + "/data").toUtf8()); // trash goes here on Linux
+    const QString lib = tmp.path() + "/Library";
+    const QString dir = lib + "/Birds";
+    write(dir + "/01 Introduction.md", "# Introduction\n");
+    write(dir + "/02_Songbirds.md", "# Songbirds\n");
+    write(dir + "/03 Raptors.md", "# Raptors\n");
+    write(dir + "/2024.md", "# A year\n");
+    QDir().mkpath(lib + "/Empty");
+    write(lib + "/Empty/book.json", R"({"format":"zwriter-book","version":1,"title":"Empty","chapters":[]})");
+    QMainWindow win;
+    auto *side = new BookSidebar(&win);
+    win.setCentralWidget(side);
+    win.resize(400, 600);
+    win.show();
+    side->setRootPath(lib);
+    side->createBook("Birds");
+    QStringList messages;
+    QObject::connect(side, &BookSidebar::message, [&messages](const QString &m) { messages << m; });
+    QListWidget *list = side->view();
+    check(list->count() == 4 && list->item(0)->text().startsWith("1. Introduction\n")
+              && list->item(1)->text().startsWith("2. Songbirds\n"),
+          "U  titles drop the file's number prefix (the sidebar numbers chapters)", list->item(0)->text());
+    check(list->item(3)->text().startsWith("4. 2024\n"), "U  a name that is only a number is kept",
+          list->item(3)->text());
+    check(side->addButton()->text() == "+ Chapter" && side->addButton()->isVisibleTo(side)
+              && !side->findChild<QToolButton *>("bookNew")->isVisibleTo(side),
+          "U  one labelled '+ Chapter' button; no second 'New' button");
+    {
+        // Double-click and Enter open a chapter; each row shows its status and
+        // word count, and the footer the book total.
+        QStringList opened;
+        auto conn = QObject::connect(side, &BookSidebar::fileActivated, [&opened](const QString &p) { opened << p; });
+        QApplication::setActiveWindow(&win);
+        QTest::qWaitForWindowExposed(&win);
+        list->scrollToItem(list->item(2));
+        const QRect r = list->visualItemRect(list->item(2));
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, r.center());
+        const int afterClick = opened.size();
+        QTest::mouseDClick(list->viewport(), Qt::LeftButton, {}, r.center());
+        const int afterDouble = int(opened.size());
+        list->setCurrentRow(1);
+        emit list->itemActivated(list->item(1)); // Enter / Return
+        QObject::disconnect(conn);
+        check(afterClick == 1 && afterDouble == 2 && opened.value(1) == QDir::cleanPath(dir + "/03 Raptors.md")
+                  && opened.value(2) == QDir::cleanPath(dir + "/02_Songbirds.md"),
+              "U  click, double-click and Enter open the chapter (once each)", opened.join(","));
+        check(list->item(0)->text().contains("Draft · 1 word"), "U  row badge: status and word count", list->item(0)->text());
+        auto *footer = side->findChild<QLabel *>("bookFooter");
+        check(footer && footer->text().startsWith("4 chapters · 5 words"), "U  footer: book total",
+              footer ? footer->text() : QString());
+    }
+    check(list->focusPolicy() == Qt::StrongFocus, "U  the list takes keyboard focus (Tab)");
+    {
+        auto *files = side->findChild<QToolButton *>("bookToLibrary");
+        check(files && files->text() == "Files" && files->toolTip().contains("all files"),
+              "U  the file-tree button says Files, not Library");
+        std::unique_ptr<QMenu> m(side->buildContextMenu(-1));
+        bool change = false;
+        for (QAction *a : m->actions()) {
+            change = change || a->text() == QStringLiteral("Change Library Folder…");
+        }
+        check(change, "U  right-click menu: Change Library Folder…");
+    }
+
+    // Picker: the last entry starts a new book and leaves the current one picked.
+    QComboBox *picker = side->picker();
+    const int newBook = picker->findText("New Book…");
+    check(newBook == picker->count() - 1, "U  picker ends with New Book…");
+    emit picker->activated(newBook);
+    check(side->newBookDialog() && side->currentBook() == "Birds"
+              && picker->currentData().toString() == "Birds",
+          "U  picking New Book… asks for the subfolder; the book stays picked");
+    if (side->newBookDialog()) {
+        side->newBookDialog()->reject();
+    }
+    QCoreApplication::processEvents();
+
+    // F2: rename in place; Enter saves the title, Esc leaves it.
+    list->setFocus();
+    list->setCurrentRow(1);
+    QTest::keyClick(list, Qt::Key_F2);
+    auto *editor = list->viewport()->findChild<QLineEdit *>();
+    check(editor && editor->text() == "Songbirds", "U  F2 opens an editor with the title",
+          editor ? editor->text() : QString());
+    if (editor) {
+        editor->setText("Songbirds of the Prairie");
+        QTest::keyClick(editor, Qt::Key_Return);
+    }
+    QTest::qWait(50);
+    BookManifest saved;
+    saved.load(dir);
+    check(saved.at(1).title == "Songbirds of the Prairie" && list->item(1)->text().startsWith("2. Songbirds of the Prairie\n"),
+          "U  Enter saves the new title to book.json", saved.at(1).title);
+    check(QFile::exists(dir + "/02_Songbirds.md"), "U  ... the file keeps its name");
+    QTest::keyClick(list, Qt::Key_F2);
+    editor = list->viewport()->findChild<QLineEdit *>();
+    if (editor) {
+        editor->setText("Something else");
+        QTest::keyClick(editor, Qt::Key_Escape);
+    }
+    QTest::qWait(50);
+    saved = BookManifest();
+    saved.load(dir);
+    check(saved.at(1).title == "Songbirds of the Prairie" && list->item(1)->text().contains("Prairie"),
+          "U  Esc cancels the rename");
+
+    // Delete: remove from the book (default), file kept.
+    list->setFocus();
+    list->setCurrentRow(2);
+    QTest::keyClick(list, Qt::Key_Delete);
+    QMessageBox *box = side->removeDialog();
+    check(box && box->defaultButton() && box->defaultButton()->text() == "Remove from Book",
+          "U  Delete asks; Remove from Book is the default");
+    if (box) {
+        box->defaultButton()->click();
+    }
+    QTest::qWait(50);
+    check(list->count() == 3 && QFile::exists(dir + "/03 Raptors.md"), "U  ... removed from the book, file kept");
+
+    // Delete File…: a second question, Cancel by default.
+    list->setCurrentRow(2); // 2024.md
+    QTest::keyClick(list, Qt::Key_Delete);
+    box = side->removeDialog();
+    QAbstractButton *del = nullptr;
+    for (QAbstractButton *b : box ? box->buttons() : QList<QAbstractButton *>()) {
+        if (b->text() == "Delete File…") {
+            del = b;
+        }
+    }
+    check(del != nullptr, "U  the question also offers Delete File…");
+    if (del) {
+        del->click();
+    }
+    QTest::qWait(50);
+    QMessageBox *sure = side->removeDialog();
+    check(sure && sure->objectName() == "bookDeleteDialog" && sure->defaultButton()
+              && sure->defaultButton()->text() != "Delete File",
+          "U  Delete File… asks again, and the default is Cancel");
+    if (sure) {
+        sure->defaultButton()->click(); // Cancel
+    }
+    QTest::qWait(50);
+    check(list->count() == 3 && QFile::exists(dir + "/2024.md"), "U  Cancel keeps the file and the chapter");
+    check(side->deleteChapterFile(2) && !QFile::exists(dir + "/2024.md") && list->count() == 2,
+          "U  confirmed delete: file moved to the trash, chapter removed");
+
+    // Drag feedback: a status message after a move by drag.
+    messages.clear();
+    list->setCurrentRow(0);
+    list->model()->moveRow(QModelIndex(), 0, QModelIndex(), 2); // what a drop does
+    QTest::qWait(50);
+    check(!messages.isEmpty() && messages.last().startsWith("Moved Introduction to position 2"),
+          "U  a drop says where the chapter went", messages.join(" | "));
+
+    // Empty book: a hint and the two ways to add a chapter.
+    side->selectBook("Empty");
+    QCoreApplication::processEvents();
+    check(side->emptyBox()->isVisibleTo(side) && !list->isVisibleTo(side)
+              && side->emptyBox()->findChild<QPushButton *>("bookEmptyNewChapter")
+              && side->emptyBox()->findChild<QPushButton *>("bookEmptyAdd"),
+          "U  empty book: 'no chapters yet' with New Chapter… and Add Existing Chapters…");
+    side->emptyBox()->findChild<QPushButton *>("bookEmptyNewChapter")->click();
+    check(side->newChapterDialog() != nullptr, "U  ... New Chapter… opens the dialog");
+    if (side->newChapterDialog()) {
+        side->newChapterDialog()->reject();
+    }
+    QCoreApplication::processEvents();
+}
+
 void sidebarTests()
 {
     QTemporaryDir tmp;
@@ -516,7 +698,7 @@ void sidebarTests()
     QApplication::processEvents();
     check(onDisk(dir) == QStringList({"2 Middle.md", "1 Start.txt", "10 End.md"}),
           "S  drag-drop order saved", onDisk(dir).join(","));
-    check(side->view()->item(0)->text().startsWith("1. 2 Middle"),
+    check(side->view()->item(0)->text().startsWith("1. Middle"),
           "S  list renumbered after the drop", side->view()->item(0)->text());
 
     side->editChapter(1);
@@ -555,9 +737,9 @@ void sidebarTests()
         }
     }
     delete menu;
-    check(texts == QStringList({"Open", "Edit Details…", "Move Up(off)", "Move Down",
-                                "Remove from Book", "New Chapter…", "Add Existing Chapters…",
-                                "New Book…"}),
+    check(texts == QStringList({"Open", "Edit Details…", "Rename", "Move Up(off)", "Move Down",
+                                "Remove from Book…", "New Chapter…", "Add Existing Chapters…",
+                                "New Book…", "Change Library Folder…"}),
           "S  context menu", texts.join(" | "));
 
     // Outside paths: refused with a message, the book unchanged.
@@ -683,6 +865,7 @@ int main(int argc, char **argv)
     odtTests();
     feedbackTests();
     newChapterTests();
+    usabilityTests();
     wordTests();
     sidebarTests();
     detailsTests();

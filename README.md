@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.5.4** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.6.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -188,12 +188,12 @@ Library sidebar (`Ctrl+Shift+L`): folders plus the `.md` / `.txt` / `.odt` files
 
 ![Library sidebar](docs/screenshots/library-sidebar.png)
 
-Book sidebar (`Ctrl+Alt+B`, or the **Book** / **Library** buttons in the sidebar headers): a book's
+Book sidebar (`Ctrl+Alt+B`, or the **Books** / **Files** buttons in the sidebar headers; **Folder…** chooses the library folder): a book's
 chapters in book order. Each book is a subfolder of the library with its own plain `book.json`
 (chapter paths relative to it), so one library can hold several books; the picker at the top
 switches between them and **New** makes a book of an existing or new subfolder, listing the
 `.md` / `.txt` / `.odt` files directly in it (files in its own subfolders, like `images/`, are not
-chapters). Drag a chapter, or use Move Up / Move Down (`Alt+Up` / `Alt+Down`, which also work
+chapters). Chapters show their title (the file's number prefix is dropped; the sidebar numbers them in book order). **F2** renames a chapter's title, **Delete** asks before removing it (the file is kept unless you choose Delete File… and confirm again), and an empty book offers New Chapter… / Add Existing Chapters…. Drag a chapter, or use Move Up / Move Down (`Alt+Up` / `Alt+Down`, which also work
 while you type in the editor), to reorder; right-click → Edit Details… for title,
 status (Idea / Outline / Draft / Revised / Final; a hand-edited other value is kept and marked
 "unknown status"), POV, tags, word target, synopsis and notes. **+**
@@ -228,7 +228,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.5.4 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.6.0 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:

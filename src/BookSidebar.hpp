@@ -4,6 +4,7 @@
 #include "Theme.hpp"
 
 #include <QPointer>
+#include <QMessageBox>
 #include <QWidget>
 
 #include "BookChapterDialog.hpp"
@@ -81,6 +82,12 @@ public:
     QString createChapter(const QString &title, const QString &suffix);
     void chooseNewChapter();                // asks for title + format (non-blocking)
     static QString chapterFileName(int number, const QString &title, const QString &suffix);
+    // F2: edit the chapter's title (book.json) in place in the list.
+    void renameChapter(int row);
+    // Delete: asks first. "Remove from Book" (the default) keeps the file;
+    // "Delete File…" asks again before moving the file to the trash.
+    void confirmRemoveChapter(int row);
+    bool deleteChapterFile(int row); // no questions: moves the file to the trash, removes the row
 
     QListWidget *view() const { return m_view; }
     QPushButton *createButton() const { return m_createButton; }
@@ -90,6 +97,8 @@ public:
     QFileDialog *fileDialog() const { return m_fileDialog.data(); }
     QDialog *newChapterDialog() const { return m_newChapterDialog.data(); }
     QToolButton *addButton() const { return m_addButton; }
+    QMessageBox *removeDialog() const { return m_removeDialog.data(); }
+    QWidget *emptyBox() const { return m_emptyBox; }
     QMenu *buildContextMenu(int row); // caller owns
     QString lastError() const { return m_lastError; }
     int currentRow() const;
@@ -144,4 +153,8 @@ private:
     QPointer<BookChapterDialog> m_dialog;
     QPointer<QFileDialog> m_fileDialog;
     QPointer<QDialog> m_newChapterDialog;
+    QPointer<QMessageBox> m_removeDialog;
+    QWidget *m_emptyBox = nullptr;
+    int m_renamingRow = -1;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 };

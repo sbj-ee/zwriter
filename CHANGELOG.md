@@ -3,6 +3,38 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.6.0] — unreleased
+
+Book sidebar usability, guided by the Birds of the Midwest test.
+
+- **Clearer header.** The book picker has its own row, so long titles are readable. Under it there is
+  one labelled **+ Chapter** menu (New Chapter… / Add Existing Chapters…) and **Library**. The
+  separate "New" button is gone. The picker's tooltip says what it does, and its last entry is
+  **New Book…**.
+- **Titles without the file number.** "01 Introduction.md" shows as "1. Introduction": the sidebar
+  numbers chapters in book order, so the file's own number was shown twice (and often disagreed
+  after a reorder). A title set in Edit Details… is shown as written. A name that is only a number
+  ("2024.md") is kept.
+- **Empty book.** A book with no chapters says so and offers New Chapter… and Add Existing
+  Chapters… buttons, instead of an empty list.
+- **F2 renames** the chapter's title in place (Enter saves it to book.json, Esc cancels). The file
+  keeps its name. Also on the right-click menu as Rename.
+- **Delete (or Backspace) asks first.** "Remove from Book" is the default and keeps the file.
+  "Delete File…" asks a second time, with Cancel as the default, and then moves the file to the
+  trash. Right-click → Remove from Book… does the same.
+- **Keyboard.** The list takes focus with Tab, so arrows, Enter (open), F2, Delete and Alt+Up/Down
+  all work without the mouse.
+- **Drag and drop says what happened**: "Moved Introduction to position 2" in the status bar.
+- The footer (chapter count and book total) is no longer flush against the edge.
+- **Clearer Library controls.** The Book sidebar's "Library" button is now **Files** (it shows
+  every file in the library folder as a tree). In that view, "Book" is now **Books** and the "…"
+  button is **Folder…** (choose the library folder). The Book right-click menu has **Change
+  Library Folder…**. Screenshots `library-header-before.png` / `library-header-after.png`.
+- Tests: `book_test` U (titles, header, picker New Book…, F2 rename and cancel, Delete →
+  remove / delete file with both confirmations, drop message, empty state). Screenshots, before
+  (1.5.3) and after: `book-usability-before.png` / `book-usability-after.png`,
+  `book-empty-before.png` / `book-empty-after.png`, `book-menu-before.png` / `book-menu-after.png`.
+
 ## [1.5.4] — unreleased
 
 - **New Chapter.** You can now make a new chapter from inside the Book sidebar. It asks for a title
