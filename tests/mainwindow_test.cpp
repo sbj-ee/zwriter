@@ -1396,6 +1396,7 @@ int main(int argc, char **argv)
     testParagraphFormatting();
     testReportFixes(dataDir.path());
     testBookToc(dataDir.path());
+    testFigureNumbers(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }
