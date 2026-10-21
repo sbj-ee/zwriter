@@ -3,6 +3,23 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.10.2] — unreleased
+
+Book sidebar keyboard fixes (G1).
+
+- **F2 renames the current chapter from anywhere in the window** while the Book sidebar is
+  shown. Before, it only worked when the chapter list had focus, and clicking a chapter puts
+  the focus in the editor, so F2 did nothing. It is now a window shortcut, like Alt+Up/Down.
+- **Focus ring**: the chapter list draws a 2 px accent border when it has the keyboard.
+- **Ctrl+Tab / Ctrl+Shift+Tab leave the editor.** Tab types a tab in the document, as in
+  any word processor, so the editor never passed focus on with Tab. That is why focus seemed
+  to go to the toolbar or header first. Ctrl+Tab now moves to the chapter list (the tab order
+  is editor, then chapter list); on macOS it is the physical Ctrl key.
+- The current row jumping up by one when the list gets focus did not reproduce offscreen
+  (Tab, Ctrl+Tab, mouse and programmatic focus, after rename, after clicking the open
+  chapter). Tests now check that the row stays put on each of these paths.
+- Tests: `mainwindow_test` Q. Screenshot `book-list-focus.png`.
+
 ## [1.10.1] — unreleased
 
 Docs only; no code changes.
