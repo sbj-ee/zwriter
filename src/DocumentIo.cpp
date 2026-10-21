@@ -790,6 +790,7 @@ constexpr char16_t kBlankParagraphMark = 0xE000;
 // -qt-user-state base that carries "this paragraph is in ODT table of
 // contents n" through the HTML import (turned into TocProperty after it).
 constexpr int kTocUserState = 0x5B000;
+constexpr int kGeneratedTocState = 0x5C000; // + level (0 = the title)
 
 // The parts of an ODT needed to write its tables of contents back unchanged.
 struct OdtTocs {
@@ -805,9 +806,16 @@ OdtTocs extractOdtTocs(const QString &content, const QString &stylesXml)
                                           QRegularExpression::DotMatchesEverythingOption);
     auto it = tocRe.globalMatch(content);
     while (it.hasNext()) {
-        out.raw << it.next().captured(0);
+        const QString raw = it.next().captured(0);
+        // zwriter's own generated ToC is rebuilt from the document, not kept.
+        out.raw << (raw.contains(QLatin1String("text:name=\"zwriter-toc\"")) ? QString() : raw);
     }
-    if (out.raw.isEmpty()) {
+    bool anyKept = false;
+    for (const QString &r : std::as_const(out.raw)) {
+        anyKept = anyKept || !r.isEmpty();
+    }
+    if (!anyKept) {
+        out.raw.clear();
         return out;
     }
     static const QRegularExpression rootRe(QStringLiteral(R"(<office:document-content\b[^>]*>)"));
@@ -1199,6 +1207,7 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
     bool atLineStart = true;   // ODF: leading whitespace of a paragraph/line is dropped
     bool tabJustWritten = false; // last thing emitted was a text:tab element
     int tocCurrent = -1; // inside the n-th text:table-of-content
+    bool generatedToc = false; // inside zwriter's own ToC
     int tocCount = 0;
 
     // Open text:span elements, innermost last: each entry is the markup that
@@ -1310,7 +1319,11 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
         pendingSpace = false;
         atLineStart = true;
         QString css = blockCss(info, level);
-        if (tocCurrent >= 0) {
+        if (generatedToc) {
+            static const QRegularExpression lvlRe(QStringLiteral(R"(^Contents_20_(\d)$)"));
+            const QRegularExpressionMatch m = lvlRe.match(styleName);
+            css += QStringLiteral("-qt-user-state:%1;").arg(kGeneratedTocState + (m.hasMatch() ? m.captured(1).toInt() : 0));
+        } else if (tocCurrent >= 0) {
             css += QStringLiteral("-qt-user-state:%1;").arg(kTocUserState + tocCurrent);
         }
         QString styleAttr = QStringLiteral(" style=\"%1\"").arg(css);
@@ -1443,6 +1456,10 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
             if (name == QLatin1String("table-of-content") && reader.prefix() == QLatin1String("text")) {
                 closeParagraph();
                 tocCurrent = tocCount++;
+                if (reader.attributes().value(QStringLiteral("text:name")) == QLatin1String("zwriter-toc")) {
+                    generatedToc = true;
+                    tocCurrent = -1;
+                }
             } else if (name == QLatin1String("table-of-content-source")) {
                 reader.skipCurrentElement(); // templates, not text
                 continue;
@@ -1624,6 +1641,7 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
             } else if (name == QLatin1String("table-of-content")) {
                 closeParagraph();
                 tocCurrent = -1;
+                generatedToc = false;
             }
         } else if (token == QXmlStreamReader::Characters && inP) {
             if (!reader.isWhitespace()) {
@@ -1804,6 +1822,28 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
     doc->setProperty("zwriter.odtTocStyles", tocs.styles);
     doc->setProperty("zwriter.odtTocNs", tocs.ns);
     doc->setHtml(odtXmlToHtml(xml, stylesXml, imageMembers));
+    {
+        QTextCursor mark(doc);
+        for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+            const int st = b.userState();
+            if (st >= kGeneratedTocState && st < kGeneratedTocState + 16) {
+                b.setUserState(-1);
+                mark.setPosition(b.position());
+                QTextBlockFormat f;
+                if (st == kGeneratedTocState) {
+                    f.setProperty(GeneratedTocTitleProperty, true);
+                } else {
+                    f.setProperty(GeneratedTocProperty, st - kGeneratedTocState);
+                }
+                mark.mergeBlockFormat(f);
+                if (b.text().endsWith(QLatin1Char('\t'))) { // the empty page-number tab
+                    QTextCursor tab(b);
+                    tab.movePosition(QTextCursor::EndOfBlock);
+                    tab.deletePreviousChar();
+                }
+            }
+        }
+    }
     if (!tocs.raw.isEmpty()) {
         QTextCursor mark(doc);
         for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
@@ -2001,6 +2041,94 @@ QString framePatchedContent(const QString &xml, const QList<Images::Wrap> &wraps
 
 // Put the original tables of contents back over the paragraphs that show
 // them (Qt's writer would save them as plain paragraphs).
+// zwriter's generated ToC as a real ODF table of contents: LibreOffice shows
+// the dot leaders, and its page numbers once updated there.
+QString generatedTocContent(const QString &src, const QTextDocument *copy)
+{
+    QSet<QString> tocStyles;
+    QString title = QStringLiteral("Contents");
+    QString body;
+    int maxLevel = 1;
+    for (QTextBlock b = copy->begin(); b.isValid(); b = b.next()) {
+        const QTextBlockFormat f = b.blockFormat();
+        if (f.hasProperty(GeneratedTocTitleProperty)) {
+            tocStyles.insert(QStringLiteral("p%1").arg(b.blockFormatIndex()));
+            title = b.text();
+        } else if (f.hasProperty(GeneratedTocProperty)) {
+            tocStyles.insert(QStringLiteral("p%1").arg(b.blockFormatIndex()));
+            const int level = qBound(1, f.intProperty(GeneratedTocProperty), 9);
+            maxLevel = qMax(maxLevel, level);
+            body += QStringLiteral("<text:p text:style-name=\"Contents_20_%1\">%2<text:tab/></text:p>")
+                        .arg(level)
+                        .arg(b.text().toHtmlEscaped());
+        }
+    }
+    if (tocStyles.isEmpty()) {
+        return src;
+    }
+    static const QRegularExpression paraRe(QStringLiteral(
+        R"re(<text:(p|h)\b[^>]*?text:style-name="(p\d+)"[^>]*?(?:/>|>.*?</text:\1>))re"),
+        QRegularExpression::DotMatchesEverythingOption);
+    qsizetype start = -1;
+    qsizetype end = -1;
+    auto it = paraRe.globalMatch(src);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        if (tocStyles.contains(m.captured(2))) {
+            if (start < 0) {
+                start = m.capturedStart(0);
+            }
+            end = m.capturedEnd(0);
+        } else if (start >= 0) {
+            break; // one contiguous table
+        }
+    }
+    if (start < 0) {
+        return src;
+    }
+    QString templates;
+    for (int l = 1; l <= maxLevel; ++l) {
+        templates += QStringLiteral(
+            "<text:table-of-content-entry-template text:outline-level=\"%1\" text:style-name=\"Contents_20_%1\">"
+            "<text:index-entry-text/><text:index-entry-tab-stop style:type=\"right\" style:leader-char=\".\"/>"
+            "<text:index-entry-page-number/></text:table-of-content-entry-template>").arg(l);
+    }
+    const QString toc = QStringLiteral(
+        "<text:table-of-content text:style-name=\"Sect_zwToc\" text:protected=\"true\" text:name=\"zwriter-toc\">"
+        "<text:table-of-content-source text:outline-level=\"%1\">"
+        "<text:index-title-template text:style-name=\"Contents_20_Heading\">%2</text:index-title-template>%3"
+        "</text:table-of-content-source><text:index-body>"
+        "<text:index-title text:style-name=\"Sect_zwToc\" text:name=\"zwriter-toc_Head\">"
+        "<text:p text:style-name=\"Contents_20_Heading\">%2</text:p></text:index-title>%4"
+        "</text:index-body></text:table-of-content>")
+                            .arg(maxLevel)
+                            .arg(title.toHtmlEscaped(), templates, body);
+    QString out = src;
+    out.replace(start, end - start, toc);
+    // Styles: a right tab with dot leaders at the text column's edge.
+    QString styles = QStringLiteral(
+        "<style:style style:name=\"Sect_zwToc\" style:family=\"section\"><style:section-properties style:editable=\"false\"/></style:style>"
+        "<style:style style:name=\"Contents_20_Heading\" style:display-name=\"Contents Heading\" style:family=\"paragraph\">"
+        "<style:paragraph-properties fo:margin-bottom=\"0.25cm\"/><style:text-properties fo:font-size=\"16pt\" fo:font-weight=\"bold\"/></style:style>");
+    for (int l = 1; l <= maxLevel; ++l) {
+        styles += QStringLiteral(
+            "<style:style style:name=\"Contents_20_%1\" style:display-name=\"Contents %1\" style:family=\"paragraph\">"
+            "<style:paragraph-properties fo:margin-left=\"%2cm\" fo:margin-top=\"%3cm\"><style:tab-stops>"
+            "<style:tab-stop style:position=\"%4cm\" style:type=\"right\" style:leader-style=\"dotted\" style:leader-text=\".\"/>"
+            "</style:tab-stops></style:paragraph-properties>%5</style:style>")
+                      .arg(l)
+                      .arg(QString::number(0.6 * (l - 1), 'f', 2))
+                      .arg(l == 1 ? QStringLiteral("0.15") : QStringLiteral("0"))
+                      .arg(QString::number(16.0 - 0.6 * (l - 1), 'f', 2))
+                      .arg(l == 1 ? QStringLiteral("<style:text-properties fo:font-weight=\"600\"/>") : QString());
+    }
+    const qsizetype at = out.indexOf(QLatin1String("</office:automatic-styles>"));
+    if (at >= 0) {
+        out.insert(at, styles);
+    }
+    return out;
+}
+
 QString tocRestoredContent(const QString &src, const QTextDocument *copy, const QTextDocument *original)
 {
     const QStringList raw = original->property("zwriter.odtTocs").toStringList();
@@ -2124,7 +2252,12 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error, co
         }
         anyLineHeight = anyLineHeight || b.blockFormat().hasProperty(QTextFormat::LineHeight);
     }
-    const bool anyToc = source && !source->property("zwriter.odtTocs").toStringList().isEmpty();
+    bool anyGeneratedToc = false;
+    for (QTextBlock b = doc->begin(); b.isValid() && !anyGeneratedToc; b = b.next()) {
+        anyGeneratedToc = b.blockFormat().hasProperty(GeneratedTocProperty)
+            || b.blockFormat().hasProperty(GeneratedTocTitleProperty);
+    }
+    const bool anyToc = anyGeneratedToc || (source && !source->property("zwriter.odtTocs").toStringList().isEmpty());
     if (headingStyles.isEmpty() && tables.isEmpty() && textStyleFamilies.isEmpty() && !anyFloat
         && namedStyles.isEmpty() && !anyLineHeight && !anyToc) {
         return true;
@@ -2184,7 +2317,10 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error, co
     if (anyLineHeight) {
         patched.replace(QLatin1String(" style:line-height=\""), QLatin1String(" fo:line-height=\""));
     }
-    if (anyToc) {
+    if (anyGeneratedToc) {
+        patched = generatedTocContent(patched, doc);
+    }
+    if (anyToc && source) {
         patched = tocRestoredContent(patched, doc, source);
     }
     if (patched == original) {

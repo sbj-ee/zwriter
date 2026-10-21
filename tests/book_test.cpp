@@ -739,7 +739,7 @@ void sidebarTests()
     delete menu;
     check(texts == QStringList({"Open", "Edit Details…", "Rename", "Move Up(off)", "Move Down",
                                 "Remove from Book…", "New Chapter…", "Add Existing Chapters…",
-                                "New Book…", "Change Library Folder…"}),
+                                "New Book…", "Insert/Update Table of Contents", "Change Library Folder…"}),
           "S  context menu", texts.join(" | "));
 
     // Outside paths: refused with a message, the book unchanged.

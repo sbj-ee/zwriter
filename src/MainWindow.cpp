@@ -1,6 +1,7 @@
 #include "MainWindow.hpp"
 #include "ParagraphDialog.hpp"
 #include "ParagraphStyles.hpp"
+#include "BookToc.hpp"
 #include "Ruler.hpp"
 #include "Images.hpp"
 #include "ImagePropertiesDialog.hpp"
@@ -269,6 +270,10 @@ MainWindow::MainWindow(QWidget *parent)
         showSidebar(true);
     });
     connect(m_book, &BookSidebar::currentBookChanged, this, [this]() { saveBookSettings(); });
+    // A generated table of contents follows the book: reorders, renames,
+    // chapters added or removed.
+    connect(m_book, &BookSidebar::bookChanged, this, [this]() { refreshBookToc(); });
+    connect(m_book, &BookSidebar::tocRequested, this, [this]() { insertBookToc(); });
     connect(m_book, &BookSidebar::chooseLibraryRequested, this, &MainWindow::chooseLibraryFolder);
     connect(m_book, &BookSidebar::message, this,
             [this](const QString &text) { statusBar()->showMessage(text, 6000); });
@@ -599,6 +604,15 @@ void MainWindow::buildFileMenu()
     connect(saveAsAct, &QAction::triggered, this, &MainWindow::fileSaveAs);
 
     m_fileMenu->addSeparator();
+
+    m_tocAction = m_fileMenu->addAction(QStringLiteral("Insert/Update &Table of Contents"));
+    m_tocAction->setObjectName(QStringLiteral("fileToc"));
+    m_tocAction->setToolTip(QStringLiteral("The book's chapters and their headings, in book order, at the cursor "
+                                           "(or updates the one already in this document)"));
+    connect(m_tocAction, &QAction::triggered, this, [this]() { insertBookToc(); });
+    connect(m_fileMenu, &QMenu::aboutToShow, this, [this]() {
+        m_tocAction->setEnabled(m_book && m_book->hasBook() && !m_markdownMode);
+    });
 
     auto *exportAct = m_fileMenu->addAction(QStringLiteral("&Export as PDF…"));
     exportAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
@@ -2208,6 +2222,32 @@ bool MainWindow::insertMarkdownPicture(const QByteArray &data)
     return true;
 }
 
+bool MainWindow::insertBookToc()
+{
+    if (m_markdownMode || !m_book || !m_book->hasBook()) {
+        statusBar()->showMessage(QStringLiteral("Open a book (and an .odt or new document) to insert its table of contents."), 5000);
+        return false;
+    }
+    QTextCursor at = m_editor->textCursor();
+    const bool had = BookToc::hasToc(m_editor->document());
+    BookToc::insertOrUpdate(m_editor->document(), &at, BookToc::entries(m_book->book(), 2, m_currentPath));
+    if (!at.block().next().isValid()) {
+        at.movePosition(QTextCursor::End);
+        at.insertBlock(QTextBlockFormat(), QTextCharFormat());
+    }
+    statusBar()->showMessage(had ? QStringLiteral("Table of contents updated") : QStringLiteral("Table of contents inserted"), 4000);
+    m_editor->setFocus();
+    return true;
+}
+
+bool MainWindow::refreshBookToc()
+{
+    if (m_markdownMode || !m_book || !m_book->hasBook() || !BookToc::hasToc(m_editor->document())) {
+        return false;
+    }
+    return BookToc::insertOrUpdate(m_editor->document(), nullptr, BookToc::entries(m_book->book(), 2, m_currentPath));
+}
+
 bool MainWindow::addCaption(int position)
 {
     QTextDocument *doc = m_editor->document();
@@ -3291,6 +3331,10 @@ bool MainWindow::openPath(const QString &path)
             QStringLiteral("Note: this file mixes line endings or is not valid UTF-8; "
                            "saving will normalise it"),
             8000);
+    }
+    // A generated table of contents catches up with chapters edited since.
+    if (refreshBookToc()) {
+        statusBar()->showMessage(QStringLiteral("Table of contents updated to the current book"), 5000);
     }
     return true;
 }

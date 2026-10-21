@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.7.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.8.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -108,6 +108,7 @@ never installed.
 - **Header & Footer** (Format → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; **page numbers are opt-in and off by default** — Format → Page Numbers adds `{page}` to an empty footer band (centre first) and removes only what it added, so custom header/footer text survives an off/on cycle; drawn on every page
 - **Paragraph alignment** — Format → Align or the toolbar: Align Left (`Ctrl+L`), Center (`Ctrl+E`), Align Right (`Ctrl+R`), Justify (`Ctrl+J`); `Cmd` on macOS. Applies to the paragraph at the cursor or every paragraph a selection touches, as one undo step; choosing the alignment a paragraph already has changes nothing (no undo step, no unsaved-changes mark). Enter in an empty centered line keeps the centering. Saved to ODT (`fo:text-align`) and RTF (`\ql \qc \qr \qj`), and honoured in Full Page view, print, Print Preview and PDF; the last line of a justified paragraph stays ragged, as in other word processors
 - **Paragraph formatting** — Format → Paragraph… sets left/right/first-line/hanging indents, spacing before/after, line spacing and alignment; Increase/Decrease Indent (`Ctrl+M` / `Ctrl+Shift+M`); View → Ruler (off by default) shows and drags the indents. Styles Title, Subtitle, Block Quote, Caption and Bibliography (hanging indent). Saved to ODT (`fo:margin-*`, `fo:text-indent`, `fo:line-height`, named styles) and RTF (`\li \ri \fi \sb \sa \sl`)
+- **Table of contents** — File → Insert/Update Table of Contents (or the Book sidebar menu) inserts the open book's chapters, in book order, with their headings; it updates itself when chapters are reordered, added or renamed, and is saved as a real ODF table of contents (dot leaders in LibreOffice)
 - **Manual page break** (Format → Insert Page Break, `Ctrl+Enter`): splits the paragraph and starts a new page; Backspace at the start of the new page removes it. Saved to ODT (`fo:break-before="page"`) and honoured in Full Page view, print and PDF
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
 - **Help** menu: About zwriter (shows PROJECT_VERSION), Check for Updates and Check for Updates at Startup — see [Updates](#updates)
@@ -229,7 +230,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.7.0 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.8.0 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:

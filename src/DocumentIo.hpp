@@ -57,6 +57,11 @@ bool markdownLoadWasLossy(const QTextDocument *doc);
 // (value: index of the table in the file). Saving to ODT writes the original
 // table back in their place, unchanged (see the "zwriter.odtTocs" property).
 constexpr int TocProperty = 0x100000 + 0x5B01; // QTextFormat::UserProperty + 0x5B01
+// A table of contents zwriter generated (BookToc): entry paragraphs carry
+// their level (1 = chapter), the "Contents" title paragraph TocTitleProperty.
+// Saved to ODT as a text:table-of-content named "zwriter-toc", read back the same.
+constexpr int GeneratedTocProperty = 0x100000 + 0x5C01;
+constexpr int GeneratedTocTitleProperty = 0x100000 + 0x5C02;
 bool load(QTextDocument *doc, const QString &path, QString *error = nullptr);
 bool save(QTextDocument *doc, const QString &path, Format format, QString *error = nullptr);
 
