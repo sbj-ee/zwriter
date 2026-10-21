@@ -1,3 +1,5 @@
+#include <QDateTime>
+#include <QHash>
 #include "BookManifest.hpp"
 
 #include <QDir>
@@ -431,8 +433,49 @@ bool BookManifest::isChapterSuffix(const QString &suffix)
     return s == QLatin1String("md") || s == QLatin1String("txt") || s == QLatin1String("odt");
 }
 
+namespace {
+// Word counts by file, reused while the file's size and time are unchanged:
+// the sidebar recounts every chapter on each refresh, and loading an ODT
+// (unzip, pictures) for each one made the whole window lag.
+struct CachedCount {
+    QDateTime modified;
+    qint64 size = -1;
+    int words = -1;
+};
+QHash<QString, CachedCount> &wordCache()
+{
+    static QHash<QString, CachedCount> cache;
+    return cache;
+}
+int g_fileCounts = 0;
+int countWordsUncached(const QString &path);
+} // namespace
+
+int wordCountFileReads()
+{
+    return g_fileCounts;
+}
+
 int countWordsInFile(const QString &path)
 {
+    const QFileInfo info(path);
+    if (!info.isFile()) {
+        wordCache().remove(path);
+        return -1;
+    }
+    auto it = wordCache().constFind(path);
+    if (it != wordCache().cend() && it->modified == info.lastModified() && it->size == info.size()) {
+        return it->words;
+    }
+    const int words = countWordsUncached(path);
+    wordCache().insert(path, {info.lastModified(), info.size(), words});
+    return words;
+}
+
+namespace {
+int countWordsUncached(const QString &path)
+{
+    ++g_fileCounts;
     if (QFileInfo(path).suffix().compare(QLatin1String("odt"), Qt::CaseInsensitive) == 0) {
         // The editor's own ODT load path (content.xml text), so the count
         // matches what opens.
@@ -451,6 +494,7 @@ int countWordsInFile(const QString &path)
     }
     return countWords(QString::fromUtf8(f.readAll()));
 }
+} // namespace
 
 bool BookManifest::naturalLess(const QString &a, const QString &b)
 {
