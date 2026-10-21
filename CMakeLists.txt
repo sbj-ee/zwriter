@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.8.0 LANGUAGES CXX)
+project(zwriter VERSION 1.9.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -150,6 +150,8 @@ add_executable(zwriter
   src/BookSidebar.cpp
   src/BookToc.cpp
   src/BookToc.hpp
+  src/Captions.cpp
+  src/Captions.hpp
   src/BookSidebar.hpp
   src/icons.qrc
   src/ui.qrc
@@ -356,6 +358,19 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(book_toc_test PRIVATE Qt6::Gui)
   add_test(NAME book_toc COMMAND book_toc_test)
   set_tests_properties(book_toc PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+  add_executable(captions_test
+    tests/captions_test.cpp
+    src/Captions.cpp
+    src/DocumentIo.cpp
+    src/Images.cpp
+    src/ParagraphStyles.cpp
+    src/Alignment.cpp
+  )
+  target_include_directories(captions_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(captions_test PRIVATE Qt6::Gui)
+  add_test(NAME captions COMMAND captions_test)
+  set_tests_properties(captions PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
   # GUI-test regressions: print scale, ODT manifest/styles, RTF import/export, tables.
   add_executable(regression_test

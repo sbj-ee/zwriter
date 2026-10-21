@@ -22,6 +22,7 @@
 #include "MainWindow.hpp"
 #include <QMenu>
 #include "BookToc.hpp"
+#include "Captions.hpp"
 #include <QLabel>
 #include <QProcess>
 #include <QComboBox>
@@ -642,7 +643,7 @@ void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
         const int pos = 0;
         check(win.addCaption(pos), "K Add Caption under a picture");
         const QTextBlock cap = ed->document()->findBlockByNumber(1);
-        check(cap.text() == QLatin1String("Caption"), "K caption paragraph follows the picture", cap.text());
+        check(cap.text() == QLatin1String("Figure 1. Caption"), "K caption paragraph follows the picture (numbered)", cap.text());
         check(cap.blockFormat().alignment() & Qt::AlignHCenter, "K caption is centred");
         check(cap.begin().fragment().charFormat().fontItalic(), "K caption is italic");
         check(ed->textCursor().selectedText() == QLatin1String("Caption"), "K caption text is selected for typing");
@@ -1227,6 +1228,89 @@ void testBookToc(const QString &root)
     ed->document()->setModified(false);
 }
 
+// 1.9.0: Insert Caption numbers figures "Figure <chapter>.<n>"; they follow
+// edits and the chapter's place in the book.
+void testFigureNumbers(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/figLib");
+    const QString dir = lib + QStringLiteral("/Birds");
+    QDir().mkpath(dir);
+    {
+        QFile f(dir + QStringLiteral("/01 Intro.md"));
+        f.open(QIODevice::WriteOnly);
+        f.write("# Intro\n");
+    }
+    QImage img(60, 30, QImage::Format_RGB32);
+    img.fill(Qt::darkBlue);
+    const QString pic = dir + QStringLiteral("/swan.png");
+    img.save(pic);
+    {
+        QTextDocument d;
+        d.setPlainText(QStringLiteral("Waterfowl"));
+        DocumentIo::save(&d, dir + QStringLiteral("/02 Waterfowl.odt"), DocumentIo::Format::Odt);
+    }
+    MainWindow w;
+    w.resize(1100, 800);
+    w.show();
+    wait(50);
+    auto *side = w.findChild<BookSidebar *>();
+    side->setRootPath(lib);
+    side->createBook(QStringLiteral("Birds"));
+    check(w.openPathForTest(dir + QStringLiteral("/02 Waterfowl.odt")) && w.chapterNumber() == 2, "N chapter 2 open");
+    QTextEdit *ed = editorOf(w);
+    auto addFigure = [&](const QString &text) {
+        QTextCursor c(ed->document());
+        c.movePosition(QTextCursor::End);
+        c.insertBlock(QTextBlockFormat(), QTextCharFormat()); // a body paragraph for the picture
+        ed->setTextCursor(c);
+        w.insertImageFile(pic);
+        int pos = -1;
+        for (QTextBlock b = ed->document()->begin(); b.isValid(); b = b.next()) {
+            for (auto f = b.begin(); !f.atEnd(); ++f) {
+                if (f.fragment().charFormat().isImageFormat()) {
+                    pos = f.fragment().position();
+                }
+            }
+        }
+        w.addCaption(pos);
+        QTest::keyClicks(ed, text); // types over the selected word "Caption"
+    };
+    addFigure(QStringLiteral("Trumpeter swan"));
+    addFigure(QStringLiteral("Mallards"));
+    auto caps = [&]() {
+        QStringList l;
+        for (QTextBlock b = ed->document()->begin(); b.isValid(); b = b.next()) {
+            if (Captions::isCaption(b)) {
+                l << b.text();
+            }
+        }
+        return l.join(QStringLiteral(" | "));
+    };
+    check(caps() == QLatin1String("Figure 2.1. Trumpeter swan | Figure 2.2. Mallards"), "N Insert Caption numbers figures", caps());
+    // Delete the first figure's caption paragraph: the other becomes 2.1.
+    for (QTextBlock b = ed->document()->begin(); b.isValid(); b = b.next()) {
+        if (Captions::isCaption(b)) {
+            QTextCursor d(b);
+            d.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+            d.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+            d.removeSelectedText();
+            break;
+        }
+    }
+    wait(400);
+    check(caps() == QLatin1String("Figure 2.1. Mallards"), "N removing a figure renumbers the rest", caps());
+    ed->document()->undo();
+    wait(400);
+    check(caps() == QLatin1String("Figure 2.1. Trumpeter swan | Figure 2.2. Mallards"), "N one Undo brings the caption and its numbers back", caps());
+    ed->document()->redo();
+    wait(400);
+    check(caps() == QLatin1String("Figure 2.1. Mallards") && !ed->document()->isRedoAvailable(), "N and Redo still works", caps());
+    side->moveChapter(1, 0);
+    QApplication::processEvents();
+    check(caps() == QLatin1String("Figure 1.1. Mallards"), "N moving the chapter in the book renumbers", caps());
+    ed->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -1242,6 +1326,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_FIGURES")) { // quick local runs
+        testFigureNumbers(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_TOC")) { // quick local runs
         testBookToc(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);

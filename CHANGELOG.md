@@ -3,6 +3,22 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.9.0] — unreleased
+
+Automatic figure numbers.
+
+- **Insert Caption numbers the figure**: "Figure 3.2. Caption", where 3 is the chapter's place
+  in the open book (as in the sidebar) and 2 the figure's place in the chapter. Outside a book
+  it is "Figure 2.". The word "Caption" is selected, so you type the caption right over it.
+- **Numbers follow the text.** Adding, removing, cutting or pasting figures renumbers the
+  captions a moment later; moving the chapter in the book renumbers them at once; opening a
+  chapter brings its numbers up to date. A number typed by hand ("Figure 7.") is corrected.
+- The label is ordinary text at the start of each Caption paragraph, so it is in every file
+  format and in PDF.
+- Tests: `captions_test` (labels, order, moves, chapter change, ODT round trip),
+  `mainwindow_test` N (Insert Caption, removing a figure, moving the chapter). Screenshot
+  `figure-numbers.png`.
+
 ## [1.8.0] — unreleased
 
 Generated table of contents for a book.
