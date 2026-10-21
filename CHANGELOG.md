@@ -17,6 +17,10 @@ the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
   over the open book. With no book yet it still starts one.
 - **Right-click menu**: New Chapter…, Add Existing Chapters… and New Book….
 - **File menu**: New Book… and New Chapter…. Both show the Book sidebar first.
+- **Fix: Insert Image no longer replaces selected text.** With text selected, Format → Insert
+  Image… (and Insert Image in a Markdown document) used to put the picture in place of the
+  selection. Now the selection is kept and the picture goes at its end. Paste still replaces a
+  selection, as paste does everywhere. `images_test` S covers it, including a backwards selection.
 - Tests: `book_test` N (file names, all three formats, book.json order, opening, the "+" menu,
   "New" with a book open), `mainwindow_test` B (File menu actions). Screenshots
   `book-new-chapter-dialog.png`, `book-add-menu.png`, `file-menu-books.png`.

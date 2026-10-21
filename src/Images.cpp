@@ -217,6 +217,11 @@ bool insertImage(QTextCursor &cursor, const QByteArray &data, QString *message)
     f.setName(name);
     f.setWidth(qRound(w));
     f.setHeight(qRound(h));
+    // Insert at the caret, never over selected text: a selection collapses
+    // to its end first (1.5.4 fix).
+    if (cursor.hasSelection()) {
+        cursor.setPosition(cursor.selectionEnd());
+    }
     cursor.beginEditBlock();
     cursor.insertImage(f);
     cursor.endEditBlock();
