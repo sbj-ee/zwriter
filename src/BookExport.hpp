@@ -39,6 +39,9 @@ struct Options {
     bool toc = true;
     bool titlePage = true;
     bool figureNumbers = true; // "Figure <chapter>.<n>." labels; off = labels removed
+    // Without the ToC: still find each chapter's and heading's page (Result::toc),
+    // for the editor's own generated table of contents.
+    bool pagesOnly = false;
 };
 
 struct TocLine {

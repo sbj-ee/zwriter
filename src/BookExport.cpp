@@ -263,7 +263,7 @@ Result build(const BookManifest &book, const Options &options, const PrintLayout
         }
     }
 
-    if (tocPos < 0) {
+    if (tocPos < 0 && !options.pagesOnly) {
         PrintLayout::preparePages(doc, page);
         return r;
     }
@@ -292,8 +292,13 @@ Result build(const BookManifest &book, const Options &options, const PrintLayout
 
     // Placeholder lines (one line each, so filling in numbers keeps the pages).
     const qreal width = PrintLayout::textWidth(page);
-    c.setPosition(tocPos);
+    if (tocPos >= 0) {
+        c.setPosition(tocPos);
+    }
     for (const TocLine &line : lines) {
+        if (tocPos < 0) {
+            break; // pages only: no ToC in this book
+        }
         QTextBlockFormat bf;
         bf.setProperty(TocEntryProperty, line.level);
         bf.setLeftMargin(line.level > 1 ? 24 : 0);
@@ -311,6 +316,17 @@ Result build(const BookManifest &book, const Options &options, const PrintLayout
         }
     }
 
+    if (tocPos < 0) {
+        for (int n = 0; n < lines.size(); ++n) {
+            lines[n].page = pageOfAnchor.value(n + 1);
+        }
+        r.toc = lines;
+        return r;
+    }
+    // One edit block for all the numbers: the layout is redone once at the end,
+    // not after every line (that took ~10 s for a 275-page book).
+    QTextCursor batch(doc);
+    batch.beginEditBlock();
     int k = 0;
     for (QTextBlock b = doc->begin(); b.isValid() && k < lines.size(); b = b.next()) {
         const QTextBlockFormat f = b.blockFormat();
@@ -336,6 +352,7 @@ Result build(const BookManifest &book, const Options &options, const PrintLayout
         bc.insertText(title + QLatin1Char(' ') + QStringLiteral(". ").repeated(dots).trimmed() + QLatin1Char('\t') + num,
                       cf);
     }
+    batch.endEditBlock();
     r.toc = lines;
     return r;
 }

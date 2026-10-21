@@ -14,6 +14,7 @@ class QVBoxLayout;
 // whenever it relayouts (resize, style/font change). This subclass re-applies a
 // fixed page size afterwards, so the document really paginates (A4 pages with
 // margins) and page count / page breaks work.
+class QPainter;
 class PageTextEdit : public QTextEdit
 {
     Q_OBJECT
@@ -43,6 +44,8 @@ public:
     // unzoomed document coordinates: convert with toView() / toDocument().
     void setZoom(qreal zoom);
     qreal zoom() const { return m_zoom; }
+    // Dot leaders across the tab of table-of-contents lines (painted only).
+    void paintLeaders(QPainter *p, const QRectF &docClip) const;
     bool isZoomed() const { return m_zoom != 1.0; }
     QPoint toDocument(const QPoint &viewportPos) const;
     QRect toView(const QRectF &documentRect) const;

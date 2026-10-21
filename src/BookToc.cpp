@@ -161,6 +161,11 @@ QString plainText(const QList<Entry> &entries)
     return s;
 }
 
+QString lineText(const Entry &e)
+{
+    return e.page > 0 ? e.text + QLatin1Char('\t') + QString::number(e.page) : e.text;
+}
+
 bool insertOrUpdate(QTextDocument *doc, QTextCursor *at, const QList<Entry> &list)
 {
     // The current ToC (first run of marked paragraphs).
@@ -182,7 +187,7 @@ bool insertOrUpdate(QTextDocument *doc, QTextCursor *at, const QList<Entry> &lis
     }
     QList<QPair<int, QString>> wanted;
     for (const Entry &e : list) {
-        wanted.append({e.level, e.text});
+        wanted.append({e.level, lineText(e)});
     }
     if (first.isValid() && current == wanted) {
         return false;
@@ -224,7 +229,7 @@ bool insertOrUpdate(QTextDocument *doc, QTextCursor *at, const QList<Entry> &lis
         cf.setFontWeight(e.level == 1 ? QFont::DemiBold : QFont::Normal);
         cf.setFontPointSize(e.level == 1 ? 12 : 11);
         c.insertBlock(bf, cf);
-        c.insertText(e.text, cf);
+        c.insertText(lineText(e), cf);
     }
     c.endEditBlock();
     if (at) {
