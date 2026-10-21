@@ -1249,7 +1249,6 @@ int main(int argc, char **argv)
     }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_PARAGRAPH")) { // quick local runs
         testParagraphFormatting();
-    testReportFixes(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }
@@ -1306,6 +1305,7 @@ int main(int argc, char **argv)
     testBookFeedback(dataDir.path(), prompts);
     testPageGuidesContainText();
     testParagraphFormatting();
+    testReportFixes(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }
