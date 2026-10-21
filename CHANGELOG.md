@@ -3,7 +3,18 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [1.10.0] — unreleased
+## [1.10.1] — unreleased
+
+Docs only; no code changes.
+
+- CHANGELOG: 1.5.4 to 1.10.0 dated 2026-10-21; 1.5.4 to 1.9.0 marked as shipped in 1.10.0.
+- README: whole-book export, the generated table of contents, Print Book, figure numbers,
+  paragraph styles, pictures and the Book sidebar are described as shipped. Removed the lines
+  that still called them planned, and the claims that ODT drops pictures and paragraph
+  indents/spacing. The menu lists, the style dropdown and the Formats table now match the app,
+  and the whole-book export limits are listed.
+
+## [1.10.0] — 2026-10-21
 
 Export and print the whole book.
 
@@ -22,7 +33,7 @@ Export and print the whole book.
   structure), `mainwindow_test` X (menus, export, Print Book to a PDF printer). Screenshots
   `book-export-menu.png`, `book-export-sidebar.png`, `book-export-dialog.png`, `book-export-pdf.png`.
 
-## [1.9.0] — unreleased
+## [1.9.0] — 2026-10-21 (not released separately; shipped in 1.10.0)
 
 Automatic figure numbers.
 
@@ -38,7 +49,7 @@ Automatic figure numbers.
   `mainwindow_test` N (Insert Caption, removing a figure, moving the chapter). Screenshot
   `figure-numbers.png`.
 
-## [1.8.0] — unreleased
+## [1.8.0] — 2026-10-21 (not released separately; shipped in 1.10.0)
 
 Generated table of contents for a book.
 
@@ -57,7 +68,7 @@ Generated table of contents for a book.
 - Tests: `book_toc_test` (entries, update, ODT write/read, LibreOffice reads it when installed),
   `mainwindow_test` T (menu, reorder, sidebar menu). Screenshot `book-toc.png`.
 
-## [1.7.0] — unreleased
+## [1.7.0] — 2026-10-21 (not released separately; shipped in 1.10.0)
 
 Paragraph formatting.
 
@@ -79,7 +90,7 @@ Paragraph formatting.
   ruler drag, Paragraph… OK, style list, a reopened Bibliography paragraph). Screenshots
   `para-styles-ruler.png`, `para-dialog.png`, `para-style-list.png`.
 
-## [1.6.0] — unreleased
+## [1.6.0] — 2026-10-21 (not released separately; shipped in 1.10.0)
 
 Book sidebar usability, guided by the Birds of the Midwest test.
 
@@ -111,7 +122,7 @@ Book sidebar usability, guided by the Birds of the Midwest test.
   (1.5.3) and after: `book-usability-before.png` / `book-usability-after.png`,
   `book-empty-before.png` / `book-empty-after.png`, `book-menu-before.png` / `book-menu-after.png`.
 
-## [1.5.4] — unreleased
+## [1.5.4] — 2026-10-21 (not released separately; shipped in 1.10.0)
 
 - **New Chapter.** You can now make a new chapter from inside the Book sidebar. It asks for a title
   and a format (.odt, .md or .txt; the default is the format most chapters in the book already
