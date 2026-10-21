@@ -20,6 +20,8 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
+#include <QPainter>
+#include <QStyledItemDelegate>
 #include <QLocale>
 #include <QMenu>
 #include <QMessageBox>
@@ -33,6 +35,40 @@
 namespace {
 constexpr int PathRole = Qt::UserRole + 1;
 }
+
+// The open chapter gets an accent bar at its left edge and bold text; the
+// highlighted (selected) row is the plain highlight; a right-clicked row is
+// outlined while its menu is open. The three can differ, and you can tell.
+class ChapterDelegate : public QStyledItemDelegate
+{
+public:
+    ChapterDelegate(const BookSidebar *side, QObject *parent) : QStyledItemDelegate(parent), m_side(side) {}
+    void initStyleOption(QStyleOptionViewItem *opt, const QModelIndex &index) const override
+    {
+        QStyledItemDelegate::initStyleOption(opt, index);
+        if (index.data(BookSidebar::OpenRole).toBool()) {
+            opt->font.setBold(true);
+        }
+    }
+    void paint(QPainter *p, const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        QStyledItemDelegate::paint(p, option, index);
+        const QColor accent = m_side->accentColor();
+        p->save();
+        if (index.data(BookSidebar::OpenRole).toBool()) {
+            p->fillRect(QRect(option.rect.left(), option.rect.top(), 4, option.rect.height()), accent);
+        }
+        if (index.data(BookSidebar::ContextRole).toBool()) {
+            p->setPen(QPen(accent, 1, Qt::DashLine));
+            p->setBrush(Qt::NoBrush);
+            p->drawRect(option.rect.adjusted(1, 1, -2, -2));
+        }
+        p->restore();
+    }
+
+private:
+    const BookSidebar *m_side;
+};
 
 BookSidebar::BookSidebar(QWidget *parent)
     : QWidget(parent)
@@ -178,6 +214,7 @@ BookSidebar::BookSidebar(QWidget *parent)
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->setFocusPolicy(Qt::StrongFocus); // Tab reaches it: arrows, Enter, F2, Delete
+    m_view->setItemDelegate(new ChapterDelegate(this, m_view));
     m_view->setDragDropOverwriteMode(false);
     m_view->installEventFilter(this);
     connect(m_view, &QListWidget::itemChanged, this, [this](QListWidgetItem *item) {
@@ -206,12 +243,13 @@ BookSidebar::BookSidebar(QWidget *parent)
     connect(m_view, &QListWidget::itemClicked, this, &BookSidebar::onItemClicked);
     connect(m_view, &QListWidget::itemActivated, this, &BookSidebar::onItemClicked);
     connect(m_view, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        // Right-click does not select or open the row; the menu names the chapter
+        // it acts on, and the row is outlined while the menu is open.
         QListWidgetItem *item = m_view->itemAt(pos);
-        if (item) {
-            m_view->setCurrentItem(item);
-        }
         QMenu *menu = buildContextMenu(item ? m_view->row(item) : -1);
         menu->setAttribute(Qt::WA_DeleteOnClose);
+        setContextRow(item ? m_view->row(item) : -1);
+        connect(menu, &QMenu::aboutToHide, this, [this]() { setContextRow(-1); });
         menu->popup(m_view->viewport()->mapToGlobal(pos));
     });
     layout->addWidget(m_view, 1);
@@ -284,8 +322,9 @@ int BookSidebar::currentRow() const
 
 int BookSidebar::shortcutRow() const
 {
-    // The list has the keyboard: its current row. Otherwise the open chapter.
-    if (!m_view->hasFocus() && !m_currentFile.isEmpty()) {
+    // The open chapter, always (the highlighted row may be one you moved to with
+    // the arrow keys or right-clicked). With nothing open, the highlighted row.
+    if (!m_currentFile.isEmpty()) {
         const int open = m_book.indexOf(QFileInfo(m_currentFile).absoluteFilePath());
         if (open >= 0) {
             return open;
@@ -439,6 +478,10 @@ void BookSidebar::rebuild(int selectRow)
     }
     if (selectRow >= 0 && selectRow < m_view->count()) {
         m_view->setCurrentRow(selectRow);
+    }
+    const int open = openRow();
+    for (int r = 0; r < m_view->count(); ++r) {
+        m_view->item(r)->setData(OpenRole, r == open);
     }
     m_rebuilding = false;
     updateHeader();
@@ -689,10 +732,26 @@ void BookSidebar::onItemClicked(QListWidgetItem *item)
     }
 }
 
+int BookSidebar::openRow() const
+{
+    return m_currentFile.isEmpty() ? -1 : m_book.indexOf(QFileInfo(m_currentFile).absoluteFilePath());
+}
+
+void BookSidebar::setContextRow(int row)
+{
+    m_contextRow = row;
+    for (int r = 0; r < m_view->count(); ++r) {
+        m_view->item(r)->setData(ContextRole, r == row);
+    }
+}
+
 void BookSidebar::setCurrentFile(const QString &path)
 {
     m_currentFile = path;
     const int i = path.isEmpty() ? -1 : m_book.indexOf(QFileInfo(path).absoluteFilePath());
+    for (int r = 0; r < m_view->count(); ++r) {
+        m_view->item(r)->setData(OpenRole, r == i);
+    }
     if (i >= 0) {
         m_view->setCurrentRow(i);
     } else {
@@ -706,21 +765,22 @@ QMenu *BookSidebar::buildContextMenu(int row)
     menu->setObjectName(QStringLiteral("bookContextMenu"));
     const bool valid = row >= 0 && row < m_book.count();
     if (valid) {
+        QAction *title = menu->addAction(m_book.displayTitle(row));
+        title->setObjectName(QStringLiteral("bookContextTitle"));
+        title->setEnabled(false);
+        menu->addSeparator();
         QAction *open = menu->addAction(QStringLiteral("Open"), this, [this, row]() {
             emit fileActivated(m_book.absolutePath(row));
         });
         open->setEnabled(!m_book.isMissing(row));
         menu->addAction(QStringLiteral("Edit Details…"), this, [this, row]() { editChapter(row); });
         QAction *rename = menu->addAction(QStringLiteral("Rename"), this, [this, row]() { renameChapter(row); });
-        rename->setShortcut(QKeySequence(Qt::Key_F2));
         menu->addSeparator();
         QAction *up = menu->addAction(QStringLiteral("Move Up"), this,
                                       [this, row]() { moveChapter(row, row - 1); });
-        up->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Up));
         up->setEnabled(row > 0);
         QAction *down = menu->addAction(QStringLiteral("Move Down"), this,
                                         [this, row]() { moveChapter(row, row + 1); });
-        down->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
         down->setEnabled(row + 1 < m_book.count());
         menu->addSeparator();
         QAction *remove = menu->addAction(QStringLiteral("Remove from Book…"), this,
@@ -798,6 +858,8 @@ void BookSidebar::chooseChapterFiles()
 
 void BookSidebar::applyTheme(const ThemeColors &c)
 {
+    m_accent = c.accent;
+    m_view->viewport()->update();
     setStyleSheet(QStringLiteral(
         "#bookSidebar, #bookEmptyBox { background-color: %1; }"
         "#bookHeader { background-color: %1; }"

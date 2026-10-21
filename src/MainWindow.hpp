@@ -50,6 +50,10 @@ class MainWindow : public QMainWindow, public zwriter::UpdateHost
     Q_OBJECT
 
 public:
+    // The menu bar, toolbar and status bar are shown (not hidden away).
+    bool chromeShown() const;
+    // Ctrl+Tab: the editor to the chapter list and back.
+    void swapEditorAndChapters();
     explicit MainWindow(QWidget *parent = nullptr);
 
     // Paragraph formatting (1.7.0); public for tests.

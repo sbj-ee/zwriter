@@ -3,7 +3,24 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [1.10.3] — unreleased
+## [1.10.4] — unreleased
+
+Book sidebar fixes from the Author's 1.10.3 retest (N1, N6, N7).
+
+- **Ctrl+Tab / Ctrl+Shift+Tab switch between the editor and the chapter list, both ways (N1).**
+  1.10.2 only handled the key inside the editor; the chapter list ignores Ctrl+Tab, so focus
+  could not come back. The test only pressed it in the editor, so it passed. It is now one window
+  shortcut. On macOS it is the physical Ctrl key (Cmd+Tab belongs to the system).
+- **Open chapter vs highlighted row (N6).** The chapter open in the editor is marked with bold text
+  and an accent bar. The highlight is just where the list cursor is. F2 and Alt+Up/Down always act
+  on the open chapter. Right-click no longer selects the row. The row is outlined while its menu is
+  open, the menu starts with the chapter's name, and its actions apply to that row only. The menu
+  no longer shows F2/Alt+arrow next to Rename/Move, because those keys act on the open chapter.
+- **Hidden-away toolbar and menus keep their space (N7).** The bars are drawn transparent and let
+  clicks through instead of being removed, so the chapter list and the page no longer jump up and
+  down under the mouse. Tabbing into the hidden toolbar shows it.
+
+## [1.10.3] — 2026-10-21
 
 Fixes for the rest of the Author's v1.10.0 report.
 
@@ -30,7 +47,7 @@ Fixes for the rest of the Author's v1.10.0 report.
   bound twice and Ctrl+S is Save only. Typing in a long ODT chapter with a book open measured
   under 5 ms for the slowest keystroke (offscreen). Both are now covered by tests.
 
-## [1.10.2] — unreleased
+## [1.10.2] — 2026-10-21 (not released separately; shipped in 1.10.3)
 
 Book sidebar keyboard fixes (G1).
 
@@ -57,7 +74,7 @@ Book sidebar keyboard fixes (G1).
 - Screenshots: `book-list-focus.png`, `book-header-before-macos.png` (the report),
   `book-header-before-linux.png`, `book-header-after-linux.png`.
 
-## [1.10.1] — unreleased
+## [1.10.1] — 2026-10-21 (not released separately; shipped in 1.10.3)
 
 Docs only; no code changes.
 

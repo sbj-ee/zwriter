@@ -66,6 +66,9 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextEdit>
+#include <QToolBar>
+#include <QContextMenuEvent>
+#include <QGraphicsEffect>
 #include <QTimer>
 #include <QInputMethodEvent>
 #include <QTest>
@@ -1512,7 +1515,7 @@ void testBookFocus(const QString &root)
     wait(200);
     check(side->book().displayTitle(2) == QLatin1String("Hawks"), "Q the new title is saved", side->book().displayTitle(2));
     check(list->currentRow() == 2, "Q renaming keeps the row", QString::number(list->currentRow()));
-    list->clearFocus();
+    ed->setFocus();
     wait(50);
     QTest::keyClick(ed, Qt::Key_Tab, Qt::ControlModifier); // focus comes back from the editor
     wait(50);
@@ -1616,6 +1619,139 @@ void testRulerDrag()
 // 1.10.3: G3 Alt+Up/Down moves the chapter open in the editor; G2 the
 // Remove Chapter buttons show their whole text; G6 the style list drops
 // down below the box.
+// 1.10.4 (retest N1, N6, N7): Ctrl+Tab both ways; right-click and the open
+// chapter are unambiguous; hiding the chrome does not move the chapter list.
+void testSidebarRetest(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/lib-retest");
+    const QString book = lib + QStringLiteral("/Retest Book");
+    QDir().mkpath(book);
+    writeFile(book + QStringLiteral("/01 Alpha.md"), "# Alpha\n\nOne.\n");
+    writeFile(book + QStringLiteral("/02 Beta.md"), "# Beta\n\nTwo.\n");
+    writeFile(book + QStringLiteral("/03 Gamma.md"), "# Gamma\n\nThree.\n");
+    BookManifest::fromFolder(book).save();
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("view/fullPageView"), false);
+        s.setValue(QStringLiteral("view/chromePinned"), false);
+        s.setValue(QStringLiteral("library/rootPath"), lib);
+        s.setValue(QStringLiteral("library/visible"), false);
+        s.setValue(QStringLiteral("book/visible"), true);
+        s.setValue(QStringLiteral("book/current"), QStringLiteral("Retest Book"));
+        s.sync();
+    }
+    auto win = std::make_unique<MainWindow>();
+    win->resize(1024, 640);
+    win->show();
+    win->activateWindow();
+    QApplication::setActiveWindow(win.get());
+    wait(100);
+    auto *side = win->findChild<BookSidebar *>();
+    QListWidget *list = side ? side->view() : nullptr;
+    if (!list || list->count() != 3) {
+        check(false, "W book");
+        return;
+    }
+    check(win->openPathForTest(book + QStringLiteral("/02 Beta.md")), "W chapter 2 open");
+    QTextEdit *ed = editorOf(*win);
+#ifdef Q_OS_MACOS
+    const Qt::KeyboardModifier ctrl = Qt::MetaModifier; // the physical Ctrl key
+#else
+    const Qt::KeyboardModifier ctrl = Qt::ControlModifier;
+#endif
+    // N1. #20's test only pressed Ctrl+Tab in the editor; from the list it did
+    // nothing (QListWidget ignores Ctrl+Tab). Keys go to the focus widget here.
+    auto press = [&](Qt::Key key, Qt::KeyboardModifiers mods) {
+        QTest::keyClick(QApplication::focusWidget() ? QApplication::focusWidget() : win.get(), key, mods);
+        wait(50);
+    };
+    ed->setFocus();
+    wait(50);
+    press(Qt::Key_Tab, ctrl);
+    check(list->hasFocus(), "W1 Ctrl+Tab: editor to the chapter list");
+    press(Qt::Key_Tab, ctrl);
+    check(ed->hasFocus(), "W1 Ctrl+Tab again: back to the editor");
+    press(Qt::Key_Backtab, ctrl | Qt::ShiftModifier);
+    check(list->hasFocus(), "W1 Ctrl+Shift+Tab: editor to the list");
+    press(Qt::Key_Backtab, ctrl | Qt::ShiftModifier);
+    check(ed->hasFocus() && !ed->toPlainText().contains(QLatin1Char('\t')), "W1 Ctrl+Shift+Tab: list to the editor, no tab typed");
+    QAction *swap = win->findChild<QAction *>(QStringLiteral("focusSwap"));
+    check(swap && swap->shortcuts().size() == 3
+              && swap->shortcuts().first() == QKeySequence(QKeyCombination(ctrl, Qt::Key_Tab)),
+          "W1 the shortcut is the physical Ctrl key on this platform", swap ? swap->shortcuts().first().toString() : QString());
+
+    // N6. The open chapter is marked (bold + bar) apart from the highlight.
+    check(list->item(1)->data(BookSidebar::OpenRole).toBool() && !list->item(0)->data(BookSidebar::OpenRole).toBool(),
+          "W6 the open chapter is marked");
+    list->setFocus();
+    list->setCurrentRow(0); // arrowed up to Alpha: highlighted, not open
+    wait(50);
+    check(list->item(1)->data(BookSidebar::OpenRole).toBool() && list->currentRow() == 0,
+          "W6 highlight and open marker can differ");
+    QTest::keyClick(list, Qt::Key_F2);
+    wait(100);
+    auto *line = qobject_cast<QLineEdit *>(QApplication::focusWidget());
+    check(line && line->text() == QLatin1String("Beta"), "W6 F2 renames the open chapter, even from the list",
+          line ? line->text() : QString());
+    if (line) {
+        QTest::keyClick(line, Qt::Key_Escape);
+    }
+    wait(100);
+    // Right-click Gamma: no selection change, nothing opened, the menu names it.
+    list->setCurrentRow(1);
+    const QString title = win->windowTitle();
+    const QPoint at = list->visualItemRect(list->item(2)).center();
+    QMenu *menu = nullptr;
+    QTimer::singleShot(300, [&]() {
+        menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (menu) {
+            check(list->item(2)->data(BookSidebar::ContextRole).toBool() && list->currentRow() == 1,
+                  "W6 right-click outlines the row, does not select it", QString::number(list->currentRow()));
+            const QList<QAction *> acts = menu->actions();
+            check(!acts.isEmpty() && acts.first()->text() == QLatin1String("Gamma") && !acts.first()->isEnabled(),
+                  "W6 the menu names the chapter it acts on", acts.isEmpty() ? QString() : acts.first()->text());
+            bool hint = false;
+            for (QAction *a : acts) {
+                hint = hint || !a->shortcut().isEmpty() && a->shortcut() != QKeySequence(QKeySequence::Delete);
+            }
+            check(!hint, "W6 no F2/Alt+arrow hints on a row menu (those keys act on the open chapter)");
+            menu->close();
+        }
+    });
+    QContextMenuEvent ev(QContextMenuEvent::Mouse, at, list->viewport()->mapToGlobal(at));
+    emit list->customContextMenuRequested(at);
+    wait(500);
+    check(menu != nullptr, "W6 the context menu opened");
+    check(!list->item(2)->data(BookSidebar::ContextRole).toBool() && win->windowTitle() == title,
+          "W6 closing it clears the outline; nothing was opened");
+
+    // N7. Chrome hidden away: the chapter list and editor stay put.
+    QAction *pinAct = actionNamed(*win, QStringLiteral("Always Show Toolbar"));
+    auto pin = [&](bool on) {
+        if (pinAct && pinAct->isChecked() != on) {
+            pinAct->trigger();
+        }
+    };
+    pin(true);
+    wait(100);
+    const QPoint listAt = list->mapTo(win.get(), QPoint(0, 0));
+    const QPoint edAt = ed->mapTo(win.get(), QPoint(0, 0));
+    pin(false);
+    QMetaObject::invokeMethod(win.get(), "hideAwayIdle");
+    wait(100);
+    check(!win->chromeShown(), "W7 chrome hidden away");
+    check(list->mapTo(win.get(), QPoint(0, 0)) == listAt && ed->mapTo(win.get(), QPoint(0, 0)) == edAt,
+          "W7 the chapter list and editor do not move",
+          QStringLiteral("%1,%2 -> %3,%4").arg(listAt.y()).arg(edAt.y()).arg(list->mapTo(win.get(), QPoint(0, 0)).y()).arg(ed->mapTo(win.get(), QPoint(0, 0)).y()));
+    QWidget *bar = win->findChild<QToolBar *>();
+    check(bar && bar->testAttribute(Qt::WA_TransparentForMouseEvents), "W7 the hidden toolbar takes no clicks");
+    pin(true);
+    wait(50);
+    check(win->chromeShown() && bar && !bar->testAttribute(Qt::WA_TransparentForMouseEvents) && !bar->graphicsEffect(),
+          "W7 shown again, it works as before");
+    ed->document()->setModified(false);
+}
+
 void testUsabilityFixes(const QString &root)
 {
     const QString lib = root + QStringLiteral("/lib-usab");
@@ -1884,6 +2020,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_W")) { // quick local runs
+        testSidebarRetest(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_USAB")) { // quick local runs
         testUsabilityFixes(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -1979,6 +2120,7 @@ int main(int argc, char **argv)
     testBookFocus(dataDir.path());
     testRulerDrag();
     testUsabilityFixes(dataDir.path());
+    testSidebarRetest(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

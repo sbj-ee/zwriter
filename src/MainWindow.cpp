@@ -40,6 +40,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
+#include <QGraphicsOpacityEffect>
 #include <QFileInfo>
 #include <QFileSystemModel>
 #include <QFont>
@@ -254,6 +255,30 @@ MainWindow::MainWindow(QWidget *parent)
     // Focus moves from the editor straight to the chapter list (Ctrl+Tab;
     // Tab itself types a tab in the document), not to the sidebar header.
     QWidget::setTabOrder(m_editor, m_book->view());
+    // Ctrl+Tab and Ctrl+Shift+Tab switch between the editor and the chapter list
+    // (both ways; the list's own key handling ignores Ctrl+Tab, so the earlier
+    // editor-only key filter could never come back). On macOS the physical Ctrl
+    // key is Qt's Meta; Cmd+Tab belongs to the system.
+    {
+        auto *swap = new QAction(QStringLiteral("Switch Between Editor and Chapters"), this);
+        swap->setObjectName(QStringLiteral("focusSwap"));
+#ifdef Q_OS_MACOS
+        const Qt::Modifier ctrl = Qt::META;
+#else
+        const Qt::Modifier ctrl = Qt::CTRL;
+#endif
+        swap->setShortcuts({QKeySequence(ctrl | Qt::Key_Tab), QKeySequence(ctrl | Qt::SHIFT | Qt::Key_Backtab),
+                            QKeySequence(ctrl | Qt::SHIFT | Qt::Key_Tab)});
+        swap->setShortcutContext(Qt::WindowShortcut);
+        connect(swap, &QAction::triggered, this, &MainWindow::swapEditorAndChapters);
+        addAction(swap);
+    }
+    // Tabbing into a hidden-away toolbar shows it.
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
+        if (now && !m_chromeVisible && m_formatBar && m_formatBar->isAncestorOf(now)) {
+            revealHideAway();
+        }
+    });
     m_previewWanted = PreviewPane::loadVisibleSetting();
     {
         const LibrarySidebar::Settings lib = LibrarySidebar::loadSettings();
@@ -1823,17 +1848,64 @@ void MainWindow::applyTheme()
     }
 }
 
+// Hidden-away chrome keeps its place: the bar is drawn fully transparent and
+// lets clicks through, so the editor and the chapter list do not move up and
+// down under the mouse (a click aimed at a chapter could land on another).
+static void veilBar(QWidget *bar, bool veiled)
+{
+    if (!bar) {
+        return;
+    }
+    bar->setAttribute(Qt::WA_TransparentForMouseEvents, veiled);
+    if (veiled) {
+        auto *fx = qobject_cast<QGraphicsOpacityEffect *>(bar->graphicsEffect());
+        if (!fx) {
+            fx = new QGraphicsOpacityEffect(bar);
+            bar->setGraphicsEffect(fx);
+        }
+        fx->setOpacity(0.0);
+    } else if (bar->graphicsEffect()) {
+        bar->setGraphicsEffect(nullptr);
+    }
+    for (QWidget *child : bar->findChildren<QWidget *>()) {
+        child->setAttribute(Qt::WA_TransparentForMouseEvents, veiled);
+    }
+}
+
 void MainWindow::setChromeVisible(bool visible)
 {
     m_chromeVisible = visible;
-    statusBar()->setVisible(visible);
+    statusBar()->setVisible(true);
+    veilBar(statusBar(), !visible);
     if (m_formatBar) {
         // Markdown mode has no rich formatting: the toolbar never shows.
-        m_formatBar->setVisible(visible && !m_markdownMode);
+        m_formatBar->setVisible(!m_markdownMode);
+        veilBar(m_formatBar, !visible);
     }
     if (menuBar()) {
-        menuBar()->setVisible(visible);
+        menuBar()->setVisible(true);
+        veilBar(menuBar(), !visible);
     }
+}
+
+void MainWindow::swapEditorAndChapters()
+{
+    QListWidget *list = m_book ? m_book->view() : nullptr;
+    const bool listUsable = list && list->isVisibleTo(this) && list->isEnabled();
+    if (m_editor->hasFocus() || !listUsable) {
+        if (listUsable) {
+            list->setFocus(Qt::TabFocusReason);
+        } else {
+            m_editor->setFocus(Qt::TabFocusReason);
+        }
+    } else {
+        m_editor->setFocus(Qt::TabFocusReason);
+    }
+}
+
+bool MainWindow::chromeShown() const
+{
+    return m_chromeVisible;
 }
 
 void MainWindow::revealHideAway()
@@ -5348,15 +5420,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         if ((ke->key() == Qt::Key_Tab || ke->key() == Qt::Key_Backtab)
             && (ke->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))
             && !(ke->modifiers() & Qt::AltModifier)) {
-            const bool back = ke->key() == Qt::Key_Backtab || (ke->modifiers() & Qt::ShiftModifier);
-            QWidget *w = back ? m_editor->previousInFocusChain() : m_editor->nextInFocusChain();
-            while (w && w != m_editor
-                   && !((w->focusPolicy() & Qt::TabFocus) && w->isVisibleTo(this) && w->isEnabled())) {
-                w = back ? w->previousInFocusChain() : w->nextInFocusChain();
-            }
-            if (w && w != m_editor) {
-                w->setFocus(back ? Qt::BacktabFocusReason : Qt::TabFocusReason);
-            }
+            swapEditorAndChapters(); // same as the shortcut, if the editor saw the key first
             return true;
         }
         if (m_fullPageView && m_pageScroll
