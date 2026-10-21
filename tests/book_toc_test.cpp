@@ -82,7 +82,7 @@ int main(int argc, char **argv)
     const QString contents = dir + QStringLiteral("/00 Contents.odt");
 
     const QList<BookToc::Entry> e2 = BookToc::entries(book, 2, contents);
-    check(show(e2) == QLatin1String("1:1. Introduction | 2:How to use this book | 1:2. Raptors | 2:Bald Eagle | 2:Owls | 1:3. Notes"),
+    check(show(e2) == QLatin1String("1:2. Introduction | 2:How to use this book | 1:3. Raptors | 2:Bald Eagle | 2:Owls | 1:4. Notes"),
           "E chapters in book order with their headings; the ToC's own file left out", show(e2));
     check(show(BookToc::entries(book, 3, contents)).contains(QLatin1String("3:Nesting")), "E depth 3 adds sub-headings");
     check(!show(e2).contains(QLatin1String("not a heading")), "E # inside a code fence is not a heading");
@@ -97,9 +97,9 @@ int main(int argc, char **argv)
               && doc.findBlockByNumber(1).text() == QLatin1String("Contents"),
           "I inserted at the cursor, after the text before it", doc.toPlainText().left(80));
     check(!BookToc::insertOrUpdate(&doc, nullptr, e2), "I unchanged book: no edit");
-    book.move(2, 0); // Raptors first
+    book.move(2, 1); // Raptors before Introduction
     const QList<BookToc::Entry> moved = BookToc::entries(book, 2, contents);
-    check(BookToc::insertOrUpdate(&doc, nullptr, moved) && tocLines(doc).first() == QLatin1String("1:1. Raptors")
+    check(BookToc::insertOrUpdate(&doc, nullptr, moved) && tocLines(doc).first() == QLatin1String("1:2. Raptors")
               && tocLines(doc).size() == 6,
           "I reorder: updated in place", tocLines(doc).join(QStringLiteral(" | ")));
     int contentsTitles = 0;
@@ -126,9 +126,9 @@ int main(int argc, char **argv)
     check(tocLines(back) == tocLines(doc) && BookToc::hasToc(&back), "O read back as zwriter's own ToC",
           tocLines(back).join(QStringLiteral(" | ")));
     check(back.property("zwriter.odtTocs").toStringList().isEmpty(), "O ... not as a foreign one to keep verbatim");
-    book.move(0, 2);
+    book.move(1, 2);
     check(BookToc::insertOrUpdate(&back, nullptr, BookToc::entries(book, 2, contents))
-              && tocLines(back).first() == QLatin1String("1:1. Introduction"),
+              && tocLines(back).first() == QLatin1String("1:2. Introduction"),
           "O and it updates after reopening");
 
     // A LibreOffice ToC (#13) is still kept as it was, not turned into ours.

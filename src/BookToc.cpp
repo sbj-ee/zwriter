@@ -88,7 +88,6 @@ QList<Entry> entries(const BookManifest &book, int maxLevel, const QString &skip
 {
     QList<Entry> out;
     const QString skip = skipPath.isEmpty() ? QString() : QFileInfo(skipPath).absoluteFilePath();
-    int number = 0;
     for (int i = 0; i < book.count(); ++i) {
         const QString path = book.absolutePath(i);
         if (!skip.isEmpty() && QFileInfo(path).absoluteFilePath() == skip) {
@@ -97,9 +96,9 @@ QList<Entry> entries(const BookManifest &book, int maxLevel, const QString &skip
         if (book.isMissing(i)) {
             continue;
         }
-        ++number;
+        // Numbered as in the sidebar (and the figure numbers), by book position.
         const QString title = book.displayTitle(i);
-        out.append({1, QStringLiteral("%1. %2").arg(number).arg(title), i});
+        out.append({1, QStringLiteral("%1. %2").arg(i + 1).arg(title), i});
         if (maxLevel < 2) {
             continue;
         }

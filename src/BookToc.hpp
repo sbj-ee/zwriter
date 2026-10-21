@@ -33,7 +33,7 @@ struct Entry {
 // headings, .md by its # lines (code fences skipped), .txt has none.
 QList<QPair<int, QString>> headingsOf(const QString &path);
 
-// Chapter titles (numbered "1. Title") and their headings down to maxLevel
+// Chapter titles (numbered by book position, as in the sidebar: "2. Title") and their headings down to maxLevel
 // (2 = chapters + their top headings). A chapter's first heading is
 // dropped when it repeats the chapter title. skipPath (the document that
 // holds the ToC) is left out.
