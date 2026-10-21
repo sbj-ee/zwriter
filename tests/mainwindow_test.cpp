@@ -2399,6 +2399,119 @@ void testUsabilityFixes(const QString &root)
     editorOf(*win)->document()->setModified(false);
 }
 
+// 1.11.1+ (Author's 1.11.0 retest, M2-M6).
+void testRetest1111(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/lib-1111");
+    const QString book = lib + QStringLiteral("/Retest Book");
+    QDir().mkpath(book);
+    writeFile(book + QStringLiteral("/01 Alpha.md"), "# Alpha\n\nOne two three.\n");
+    {
+        QTextDocument d;
+        QTextCursor c(&d);
+        QTextBlockFormat h;
+        h.setHeadingLevel(1);
+        c.setBlockFormat(h);
+        c.insertText(QStringLiteral("Beta"));
+        c.insertBlock(QTextBlockFormat());
+        c.insertText(QStringLiteral("Body line."));
+        DocumentIo::save(&d, book + QStringLiteral("/02 Beta.odt"), DocumentIo::Format::Odt);
+    }
+    writeFile(book + QStringLiteral("/03 Gamma.md"), "# Gamma\n\nThree.\n");
+    BookManifest::fromFolder(book).save();
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("view/fullPageView"), false);
+        s.setValue(QStringLiteral("view/chromePinned"), true);
+        s.setValue(QStringLiteral("library/rootPath"), lib);
+        s.setValue(QStringLiteral("library/visible"), false);
+        s.setValue(QStringLiteral("book/visible"), true);
+        s.setValue(QStringLiteral("book/current"), QStringLiteral("Retest Book"));
+        s.sync();
+    }
+    auto win = std::make_unique<MainWindow>();
+    win->resize(1024, 640);
+    win->show();
+    win->activateWindow();
+    QApplication::setActiveWindow(win.get());
+    wait(100);
+    auto *side = win->findChild<BookSidebar *>();
+    if (!side || side->book().count() != 3) {
+        check(false, "R book");
+        return;
+    }
+
+    // M2: Heading 1 chosen again on a Heading 1 line keeps it a Heading 1.
+    check(win->openPathForTest(book + QStringLiteral("/02 Beta.odt")), "R Beta open");
+    {
+        QTextEdit *ed = editorOf(*win);
+        QTextCursor c(ed->document());
+        ed->setTextCursor(c); // on "Beta", a Heading 1
+        QApplication::processEvents();
+        auto *combo = win->findChild<QComboBox *>(QStringLiteral("styleCombo"));
+        const int h1 = combo ? combo->findText(QStringLiteral("Heading 1")) : -1;
+        check(ed->textCursor().blockFormat().headingLevel() == 1 && h1 >= 0 && combo->currentIndex() == h1,
+              "R M2 setup: the line is Heading 1 and the list says so");
+        if (h1 >= 0) {
+            combo->setCurrentIndex(h1);
+            combo->activated(h1);
+            QApplication::processEvents();
+            check(ed->textCursor().blockFormat().headingLevel() == 1 && combo->currentIndex() == h1,
+                  "R M2 choosing Heading 1 again keeps it Heading 1",
+                  QString::number(ed->textCursor().blockFormat().headingLevel()));
+            combo->activated(h1);
+            QApplication::processEvents();
+            check(ed->textCursor().blockFormat().headingLevel() == 1, "R M2 ... and a third time");
+        }
+        QAction *h1Action = nullptr;
+        for (QAction *a : win->findChildren<QAction *>()) {
+            if (a->text() == QLatin1String("Heading &1")) {
+                h1Action = a;
+            }
+        }
+        if (h1Action) {
+            h1Action->trigger();
+            QApplication::processEvents();
+            check(ed->textCursor().blockFormat().headingLevel() == 1 && h1Action->isChecked(),
+                  "R M2 Format > Heading 1 (Ctrl+Alt+1) on a Heading 1 keeps it");
+        }
+        const int body = combo ? combo->findText(QStringLiteral("Body Text")) : -1;
+        if (body >= 0) {
+            combo->activated(body);
+            QApplication::processEvents();
+            check(ed->textCursor().blockFormat().headingLevel() == 0, "R M2 Body Text still turns it to body text");
+            combo->activated(body);
+            QApplication::processEvents();
+            check(ed->textCursor().blockFormat().headingLevel() == 0, "R M2 ... and stays body text");
+            combo->activated(h1);
+            QApplication::processEvents();
+        }
+    }
+
+    // M6: the inline rename box does not move the rows below it.
+    {
+        QListWidget *list = side->view();
+        const int below = list->visualItemRect(list->item(2)).top();
+        const int height = list->visualItemRect(list->item(1)).height();
+        side->renameChapter(1);
+        QApplication::processEvents();
+        wait(50);
+        auto *line = list->findChild<QLineEdit *>();
+        check(line && line->isVisible(), "R M6 rename box open");
+        check(list->visualItemRect(list->item(2)).top() == below && list->visualItemRect(list->item(1)).height() == height,
+              "R M6 rows below do not shift",
+              QStringLiteral("%1 -> %2, %3 -> %4").arg(below).arg(list->visualItemRect(list->item(2)).top())
+                  .arg(height).arg(list->visualItemRect(list->item(1)).height()));
+        if (line) {
+            QTest::keyClick(line, Qt::Key_Escape);
+        }
+        wait(50);
+        check(list->visualItemRect(list->item(2)).top() == below, "R M6 ... nor after Esc");
+    }
+    // @@R1111_MORE@@
+    win->close();
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -2414,6 +2527,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_R1111")) { // quick local runs
+        testRetest1111(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_Z")) { // quick local runs
         testBigBookTimings(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -2436,6 +2554,7 @@ int main(int argc, char **argv)
     }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_USAB")) { // quick local runs
         testUsabilityFixes(dataDir.path());
+    testRetest1111(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }
