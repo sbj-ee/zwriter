@@ -501,6 +501,7 @@ if(TARGET Qt6::Widgets)
   endforeach()
   find_package(Qt6 REQUIRED COMPONENTS Test)
   target_link_libraries(mainwindow_test PRIVATE Qt6::Test)
+  target_compile_definitions(mainwindow_test PRIVATE ZW_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME mainwindow COMMAND mainwindow_test)
   set_tests_properties(mainwindow PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion"

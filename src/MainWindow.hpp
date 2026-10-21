@@ -90,6 +90,7 @@ public:
     QString saveStartDir(const QString &bookDir) const;
     void setCurrentPathForTest(const QString &path) { m_currentPath = path; }
     bool openPathForTest(const QString &path) { return openPath(path); }
+    bool saveToPathForTest(const QString &path) { return saveToPath(path, DocumentIo::Format::Odt); }
     // File → Export as PDF without the dialog (also used by tests).
     bool exportPdfTo(const QString &path);
     // Markdown mode: copy the picture into "<name>.assets/" and type a link.

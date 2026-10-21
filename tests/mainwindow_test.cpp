@@ -1134,6 +1134,31 @@ void testReportFixes(const QString &root)
     }
     ed->document()->setModified(false);
 
+    // Bug 1 in the window (spell check on): open a LibreOffice file with a
+    // table of contents, edit, save: the table is written back.
+    {
+        QSettings().setValue(QStringLiteral("view/spellCheck"), true);
+        MainWindow w3;
+        w3.show();
+        QTemporaryDir t;
+        const QString copy = t.filePath(QStringLiteral("toc.odt"));
+        QFile::copy(QStringLiteral(ZW_SOURCE_DIR "/tests/data/toc-libreoffice.odt"), copy);
+        check(w3.openPathForTest(copy), "F1 open a LibreOffice file with a ToC");
+        QTextEdit *e3 = editorOf(w3);
+        QTextCursor c3(e3->document());
+        c3.movePosition(QTextCursor::End);
+        e3->setTextCursor(c3);
+        QTest::keyClicks(e3, QStringLiteral(" More."));
+        check(w3.saveToPathForTest(copy), "F1 save");
+        QProcess unzip;
+        unzip.start(QStringLiteral("unzip"), {QStringLiteral("-p"), copy, QStringLiteral("content.xml")});
+        unzip.waitForFinished(15000);
+        const QString xml = QString::fromUtf8(unzip.readAllStandardOutput());
+        check(xml.contains(QLatin1String("<text:table-of-content ")) && xml.contains(QLatin1String("leader-char")) && xml.contains(QLatin1String("More.")),
+              "F1 the table of contents survives edit + save in the window");
+        e3->document()->setModified(false);
+    }
+
     // Bug 5: the first Save As starts in the open book's folder.
     {
         const QString bookDir = root + QStringLiteral("/savebook");
