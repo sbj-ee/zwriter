@@ -3,6 +3,29 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.10.5] — unreleased
+
+Headings and chapter files, from the Author's 1.10.3 retest (N3, N5, minor items).
+
+- **Renaming a chapter also renames its title heading (N3).** That is the first heading, when it is
+  a Heading 1 that says the old title or is the chapter's only Heading 1.
+  - A chapter that isn't open: its file is rewritten safely, and in a Markdown file only the `# `
+    line changes. Rename it back to undo.
+  - The open chapter with nothing unsaved: the heading changes in the editor and is saved.
+    Ctrl+Z brings the old heading back.
+  - The open chapter with unsaved changes: you are asked first (Change Heading / Keep Heading),
+    and the change stays unsaved.
+- **The generated table of contents lists each chapter once (N3).** A lone Heading 1 is the
+  chapter's title, not a section, and no section repeats the chapter title.
+- **Heading 1-3 use the heading face (N5).** Before, a heading kept the face of the text it was
+  made from, e.g. Courier.
+- **Heading 2 and 3 look different:** Heading 2 is 17 pt bold; Heading 3 is 13 pt bold italic
+  (it was 14 pt semibold, close to Heading 2). Going back to Body Text drops Heading 3's italic.
+- **Renumber Files…** (Book sidebar menu): renames the chapter files so their `NN ` numbers follow
+  the book order. It lists the renames and asks first (Cancel is the default); a reorder never
+  renames files by itself. Renames go through temporary names, so swaps can't collide, and
+  everything is rolled back if one fails. An open chapter follows its new file name.
+
 ## [1.10.4] — unreleased
 
 Book sidebar fixes from the Author's 1.10.3 retest (N1, N6, N7).

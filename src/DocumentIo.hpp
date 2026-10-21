@@ -31,6 +31,9 @@ Format formatFromFilter(const QString &selectedFilter, const QString &pathHint);
 
 // The document font's family list: Courier, then Courier-class monospace faces.
 QStringList defaultFontFamilies();
+// The face headings use (Heading 1-3, and a new chapter's title): the
+// application's UI sans face, then common sans faces. Body text stays Courier.
+QStringList headingFontFamilies();
 
 // zwriter's table look (Insert Table, reopened ODT/RTF tables): a single
 // 1 px light-grey grid with collapsed borders, 8 px padding, 100 % width.

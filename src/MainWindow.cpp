@@ -306,6 +306,14 @@ MainWindow::MainWindow(QWidget *parent)
         refreshBookToc();
         renumberCaptions(); // the chapter may have moved
     });
+    connect(m_book, &BookSidebar::chapterRenamed, this, &MainWindow::retitleChapterHeading);
+    connect(m_book, &BookSidebar::chapterFileMoved, this, [this](const QString &from, const QString &to) {
+        if (!m_currentPath.isEmpty() && QFileInfo(m_currentPath).absoluteFilePath() == from) {
+            m_currentPath = to; // unsaved edits stay; Save writes to the new name
+            updateWindowTitle();
+            m_book->setCurrentFile(to);
+        }
+    });
     connect(m_book, &BookSidebar::tocRequested, this, [this]() { insertBookToc(); });
     connect(m_book, &BookSidebar::exportBookPdfRequested, this, &MainWindow::exportBookPdf);
     connect(m_book, &BookSidebar::exportBookEpubRequested, this, &MainWindow::exportBookEpub);
@@ -2369,6 +2377,131 @@ int MainWindow::renumberCaptions(bool joinPrevious)
     return Captions::renumber(m_editor->document(), chapterNumber(), joinPrevious);
 }
 
+namespace {
+// The chapter's title heading: the first heading, when it is a Heading 1 and
+// either says the old title or is the only Heading 1. In a Markdown file
+// (plain text in the editor) that is a "# ..." line. -1: none.
+int titleHeadingBlock(const QTextDocument *doc, bool markdown, const QString &oldTitle)
+{
+    static const QRegularExpression atx(QStringLiteral("^ {0,3}(#{1,6})[ \\t]+(.*?)[ \\t#]*$"));
+    int first = -1;
+    QString firstText;
+    int h1s = 0;
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        int level = 0;
+        QString text;
+        if (markdown) {
+            const auto m = atx.match(b.text());
+            if (m.hasMatch()) {
+                level = int(m.capturedLength(1));
+                text = m.captured(2);
+            }
+        } else {
+            level = b.blockFormat().headingLevel();
+            text = b.text();
+        }
+        if (level <= 0) {
+            continue;
+        }
+        if (first < 0) {
+            if (level != 1) {
+                return -1;
+            }
+            first = b.blockNumber();
+            firstText = text.trimmed();
+        }
+        h1s += level == 1 ? 1 : 0;
+    }
+    if (first < 0) {
+        return -1;
+    }
+    return (firstText.compare(oldTitle.trimmed(), Qt::CaseInsensitive) == 0 || h1s == 1) ? first : -1;
+}
+
+// Replace the text of block `number` (keeping "# " in Markdown), as one edit step.
+void setHeadingText(QTextDocument *doc, int number, bool markdown, const QString &title)
+{
+    const QTextBlock b = doc->findBlockByNumber(number);
+    QTextCursor c(b);
+    int start = b.position();
+    if (markdown) {
+        int i = 0;
+        const QString t = b.text();
+        while (i < t.size() && (t.at(i) == QLatin1Char(' ') || t.at(i) == QLatin1Char('#'))) {
+            ++i;
+        }
+        start += i;
+    }
+    c.beginEditBlock();
+    c.setPosition(start);
+    c.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+    const QTextCharFormat keep = c.charFormat();
+    c.insertText(title, keep);
+    c.endEditBlock();
+}
+} // namespace
+
+void MainWindow::retitleChapterHeading(const QString &path, const QString &oldTitle, const QString &newTitle)
+{
+    const bool isOpen = !m_currentPath.isEmpty()
+        && QFileInfo(m_currentPath).absoluteFilePath() == QFileInfo(path).absoluteFilePath();
+    if (isOpen) {
+        QTextDocument *doc = m_editor->document();
+        const int block = titleHeadingBlock(doc, m_markdownMode, oldTitle);
+        if (block < 0) {
+            return;
+        }
+        const bool unsaved = doc->isModified();
+        if (unsaved) {
+            QMessageBox box(QMessageBox::Question, QStringLiteral("Rename Chapter"),
+                            QStringLiteral("Change the chapter heading to \"%1\" too?").arg(newTitle),
+                            QMessageBox::NoButton, this);
+            box.setObjectName(QStringLiteral("renameHeadingDialog"));
+            box.setInformativeText(QStringLiteral("The chapter has unsaved changes, so the heading is changed in "
+                                                  "the editor only. Save when you are ready; Ctrl+Z undoes it."));
+            QPushButton *yes = box.addButton(QStringLiteral("Change Heading"), QMessageBox::AcceptRole);
+            box.addButton(QStringLiteral("Keep Heading"), QMessageBox::RejectRole);
+            box.setDefaultButton(yes);
+            box.exec();
+            if (box.clickedButton() != yes) {
+                return;
+            }
+        }
+        setHeadingText(doc, block, m_markdownMode, newTitle);
+        if (!unsaved) {
+            // Nothing else was pending: save, so the file agrees with the book.
+            // Ctrl+Z still brings the old heading back.
+            fileSave();
+        }
+        refreshBookToc();
+        return;
+    }
+    // A chapter that is not open: rewrite its file (written safely, all or nothing).
+    const DocumentIo::Format format = DocumentIo::formatFromPath(path);
+    const bool markdown = format == DocumentIo::Format::Markdown;
+    if (format == DocumentIo::Format::Unknown || format == DocumentIo::Format::Txt) {
+        return;
+    }
+    QTextDocument doc;
+    if (!DocumentIo::load(&doc, path)) {
+        return;
+    }
+    const int block = titleHeadingBlock(&doc, markdown, oldTitle);
+    if (block < 0) {
+        return;
+    }
+    setHeadingText(&doc, block, markdown, newTitle);
+    QString err;
+    if (!DocumentIo::save(&doc, path, format, &err)) {
+        statusBar()->showMessage(QStringLiteral("Could not update the heading in %1: %2")
+                                     .arg(QFileInfo(path).fileName(), err), 8000);
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Heading changed to \"%1\" in %2 (rename back to undo)")
+                                 .arg(newTitle, QFileInfo(path).fileName()), 6000);
+    refreshBookToc();
+}
+
 bool MainWindow::refreshBookToc()
 {
     if (m_markdownMode || !m_book || !m_book->hasBook() || !BookToc::hasToc(m_editor->document())) {
@@ -3088,11 +3221,18 @@ void MainWindow::applyHeading()
         charFmt.setFontPointSize(22);
         charFmt.setFontWeight(QFont::Bold);
     } else if (level == 2) {
-        charFmt.setFontPointSize(18);
+        charFmt.setFontPointSize(17);
         charFmt.setFontWeight(QFont::Bold);
     } else {
-        charFmt.setFontPointSize(14);
-        charFmt.setFontWeight(QFont::DemiBold);
+        // Heading 3: smaller and italic, so it reads apart from Heading 2.
+        charFmt.setFontPointSize(13);
+        charFmt.setFontWeight(QFont::Bold);
+        charFmt.setFontItalic(true);
+    }
+    if (level > 0) {
+        // A heading uses the heading face (as a new chapter's title does),
+        // whatever face the text had: typed after a Courier run, it used to stay Courier.
+        charFmt.setFontFamilies(DocumentIo::headingFontFamilies());
     }
 
     // Apply to every block the selection touches. The style has to reach the
@@ -3106,12 +3246,16 @@ void MainWindow::applyHeading()
     walk.setPosition(first);
     while (true) {
         QTextBlockFormat blockFmt = walk.blockFormat();
+        QTextCharFormat runFmt = charFmt;
+        if (blockFmt.headingLevel() == 3 && level != 3) {
+            runFmt.setFontItalic(false); // Heading 3's italic goes with it
+        }
         blockFmt.setHeadingLevel(level);
         walk.setBlockFormat(blockFmt);
-        walk.mergeBlockCharFormat(charFmt);
+        walk.mergeBlockCharFormat(runFmt);
         QTextCursor text(walk.block());
         text.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
-        text.mergeCharFormat(charFmt);
+        text.mergeCharFormat(runFmt);
         if (walk.block().next().isValid() && walk.block().next().position() <= last) {
             walk.setPosition(walk.block().next().position());
         } else {
