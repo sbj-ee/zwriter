@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QDirIterator>
+#include <QRegularExpression>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -306,7 +307,16 @@ int BookManifest::indexOf(const QString &path) const
 QString BookManifest::displayTitle(int i) const
 {
     const BookChapter &c = m_chapters.at(i);
-    return c.title.trimmed().isEmpty() ? QFileInfo(c.path).completeBaseName() : c.title;
+    if (!c.title.trimmed().isEmpty()) {
+        return c.title;
+    }
+    // "01 Introduction.md" shows as "Introduction": the sidebar numbers the
+    // chapters itself, in book order.
+    const QString base = QFileInfo(c.path).completeBaseName();
+    static const QRegularExpression prefix(QStringLiteral(R"(^\d+[\s._-]+(?=\S))"));
+    QString t = base;
+    t.remove(prefix);
+    return t.isEmpty() ? base : t;
 }
 
 int BookManifest::add(const QString &path, int at)

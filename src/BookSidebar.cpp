@@ -22,9 +22,12 @@
 #include <QListWidget>
 #include <QLocale>
 #include <QMenu>
+#include <QMessageBox>
+#include <QAbstractItemDelegate>
 #include <QPushButton>
 #include <QSettings>
 #include <QToolButton>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
@@ -54,8 +57,16 @@ BookSidebar::BookSidebar(QWidget *parent)
     m_picker->setObjectName(QStringLiteral("bookPicker"));
     m_picker->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_picker->setMinimumContentsLength(8);
+    m_picker->setToolTip(QStringLiteral("Choose a book"));
     connect(m_picker, &QComboBox::activated, this, [this](int i) {
-        selectBook(m_picker->itemData(i).toString());
+        const QString key = m_picker->itemData(i).toString();
+        if (key.isEmpty()) { // the "New Book…" entry
+            const int cur = m_picker->findData(m_current);
+            m_picker->setCurrentIndex(cur >= 0 ? cur : 0);
+            chooseNewBook();
+            return;
+        }
+        selectBook(key);
     });
     hl->addWidget(m_picker, 1);
     const auto tool = [header, hl](const QString &name, const QString &text, const QString &tip) {
@@ -70,9 +81,10 @@ BookSidebar::BookSidebar(QWidget *parent)
     m_libraryButton = tool(QStringLiteral("bookToLibrary"), QStringLiteral("Library"),
                            QStringLiteral("Show the Library sidebar instead (Ctrl+Shift+L)"));
     connect(m_libraryButton, &QToolButton::clicked, this, &BookSidebar::switchToLibrary);
-    // "+" is a menu, so a click always shows something: New Chapter… (writes a
-    // new file) or Add Existing Chapters… (picks files already in the folder).
-    m_addButton = tool(QStringLiteral("bookAdd"), QStringLiteral("+"),
+    // One clearly labelled button for chapters: a menu with New Chapter… and
+    // Add Existing Chapters…. New Book is in the book picker, the right-click
+    // menu and the File menu.
+    m_addButton = tool(QStringLiteral("bookAdd"), QStringLiteral("+ Chapter"),
                        QStringLiteral("New chapter, or add existing .md / .txt / .odt files"));
     {
         auto *addMenu = new QMenu(m_addButton);
@@ -82,10 +94,10 @@ BookSidebar::BookSidebar(QWidget *parent)
         m_addButton->setMenu(addMenu);
         m_addButton->setPopupMode(QToolButton::InstantPopup);
     }
-    // "New" makes a chapter when a book is open; with no book yet it starts a
-    // book (it never reopens New Book over an open book).
-    m_newButton = tool(QStringLiteral("bookNew"), QStringLiteral("New"),
-                       QStringLiteral("New chapter in this book"));
+    // Kept for code that looks it up, but not shown: "+ Chapter" does its job.
+    m_newButton = new QToolButton(header);
+    m_newButton->setObjectName(QStringLiteral("bookNew"));
+    m_newButton->hide();
     connect(m_newButton, &QToolButton::clicked, this, [this]() {
         if (m_hasBook) {
             chooseNewChapter();
@@ -118,6 +130,30 @@ BookSidebar::BookSidebar(QWidget *parent)
     hint->addStretch(1);
     layout->addWidget(m_hintBox, 1);
 
+    // A book with no chapters yet: say so and offer the two ways to add one.
+    m_emptyBox = new QWidget(this);
+    m_emptyBox->setObjectName(QStringLiteral("bookEmptyBox"));
+    {
+        auto *empty = new QVBoxLayout(m_emptyBox);
+        empty->setContentsMargins(12, 8, 12, 8);
+        empty->setSpacing(8);
+        auto *label = new QLabel(QStringLiteral("This book has no chapters yet."), m_emptyBox);
+        label->setObjectName(QStringLiteral("bookHint"));
+        label->setWordWrap(true);
+        empty->addWidget(label);
+        auto *newChapter = new QPushButton(QStringLiteral("New Chapter…"), m_emptyBox);
+        newChapter->setObjectName(QStringLiteral("bookEmptyNewChapter"));
+        connect(newChapter, &QPushButton::clicked, this, &BookSidebar::chooseNewChapter);
+        empty->addWidget(newChapter, 0, Qt::AlignLeft);
+        auto *addExisting = new QPushButton(QStringLiteral("Add Existing Chapters…"), m_emptyBox);
+        addExisting->setObjectName(QStringLiteral("bookEmptyAdd"));
+        connect(addExisting, &QPushButton::clicked, this, &BookSidebar::chooseChapterFiles);
+        empty->addWidget(addExisting, 0, Qt::AlignLeft);
+        empty->addStretch(1);
+    }
+    m_emptyBox->hide();
+    layout->addWidget(m_emptyBox, 1);
+
     m_view = new QListWidget(this);
     m_view->setObjectName(QStringLiteral("bookList"));
     m_view->setFrameShape(QFrame::NoFrame);
@@ -128,7 +164,29 @@ BookSidebar::BookSidebar(QWidget *parent)
     m_view->setDropIndicatorShown(true);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_view->setFocusPolicy(Qt::ClickFocus);
+    m_view->setFocusPolicy(Qt::StrongFocus); // Tab reaches it: arrows, Enter, F2, Delete
+    m_view->setDragDropOverwriteMode(false);
+    m_view->installEventFilter(this);
+    connect(m_view, &QListWidget::itemChanged, this, [this](QListWidgetItem *item) {
+        if (m_rebuilding || m_renamingRow < 0) {
+            return;
+        }
+        const int row = m_renamingRow;
+        m_renamingRow = -1;
+        if (row < m_book.count() && m_view->row(item) == row) {
+            BookChapter c = m_book.at(row);
+            const QString t = item->text().simplified();
+            // An empty title goes back to the file name.
+            c.title = t == QFileInfo(c.path).completeBaseName() ? QString() : t;
+            QTimer::singleShot(0, this, [this, row, c]() { setChapter(row, c); });
+        }
+    });
+    connect(m_view->itemDelegate(), &QAbstractItemDelegate::closeEditor, this, [this]() {
+        if (m_renamingRow >= 0) { // Esc: nothing changed
+            m_renamingRow = -1;
+            QTimer::singleShot(0, this, [this]() { rebuild(m_view->currentRow()); });
+        }
+    });
     m_view->setWordWrap(true);
     m_view->setTextElideMode(Qt::ElideRight);
     connect(m_view->model(), &QAbstractItemModel::rowsMoved, this, &BookSidebar::onRowsMoved);
@@ -226,6 +284,10 @@ void BookSidebar::scanBooks()
         b.load(QDir(m_root).filePath(sub));
         m_picker->addItem(b.title().trimmed().isEmpty() ? sub : b.title(), sub);
         m_picker->setItemData(m_picker->count() - 1, sub, Qt::ToolTipRole);
+    }
+    if (!m_books.isEmpty()) {
+        m_picker->insertSeparator(m_picker->count());
+        m_picker->addItem(QStringLiteral("New Book…"), QString());
     }
 }
 
@@ -347,12 +409,12 @@ void BookSidebar::updateHeader()
     const bool library = !m_root.isEmpty();
     m_picker->setVisible(!m_books.isEmpty());
     m_title->setVisible(m_books.isEmpty());
-    m_picker->setToolTip(m_book.bookDir());
+    m_picker->setToolTip(QStringLiteral("Choose a book (or New Book…)\n%1").arg(m_book.bookDir()));
     m_addButton->setEnabled(m_hasBook);
     m_newButton->setEnabled(library);
-    m_newButton->setToolTip(m_hasBook ? QStringLiteral("New chapter in this book")
-                                      : QStringLiteral("New book: write book.json in a subfolder of the library"));
-    m_view->setVisible(m_hasBook);
+    m_addButton->setVisible(m_hasBook);
+    m_emptyBox->setVisible(m_hasBook && m_book.count() == 0);
+    m_view->setVisible(m_hasBook && m_book.count() > 0);
     m_footer->setVisible(m_hasBook);
     m_hintBox->setVisible(!m_hasBook);
     m_createButton->setVisible(library && m_lastError.isEmpty());
@@ -568,8 +630,12 @@ void BookSidebar::onRowsMoved()
                                                 : QString();
     m_book.reorder(order);
     // Deferred: the view is still finishing the drop when rowsMoved fires.
-    QMetaObject::invokeMethod(this, [this, moved]() { commit(m_book.indexOf(moved)); },
-                              Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, [this, moved]() {
+        const int at = m_book.indexOf(moved);
+        if (commit(at) && at >= 0) {
+            emit message(QStringLiteral("Moved %1 to position %2").arg(m_book.displayTitle(at)).arg(at + 1));
+        }
+    }, Qt::QueuedConnection);
 }
 
 void BookSidebar::onItemClicked(QListWidgetItem *item)
@@ -605,6 +671,8 @@ QMenu *BookSidebar::buildContextMenu(int row)
         });
         open->setEnabled(!m_book.isMissing(row));
         menu->addAction(QStringLiteral("Edit Details…"), this, [this, row]() { editChapter(row); });
+        QAction *rename = menu->addAction(QStringLiteral("Rename"), this, [this, row]() { renameChapter(row); });
+        rename->setShortcut(QKeySequence(Qt::Key_F2));
         menu->addSeparator();
         QAction *up = menu->addAction(QStringLiteral("Move Up"), this,
                                       [this, row]() { moveChapter(row, row - 1); });
@@ -615,9 +683,10 @@ QMenu *BookSidebar::buildContextMenu(int row)
         down->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Down));
         down->setEnabled(row + 1 < m_book.count());
         menu->addSeparator();
-        menu->addAction(QStringLiteral("Remove from Book"), this,
-                        [this, row]() { removeChapter(row); })
-            ->setToolTip(QStringLiteral("The file itself is kept"));
+        QAction *remove = menu->addAction(QStringLiteral("Remove from Book…"), this,
+                                          [this, row]() { confirmRemoveChapter(row); });
+        remove->setToolTip(QStringLiteral("Asks first; the file is kept unless you choose to delete it"));
+        remove->setShortcut(QKeySequence(QKeySequence::Delete));
         menu->addSeparator();
     }
     menu->addAction(QStringLiteral("New Chapter…"), this, &BookSidebar::chooseNewChapter)
@@ -680,11 +749,11 @@ void BookSidebar::chooseChapterFiles()
 void BookSidebar::applyTheme(const ThemeColors &c)
 {
     setStyleSheet(QStringLiteral(
-        "#bookSidebar { background-color: %1; }"
+        "#bookSidebar, #bookEmptyBox { background-color: %1; }"
         "#bookHeader { background-color: %1; }"
         "#bookTitle { color: %2; font-size: 9pt; font-weight: 600; }"
         "#bookHint, #bookFooter { color: %3; font-size: 9pt; }"
-        "#bookCreate, #bookChooseFolder { color: %2; background-color: %4; border: none;"
+        "#bookCreate, #bookChooseFolder, #bookEmptyNewChapter, #bookEmptyAdd { color: %2; background-color: %4; border: none;"
         " border-radius: 4px; padding: 4px 12px; }"
         "#bookToLibrary, #bookAdd, #bookNew { color: %2; border: none; border-radius: 4px;"
         " padding: 1px 6px; }"
@@ -814,4 +883,107 @@ void BookSidebar::chooseNewChapter()
     });
     m_newChapterDialog = dlg;
     dlg->open();
+}
+
+bool BookSidebar::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_view && event->type() == QEvent::KeyPress && m_renamingRow < 0) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        const int row = m_view->currentRow();
+        if (row >= 0 && ke->modifiers() == Qt::NoModifier) {
+            if (ke->key() == Qt::Key_F2) {
+                renameChapter(row);
+                return true;
+            }
+            if (ke->key() == Qt::Key_Delete || ke->key() == Qt::Key_Backspace) {
+                confirmRemoveChapter(row);
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void BookSidebar::renameChapter(int row)
+{
+    if (row < 0 || row >= m_book.count() || row >= m_view->count()) {
+        return;
+    }
+    QListWidgetItem *item = m_view->item(row);
+    m_rebuilding = true;
+    item->setText(m_book.displayTitle(row));
+    item->setFlags(item->flags() | Qt::ItemIsEditable);
+    m_rebuilding = false;
+    m_renamingRow = row;
+    m_view->setCurrentItem(item);
+    m_view->editItem(item);
+}
+
+void BookSidebar::confirmRemoveChapter(int row)
+{
+    if (row < 0 || row >= m_book.count() || m_removeDialog) {
+        return;
+    }
+    const QString name = m_book.displayTitle(row);
+    const QString path = m_book.at(row).path;
+    auto *box = new QMessageBox(QMessageBox::Question, QStringLiteral("Remove Chapter"),
+                                QStringLiteral("Remove \"%1\" from the book?").arg(name),
+                                QMessageBox::NoButton, window());
+    box->setObjectName(QStringLiteral("bookRemoveDialog"));
+    box->setInformativeText(QStringLiteral("The file %1 stays in the book folder.").arg(path));
+    box->setAttribute(Qt::WA_DeleteOnClose, true);
+    box->setWindowModality(Qt::WindowModal);
+    QPushButton *remove = box->addButton(QStringLiteral("Remove from Book"), QMessageBox::AcceptRole);
+    QPushButton *del = box->addButton(QStringLiteral("Delete File…"), QMessageBox::DestructiveRole);
+    box->addButton(QMessageBox::Cancel);
+    box->setDefaultButton(remove);
+    connect(box, &QMessageBox::buttonClicked, this, [this, box, remove, del, path](QAbstractButton *b) {
+        const int i = m_book.indexOf(path);
+        if (i < 0) {
+            return;
+        }
+        if (b == remove) {
+            removeChapter(i);
+            emit message(QStringLiteral("Removed %1 from the book (file kept)").arg(path));
+        } else if (b == del) {
+            // Second, explicit question; Cancel is the default.
+            auto *sure = new QMessageBox(QMessageBox::Warning, QStringLiteral("Delete File"),
+                                         QStringLiteral("Move %1 to the trash?").arg(path),
+                                         QMessageBox::NoButton, window());
+            sure->setObjectName(QStringLiteral("bookDeleteDialog"));
+            sure->setInformativeText(QStringLiteral("It is also removed from the book."));
+            sure->setAttribute(Qt::WA_DeleteOnClose, true);
+            sure->setWindowModality(Qt::WindowModal);
+            QPushButton *yes = sure->addButton(QStringLiteral("Delete File"), QMessageBox::DestructiveRole);
+            QPushButton *no = sure->addButton(QMessageBox::Cancel);
+            sure->setDefaultButton(no);
+            sure->setEscapeButton(no);
+            connect(sure, &QMessageBox::buttonClicked, this, [this, yes, path](QAbstractButton *c) {
+                const int j = m_book.indexOf(path);
+                if (c == yes && j >= 0) {
+                    deleteChapterFile(j);
+                }
+            });
+            m_removeDialog = sure;
+            sure->open();
+        }
+    });
+    m_removeDialog = box;
+    box->open();
+}
+
+bool BookSidebar::deleteChapterFile(int row)
+{
+    if (row < 0 || row >= m_book.count() || m_book.isOutside(row)) {
+        return false;
+    }
+    const QString abs = m_book.absolutePath(row);
+    const QString rel = m_book.at(row).path;
+    if (QFileInfo::exists(abs) && !QFile::moveToTrash(abs) && !QFile::remove(abs)) {
+        emit message(QStringLiteral("Could not delete %1").arg(rel));
+        return false;
+    }
+    removeChapter(row);
+    emit message(QStringLiteral("Deleted %1").arg(rel));
+    return true;
 }
