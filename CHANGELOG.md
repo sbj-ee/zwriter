@@ -3,6 +3,33 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.10.3] — unreleased
+
+Fixes for the rest of the Author's v1.10.0 report.
+
+- **Ruler (G5).** The ruler now follows the zoom (Fit Page to Width), so its markers sit over
+  the text they control. Dragging snaps to 0.25 cm, keeps at least 3 cm (or half the column)
+  of text, and a whole drag is one undo step. The left and right markers have separate hit
+  areas; the nearer one wins.
+- **Alt+Up/Down (G3)** moves the chapter open in the editor, unless the chapter list has
+  focus (then it moves the selected one). F2 follows the same rule.
+- **Remove Chapter dialog (G2):** the buttons are sized to show their full text.
+- **Style dropdown (G6)** drops down below the box instead of covering it.
+- **LibreOffice tables of contents** open with the page numbers on a right-aligned tab at
+  the column edge. Opening the file still leaves it unmodified.
+- **Export Book dialogs remember the folder** you exported to last.
+- **Toolbar:** shown by default, and the View menu shows Esc next to Always Show Toolbar.
+- **Generated table of contents after a rename.** Renaming a chapter in the sidebar (F2 or
+  Rename) left the file's old title heading in the ToC as a section and dropped the real
+  sections under it. The title heading is now recognised by position too. A changed heading in
+  a chapter also shows up after the book is saved (now tested).
+- **Heading 1-3 and Bibliography** checked: they apply from the style list, show in it, and
+  survive an ODT save and reopen; switching Bibliography to a heading drops the hanging indent.
+  No change needed; now covered by a test.
+- **G9 / G10 (Print dialog after Ctrl+S, typing lag): did not reproduce.** No shortcut is
+  bound twice and Ctrl+S is Save only. Typing in a long ODT chapter with a book open measured
+  under 5 ms for the slowest keystroke (offscreen). Both are now covered by tests.
+
 ## [1.10.2] — unreleased
 
 Book sidebar keyboard fixes (G1).

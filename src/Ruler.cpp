@@ -1,5 +1,6 @@
 #include "Ruler.hpp"
 
+#include "PageWidgets.hpp"
 #include "ParagraphStyles.hpp"
 
 #include <QAbstractTextDocumentLayout>
@@ -34,11 +35,20 @@ QSize Ruler::sizeHint() const
     return {400, 22};
 }
 
+qreal Ruler::zoom() const
+{
+    // Fit Page to Width paints the document scaled; the ruler must follow.
+    if (const auto *pe = qobject_cast<const PageTextEdit *>(m_editor)) {
+        return pe->zoom();
+    }
+    return 1.0;
+}
+
 int Ruler::originX() const
 {
     const QTextDocument *doc = m_editor->document();
     const QTextFrameFormat ff = doc->rootFrame()->frameFormat();
-    const qreal x = ff.leftMargin() + ff.border() + ff.padding() - m_editor->horizontalScrollBar()->value();
+    const qreal x = (ff.leftMargin() + ff.border() + ff.padding()) * zoom() - m_editor->horizontalScrollBar()->value();
     return m_editor->viewport()->mapTo(window(), QPoint(qRound(x), 0)).x() - mapTo(window(), QPoint(0, 0)).x();
 }
 
@@ -54,13 +64,14 @@ int Ruler::markerX(Marker m) const
 {
     const QTextBlockFormat f = m_editor->textCursor().blockFormat();
     const int o = originX();
+    const qreal z = zoom();
     switch (m) {
     case Marker::FirstLine:
-        return o + qRound(f.leftMargin() + f.textIndent());
+        return o + qRound((f.leftMargin() + f.textIndent()) * z);
     case Marker::Left:
-        return o + qRound(f.leftMargin());
+        return o + qRound(f.leftMargin() * z);
     case Marker::Right:
-        return o + qRound(columnWidth() - f.rightMargin());
+        return o + qRound((columnWidth() - f.rightMargin()) * z);
     case Marker::None:
         break;
     }
@@ -73,15 +84,16 @@ void Ruler::paintEvent(QPaintEvent *)
     const QColor fg = palette().color(QPalette::WindowText);
     p.fillRect(rect(), palette().color(QPalette::Window));
     const int o = originX();
-    const qreal w = columnWidth();
+    const qreal z = zoom();
+    const qreal w = columnWidth() * z;
     p.fillRect(QRect(o, 4, qRound(w), height() - 8), palette().color(QPalette::Base));
     p.setPen(fg);
     QFont small = font();
     small.setPointSizeF(qMax(6.0, small.pointSizeF() - 3));
     p.setFont(small);
     // Ticks every 0.5 cm, numbers every cm.
-    for (int half = 1; cmToPx(half * 0.5) <= w; ++half) {
-        const int x = o + qRound(cmToPx(half * 0.5));
+    for (int half = 1; cmToPx(half * 0.5) * z <= w; ++half) {
+        const int x = o + qRound(cmToPx(half * 0.5) * z);
         if (half % 2 == 0) {
             p.drawText(QRect(x - 10, 4, 20, height() - 8), Qt::AlignCenter, QString::number(half / 2));
         } else {
@@ -110,21 +122,26 @@ void Ruler::paintEvent(QPaintEvent *)
 Ruler::Marker Ruler::hit(const QPoint &pt) const
 {
     const bool upper = pt.y() < height() / 2;
-    if (upper && qAbs(pt.x() - markerX(Marker::FirstLine)) <= 6) {
-        return Marker::FirstLine;
+    if (upper) {
+        return qAbs(pt.x() - markerX(Marker::FirstLine)) <= 7 ? Marker::FirstLine : Marker::None;
     }
-    if (!upper && qAbs(pt.x() - markerX(Marker::Left)) <= 6) {
-        return Marker::Left;
+    // Lower half: the nearer of Left and Right, so markers that touch each
+    // still have their own side (left of the middle Left, right of it Right).
+    const int dl = qAbs(pt.x() - markerX(Marker::Left));
+    const int dr = qAbs(pt.x() - markerX(Marker::Right));
+    if (qMin(dl, dr) > 7) {
+        return Marker::None;
     }
-    if (!upper && qAbs(pt.x() - markerX(Marker::Right)) <= 6) {
-        return Marker::Right;
+    if (dl == dr) {
+        return pt.x() <= markerX(Marker::Left) ? Marker::Left : Marker::Right;
     }
-    return Marker::None;
+    return dl < dr ? Marker::Left : Marker::Right;
 }
 
 void Ruler::mousePressEvent(QMouseEvent *e)
 {
     m_drag = e->button() == Qt::LeftButton ? hit(e->position().toPoint()) : Marker::None;
+    m_dragChanged = false;
 }
 
 void Ruler::mouseMoveEvent(QMouseEvent *e)
@@ -146,18 +163,32 @@ void Ruler::mouseReleaseEvent(QMouseEvent *e)
 
 void Ruler::dragTo(int x)
 {
-    // Snap to 0.25 cm.
+    // Screen x -> document px (zoom), snapped to 0.25 cm.
     const qreal step = cmToPx(0.25);
-    const qreal at = qRound((x - originX()) / step) * step;
+    const qreal at = qRound((x - originX()) / zoom() / step) * step;
+    // The text keeps at least 3 cm (or what the column allows).
+    const qreal minText = qMin(cmToPx(3.0), columnWidth() / 2);
     QTextCursor c = m_editor->textCursor();
-    QTextBlockFormat f = c.blockFormat();
+    const QTextBlockFormat old = c.blockFormat();
+    QTextBlockFormat f = old;
     if (m_drag == Marker::FirstLine) {
-        f.setTextIndent(qBound(-f.leftMargin(), at - f.leftMargin(), columnWidth()));
+        f.setTextIndent(qBound(-f.leftMargin(), at - f.leftMargin(), columnWidth() - f.leftMargin() - f.rightMargin() - minText));
     } else if (m_drag == Marker::Left) {
-        f.setLeftMargin(qBound<qreal>(0.0, at, columnWidth() - f.rightMargin() - step));
+        f.setLeftMargin(qBound<qreal>(0.0, at, qMax<qreal>(0.0, columnWidth() - f.rightMargin() - minText)));
     } else if (m_drag == Marker::Right) {
-        f.setRightMargin(qBound<qreal>(0.0, columnWidth() - at, columnWidth() - f.leftMargin() - step));
+        f.setRightMargin(qBound<qreal>(0.0, columnWidth() - at, qMax<qreal>(0.0, columnWidth() - f.leftMargin() - minText)));
+    }
+    if (f.leftMargin() == old.leftMargin() && f.rightMargin() == old.rightMargin() && f.textIndent() == old.textIndent()) {
+        return;
+    }
+    // One drag = one undo step: later changes join the first one.
+    if (m_dragChanged) {
+        c.joinPreviousEditBlock();
+    } else {
+        c.beginEditBlock();
     }
     ParagraphStyles::setGeometry(c, f);
+    c.endEditBlock();
+    m_dragChanged = true;
     update();
 }

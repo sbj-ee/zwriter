@@ -269,6 +269,10 @@ QToolTip {
   border-color: @accent; background-color: @accent; image: url(:/ui/check-@id.png);
 }
 
+/* Combo boxes drop their list down below the box (not centred on the
+   current item, which moved every entry with the current choice). */
+QComboBox { combobox-popup: 0; }
+
 /* ---- Dialogs ------------------------------------------------------------ */
 QDialog, QMessageBox { background-color: @windowBg; color: @fg; }
 QDialog QLabel, QMessageBox QLabel { color: @fg; }

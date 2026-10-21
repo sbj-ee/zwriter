@@ -99,6 +99,8 @@ public:
     QString saveStartDir(const QString &bookDir) const;
     void setCurrentPathForTest(const QString &path) { m_currentPath = path; }
     bool openPathForTest(const QString &path) { return openPath(path); }
+    int alignKeptTocTabs();
+    QString bookExportStartDir() const;
     bool saveToPathForTest(const QString &path) { return saveToPath(path, DocumentIo::Format::Odt); }
     // File → Export as PDF without the dialog (also used by tests).
     bool exportPdfTo(const QString &path);
@@ -316,6 +318,7 @@ private:
     QAction *m_printBookAction = nullptr;
     BookExport::Options m_bookExportOptions;
     bool bookReadyForExport();
+    void rememberBookExportDir(const QString &exportedFile);
     QString runBookExportPath(const QString &title, const QString &filter, const QString &suffix);
     class QTimer *m_captionTimer = nullptr;
     bool m_renumbering = false;
