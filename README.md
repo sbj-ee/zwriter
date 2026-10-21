@@ -193,7 +193,7 @@ chapters in book order. Each book is a subfolder of the library with its own pla
 (chapter paths relative to it), so one library can hold several books; the picker at the top
 switches between them and **New** makes a book of an existing or new subfolder, listing the
 `.md` / `.txt` / `.odt` files directly in it (files in its own subfolders, like `images/`, are not
-chapters). Drag a chapter, or use Move Up / Move Down (`Alt+Up` / `Alt+Down`, which also work
+chapters). Chapters show their title (the file's number prefix is dropped; the sidebar numbers them in book order). **F2** renames a chapter's title, **Delete** asks before removing it (the file is kept unless you choose Delete File… and confirm again), and an empty book offers New Chapter… / Add Existing Chapters…. Drag a chapter, or use Move Up / Move Down (`Alt+Up` / `Alt+Down`, which also work
 while you type in the editor), to reorder; right-click → Edit Details… for title,
 status (Idea / Outline / Draft / Revised / Final; a hand-edited other value is kept and marked
 "unknown status"), POV, tags, word target, synopsis and notes. **+**

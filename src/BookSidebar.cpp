@@ -45,9 +45,17 @@ BookSidebar::BookSidebar(QWidget *parent)
 
     auto *header = new QWidget(this);
     header->setObjectName(QStringLiteral("bookHeader"));
-    auto *hl = new QHBoxLayout(header);
-    hl->setContentsMargins(12, 8, 6, 8);
+    // Two rows: the book picker gets the full width (long titles stay
+    // readable), the buttons go under it.
+    auto *hv = new QVBoxLayout(header);
+    hv->setContentsMargins(12, 8, 6, 4);
+    hv->setSpacing(2);
+    auto *hl = new QHBoxLayout;
     hl->setSpacing(4);
+    auto *bl = new QHBoxLayout;
+    bl->setSpacing(4);
+    hv->addLayout(hl);
+    hv->addLayout(bl);
     m_title = new QLabel(header);
     m_title->setObjectName(QStringLiteral("bookTitle"));
     m_title->setTextFormat(Qt::PlainText);
@@ -69,13 +77,13 @@ BookSidebar::BookSidebar(QWidget *parent)
         selectBook(key);
     });
     hl->addWidget(m_picker, 1);
-    const auto tool = [header, hl](const QString &name, const QString &text, const QString &tip) {
+    const auto tool = [header, bl](const QString &name, const QString &text, const QString &tip) {
         auto *b = new QToolButton(header);
         b->setObjectName(name);
         b->setText(text);
         b->setToolTip(tip);
         b->setAutoRaise(true);
-        hl->addWidget(b);
+        bl->addWidget(b);
         return b;
     };
     m_libraryButton = tool(QStringLiteral("bookToLibrary"), QStringLiteral("Library"),
@@ -94,6 +102,9 @@ BookSidebar::BookSidebar(QWidget *parent)
         m_addButton->setMenu(addMenu);
         m_addButton->setPopupMode(QToolButton::InstantPopup);
     }
+    bl->removeWidget(m_addButton);
+    bl->insertWidget(0, m_addButton);
+    bl->insertStretch(1, 1);
     // Kept for code that looks it up, but not shown: "+ Chapter" does its job.
     m_newButton = new QToolButton(header);
     m_newButton->setObjectName(QStringLiteral("bookNew"));
@@ -753,6 +764,7 @@ void BookSidebar::applyTheme(const ThemeColors &c)
         "#bookHeader { background-color: %1; }"
         "#bookTitle { color: %2; font-size: 9pt; font-weight: 600; }"
         "#bookHint, #bookFooter { color: %3; font-size: 9pt; }"
+        "#bookFooter { padding: 4px 12px 6px 12px; }"
         "#bookCreate, #bookChooseFolder, #bookEmptyNewChapter, #bookEmptyAdd { color: %2; background-color: %4; border: none;"
         " border-radius: 4px; padding: 4px 12px; }"
         "#bookToLibrary, #bookAdd, #bookNew { color: %2; border: none; border-radius: 4px;"
