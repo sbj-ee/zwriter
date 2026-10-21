@@ -18,7 +18,17 @@ Book sidebar keyboard fixes (G1).
 - The current row jumping up by one when the list gets focus did not reproduce offscreen
   (Tab, Ctrl+Tab, mouse and programmatic focus, after rename, after clicking the open
   chapter). Tests now check that the row stays put on each of these paths.
-- Tests: `mainwindow_test` Q. Screenshot `book-list-focus.png`.
+- **Book sidebar header no longer crams or overlaps** (reported on macOS):
+  - The "+ Chapter" menu arrow has its own space at the right of the button; before, the macOS
+    style drew it over the text.
+  - The book picker's arrow sits in its own area inside the box.
+  - Spacing between the title row, the buttons and the list is larger, and the chapter rows
+    have more padding.
+- Tests: `mainwindow_test` Q; `book_test` H checks that no header controls overlap and no
+  button is squeezed, at widths 180-480 px in both themes. CI runs it on Linux and on macOS
+  in the native style, and uploads the macOS screenshot as an artifact.
+- Screenshots: `book-list-focus.png`, `book-header-before-macos.png` (the report),
+  `book-header-before-linux.png`, `book-header-after-linux.png`.
 
 ## [1.10.1] — unreleased
 

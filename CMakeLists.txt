@@ -529,6 +529,7 @@ if(TARGET Qt6::Widgets)
     src/Alignment.hpp
     src/Theme.cpp
     src/Theme.hpp
+    src/ui.qrc
   )
   target_include_directories(book_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ZWRITER_GENERATED_DIR})
   find_package(Qt6 REQUIRED COMPONENTS Test)

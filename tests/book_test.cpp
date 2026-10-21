@@ -20,6 +20,8 @@
 #include <memory>
 #include "BookManifest.hpp"
 #include "BookSidebar.hpp"
+#include <QGuiApplication>
+#include "Theme.hpp"
 #include "DocumentIo.hpp"
 #include "version.hpp"
 
@@ -854,12 +856,86 @@ void detailsTests()
     }
 }
 
+// 1.10.2: the header (book picker, "+ Chapter" with its menu arrow, "Files")
+// never overlaps, at typical sidebar widths, in every theme. Runs on Linux
+// and macOS CI (native style on macOS); ZW_SHOT_DIR saves a screenshot.
+void headerLayoutTests()
+{
+    QTemporaryDir tmp;
+    const QString lib = tmp.path() + "/Library";
+    write(lib + "/Test Book/Chapter 1.odt", QByteArray());
+    write(lib + "/Test Book/Chapter 2.md", "# Chapter 2\n");
+    BookManifest::fromFolder(lib + "/Test Book").save();
+    QMainWindow win;
+    auto *side = new BookSidebar(&win);
+    win.setCentralWidget(side);
+    side->setRootPath(lib);
+    side->selectBook("Test Book");
+    win.show();
+    QWidget *header = side->findChild<QWidget *>("bookHeader");
+    check(header != nullptr, "H  header found");
+    if (!header) {
+        return;
+    }
+    for (const QString theme : {QStringLiteral("dark"), QStringLiteral("paper")}) {
+        side->applyTheme(Theme::colors(theme));
+        for (int w : {180, 220, 260, 320, 480}) {
+            win.resize(w, 500);
+            QApplication::processEvents();
+            QList<QWidget *> kids;
+            for (QWidget *k : header->findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly)) {
+                if (k->isVisible()) {
+                    kids << k;
+                }
+            }
+            QStringList bad;
+            for (int i = 0; i < kids.size(); ++i) {
+                const QRect a = kids[i]->geometry();
+                if (!header->rect().contains(a)) {
+                    bad << kids[i]->objectName() + " outside";
+                }
+                for (int j = i + 1; j < kids.size(); ++j) {
+                    if (a.intersects(kids[j]->geometry())) {
+                        bad << kids[i]->objectName() + "/" + kids[j]->objectName();
+                    }
+                }
+                // A button narrower than it asks for clips its text or its
+                // menu arrow lands on the text (the macOS report).
+                if (auto *b = qobject_cast<QToolButton *>(kids[i])) {
+                    if (b->width() < b->sizeHint().width()) {
+                        bad << b->objectName() + " squeezed";
+                    }
+                }
+            }
+            const QRect list = side->view()->geometry();
+            if (header->geometry().bottom() >= list.top()) {
+                bad << "header/list";
+            }
+            check(bad.isEmpty() && kids.size() >= 3,
+                  qPrintable(QStringLiteral("H  no overlaps in the header (%1, %2 px)").arg(theme).arg(w)),
+                  bad.join(", "));
+        }
+    }
+    auto *add = side->findChild<QToolButton *>("bookAdd");
+    check(add && add->styleSheet().isEmpty() && side->styleSheet().contains("#bookAdd::menu-indicator"),
+          "H  \"+ Chapter\" has room for its own menu arrow");
+    if (!qEnvironmentVariableIsEmpty("ZW_SHOT_DIR")) {
+        QDir().mkpath(qEnvironmentVariable("ZW_SHOT_DIR"));
+        side->applyTheme(Theme::colors(QStringLiteral("dark")));
+        win.resize(260, 300);
+        QApplication::processEvents();
+        QTest::qWait(200);
+        win.grab().save(qEnvironmentVariable("ZW_SHOT_DIR") + "/book-header-" + QGuiApplication::platformName() + ".png");
+    }
+}
+
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("zwriter-test");
     QCoreApplication::setApplicationName("book_test");
     manifestTests();
+    headerLayoutTests();
     tolerantTests();
     outsideTests();
     odtTests();
