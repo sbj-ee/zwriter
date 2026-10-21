@@ -1099,6 +1099,46 @@ QString BookSidebar::createChapter(const QString &title, const QString &suffixIn
     return path;
 }
 
+int BookSidebar::contentsRow() const
+{
+    for (int i = 0; i < m_book.count(); ++i) {
+        if (m_book.displayTitle(i).compare(QLatin1String("Contents"), Qt::CaseInsensitive) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+QString BookSidebar::createContentsChapter()
+{
+    if (!m_hasBook) {
+        return {};
+    }
+    const QDir dir(m_book.bookDir());
+    QString name = QStringLiteral("00 Contents.odt");
+    for (int n = 2; QFileInfo::exists(dir.filePath(name)); ++n) {
+        name = QStringLiteral("00 Contents %1.odt").arg(n);
+    }
+    const QString path = dir.filePath(name);
+    QTextDocument doc;
+    if (!DocumentIo::save(&doc, path, DocumentIo::Format::Odt)) {
+        emit message(QStringLiteral("Could not create %1").arg(name));
+        return {};
+    }
+    BookChapter c;
+    const int at = m_book.add(path, 0);
+    if (at < 0) {
+        return {};
+    }
+    c = m_book.at(at);
+    c.title = QStringLiteral("Contents");
+    m_book.setChapter(at, c);
+    if (!commit(at)) {
+        emit message(QStringLiteral("Created %1, but book.json could not be saved").arg(name));
+    }
+    return QFileInfo(path).absoluteFilePath();
+}
+
 void BookSidebar::chooseNewChapter()
 {
     if (!m_hasBook) {

@@ -23,6 +23,7 @@
 #include <QMenu>
 #include <QPageLayout>
 #include <QPageSize>
+#include <QPainter>
 #include <QPrinter>
 #include "BookToc.hpp"
 #include "Captions.hpp"
@@ -1217,20 +1218,52 @@ void testBookToc(const QString &root)
     if (toc) {
         toc->trigger();
     }
+    // 1.11.0 (N4): the ToC goes into a Contents chapter, created first in the
+    // book and opened, not at the caret; it lists every other chapter.
+    ed = editorOf(w);
+    check(side->book().count() == 3 && side->book().at(0).path == QLatin1String("00 Contents.odt")
+              && w.windowTitle().contains(QLatin1String("00 Contents")) && !ed->document()->isModified(),
+          "T a Contents chapter is made first in the book, opened and saved", side->book().at(0).path + QLatin1Char(' ') + w.windowTitle());
     QStringList lines;
+    QList<int> pages;
     auto collect = [&]() {
         lines.clear();
-        for (QTextBlock b = ed->document()->begin(); b.isValid(); b = b.next()) {
+        pages.clear();
+        for (QTextBlock b = editorOf(w)->document()->begin(); b.isValid(); b = b.next()) {
             if (b.blockFormat().hasProperty(BookToc::GeneratedProperty)) {
-                lines << b.text();
+                lines << b.text().section(QLatin1Char('\t'), 0, 0);
+                pages << b.text().section(QLatin1Char('\t'), 1).toInt();
             }
         }
         return lines.join(QStringLiteral(" | "));
     };
-    check(collect() == QLatin1String("1. Prairie | Meadowlarks | 2. Marsh | Rails"), "T inserted in book order", collect());
-    side->moveChapter(1, 0);
+    check(collect() == QLatin1String("2. Prairie | Meadowlarks | 3. Marsh | Rails"), "T inserted in book order", collect());
+    // N2: the whole-book PDF's page numbers, after a right tab with dot leaders.
+    bool pagesOk = !pages.isEmpty();
+    for (int k = 0; k < pages.size(); ++k) {
+        pagesOk = pagesOk && pages.at(k) > 0 && (k == 0 || pages.at(k) >= pages.at(k - 1));
+    }
+    check(pagesOk && pages.at(2) > pages.at(0), "T page numbers, in order, each chapter on its own page",
+          [&] { QStringList t; for (int p : pages) t << QString::number(p); return t.join(QLatin1Char(',')); }());
+    bool tabbed = true;
+    for (QTextBlock b = editorOf(w)->document()->begin(); b.isValid(); b = b.next()) {
+        if (b.blockFormat().hasProperty(BookToc::GeneratedProperty)) {
+            const auto tabs = b.blockFormat().tabPositions();
+            tabbed = tabbed && !tabs.isEmpty() && tabs.first().type == QTextOption::RightTab;
+        }
+    }
+    check(tabbed, "T the page numbers sit on a right tab");
+    // Running it again from another chapter updates the same Contents chapter.
+    check(w.openPathForTest(dir + QStringLiteral("/02 Marsh.md")), "T open another chapter");
+    if (toc) {
+        toc->trigger();
+    }
+    check(side->book().count() == 3 && w.windowTitle().contains(QLatin1String("00 Contents")) && collect().startsWith(QLatin1String("2. Prairie")),
+          "T Insert/Update from another chapter goes back to Contents", w.windowTitle());
+    ed = editorOf(w);
+    side->moveChapter(2, 1);
     QApplication::processEvents();
-    check(collect() == QLatin1String("1. Marsh | Rails | 2. Prairie | Meadowlarks"), "T a reorder updates it", collect());
+    check(collect() == QLatin1String("2. Marsh | Rails | 3. Prairie | Meadowlarks"), "T a reorder updates it", collect());
     std::unique_ptr<QMenu> m(side->buildContextMenu(-1));
     bool inMenu = false;
     for (QAction *a : m->actions()) {
@@ -1240,7 +1273,7 @@ void testBookToc(const QString &root)
 
     // Rename a chapter: the entry takes the new name, and its sections
     // stay (the old title heading in the file is not listed as a section).
-    side->renameChapter(0); // the menu's Rename; F2 calls the same (group Q)
+    side->renameChapter(1); // the menu's Rename; F2 calls the same (group Q)
     QApplication::processEvents();
     if (auto *line = side->view()->findChild<QLineEdit *>()) {
         line->selectAll();
@@ -1248,14 +1281,14 @@ void testBookToc(const QString &root)
         QTest::keyClick(line, Qt::Key_Return);
     }
     wait(50);
-    check(collect() == QLatin1String("1. Wetlands | Rails | 2. Prairie | Meadowlarks"), "T a rename updates it", collect());
+    check(collect() == QLatin1String("2. Wetlands | Rails | 3. Prairie | Meadowlarks"), "T a rename updates it", collect());
     // A changed heading in a chapter file shows up too (the book saves when the file does).
     put(dir + QStringLiteral("/01 Prairie.md"), "# Prairie\n\n## Larks and Meadowlarks\n");
-    side->setChapter(1, side->book().at(1)); // what saving a chapter does: the book is saved, bookChanged follows
+    side->setChapter(2, side->book().at(2)); // what saving a chapter does: the book is saved, bookChanged follows
     QApplication::processEvents();
-    check(collect() == QLatin1String("1. Wetlands | Rails | 2. Prairie | Larks and Meadowlarks"),
+    check(collect() == QLatin1String("2. Wetlands | Rails | 3. Prairie | Larks and Meadowlarks"),
           "T a changed heading updates it", collect());
-    ed->document()->setModified(false);
+    editorOf(w)->document()->setModified(false);
 }
 
 // 1.9.0: Insert Caption numbers figures "Figure <chapter>.<n>"; they follow
@@ -1943,6 +1976,167 @@ void testHeadingsRetest(const QString &root)
     ed->document()->setModified(false);
 }
 
+// 1.11.0 (retest N2, N8): dot leaders in the editor for a kept LibreOffice ToC
+// and zwriter's own; page numbers survive a save; timings of a big book.
+void testTocPagesRetest(const QString &root)
+{
+    MainWindow w;
+    w.resize(1100, 800);
+    w.show();
+    wait(50);
+    const QString copy = root + QStringLiteral("/toc-leaders.odt");
+    QFile::remove(copy);
+    QFile::copy(QStringLiteral(ZW_SOURCE_DIR "/tests/data/toc-libreoffice.odt"), copy);
+    check(w.openPathForTest(copy), "Y open a LibreOffice file with a ToC");
+    auto *ed = qobject_cast<PageTextEdit *>(editorOf(w));
+    auto leaderPixels = [&](PageTextEdit *e) {
+        const QSizeF size = e->document()->size();
+        QImage img(size.toSize(), QImage::Format_ARGB32);
+        img.fill(Qt::transparent);
+        QPainter p(&img);
+        e->paintLeaders(&p, QRectF(QPointF(0, 0), size));
+        p.end();
+        int n = 0;
+        for (int y = 0; y < img.height(); ++y) {
+            for (int x = 0; x < img.width(); ++x) {
+                n += qAlpha(img.pixel(x, y)) > 100 ? 1 : 0;
+            }
+        }
+        return n;
+    };
+    const int kept = ed ? leaderPixels(ed) : 0;
+    check(ed && kept > 50 && !ed->document()->isModified(), "Y2 the kept ToC shows dot leaders (painted; file unchanged)",
+          QString::number(kept));
+    // Zoomed (Fit Page to Width) too: the same dots, scaled with the page.
+    ed->document()->setModified(false);
+
+    // zwriter's ToC with page numbers: saved and read back.
+    QTextDocument d;
+    QTextCursor c(&d);
+    c.insertText(QStringLiteral("x"));
+    QList<BookToc::Entry> list{{1, QStringLiteral("1. Prairie"), 0, 3}, {2, QStringLiteral("Meadowlarks"), 0, 4}};
+    BookToc::insertOrUpdate(&d, nullptr, list);
+    const QString path = root + QStringLiteral("/toc-pages.odt");
+    DocumentIo::save(&d, path, DocumentIo::Format::Odt);
+    QTextDocument back;
+    DocumentIo::load(&back, path);
+    QStringList got;
+    for (QTextBlock b = back.begin(); b.isValid(); b = b.next()) {
+        if (b.blockFormat().hasProperty(BookToc::GeneratedProperty)) {
+            got << b.text().replace(QLatin1Char('\t'), QLatin1Char('|'));
+        }
+    }
+    check(got == QStringList({QStringLiteral("1. Prairie|3"), QStringLiteral("Meadowlarks|4")}),
+          "Y2 page numbers survive an ODT save and reopen", got.join(QStringLiteral(", ")));
+    QByteArray content;
+    {
+        QProcess unzip;
+        unzip.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("content.xml")});
+        unzip.waitForFinished(5000);
+        content = unzip.readAllStandardOutput();
+    }
+    check(content.isEmpty() || content.contains("1. Prairie<text:tab/>3"), "Y2 ... written as entry, tab, page (as LibreOffice does)");
+    check(w.openPathForTest(path), "Y2 open it");
+    auto *ed2 = qobject_cast<PageTextEdit *>(editorOf(w));
+    check(ed2 && leaderPixels(ed2) > 20, "Y2 and its lines show leaders");
+    editorOf(w)->document()->setModified(false);
+}
+
+// N8: timings with a big book (30 chapters, ~90,000 words), offscreen.
+// Printed so CI logs show them; the limits are loose, to catch regressions.
+void testBigBookTimings(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/lib-big");
+    const QString book = lib + QStringLiteral("/Big Book");
+    QDir().mkpath(book);
+    QString para;
+    for (int i = 0; i < 25; ++i) {
+        para += QStringLiteral("The kestrel hovered over the verge, tail fanned, head perfectly still. ");
+    }
+    for (int ch = 1; ch <= 30; ++ch) {
+        QTextDocument d;
+        QTextCursor c(&d);
+        QTextBlockFormat h;
+        h.setHeadingLevel(1);
+        c.setBlockFormat(h);
+        c.insertText(QStringLiteral("Chapter %1").arg(ch));
+        for (int k = 0; k < 4; ++k) {
+            QTextBlockFormat h2;
+            h2.setHeadingLevel(2);
+            c.insertBlock(h2);
+            c.insertText(QStringLiteral("Section %1.%2").arg(ch).arg(k + 1));
+            for (int pgh = 0; pgh < 4; ++pgh) {
+                c.insertBlock(QTextBlockFormat());
+                c.insertText(para);
+            }
+        }
+        DocumentIo::save(&d, book + QStringLiteral("/%1 Chapter %2.odt").arg(ch, 2, 10, QLatin1Char('0')).arg(ch),
+                         DocumentIo::Format::Odt);
+    }
+    BookManifest::fromFolder(book).save();
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("view/fullPageView"), true);
+        s.setValue(QStringLiteral("library/rootPath"), lib);
+        s.setValue(QStringLiteral("library/visible"), false);
+        s.setValue(QStringLiteral("book/visible"), true);
+        s.setValue(QStringLiteral("book/current"), QStringLiteral("Big Book"));
+        s.sync();
+    }
+    MainWindow w;
+    w.resize(1100, 800);
+    w.show();
+    wait(100);
+    auto *side = w.findChild<BookSidebar *>();
+    if (!side || side->book().count() != 30) {
+        check(false, "Z big book");
+        return;
+    }
+    QElapsedTimer t;
+    t.start();
+    w.exportBookPdfTo(root + QStringLiteral("/big1.pdf"), BookExport::Options());
+    const qint64 pdf1 = t.restart();
+    w.exportBookPdfTo(root + QStringLiteral("/big2.pdf"), BookExport::Options());
+    const qint64 pdf2 = t.restart();
+    QAction *toc = w.findChild<QAction *>(QStringLiteral("fileToc"));
+    toc->trigger();
+    const qint64 tocMs = t.restart();
+    check(w.openPathForTest(side->book().absolutePath(5)), "Z open a chapter");
+    const qint64 openMs = t.restart();
+    QTextEdit *ed = editorOf(w);
+    QTextCursor end(ed->document());
+    end.movePosition(QTextCursor::End);
+    ed->setTextCursor(end);
+    ed->setFocus();
+    qint64 worst = 0;
+    const QString typed = QStringLiteral("typing at the end of a long chapter in a big book. ");
+    for (const QChar ch : typed) {
+        QElapsedTimer one;
+        one.start();
+        QTest::keyClick(ed, ch.toLatin1());
+        QApplication::processEvents();
+        worst = qMax(worst, one.elapsed());
+    }
+    wait(400);
+    QElapsedTimer settle;
+    settle.start();
+    QApplication::processEvents();
+    worst = qMax(worst, settle.elapsed());
+    t.restart();
+    QMetaObject::invokeMethod(&w, "fileSave");
+    const qint64 saveMs = t.restart();
+    std::printf("      Z timings: first PDF %lld ms, second PDF %lld ms, Insert/Update ToC %lld ms, open chapter %lld ms, "
+                "worst keystroke %lld ms, save %lld ms\n",
+                pdf1, pdf2, tocMs, openMs, worst, saveMs);
+    check(worst < 150, "Z8 no keystroke blocks the window in a big book", QStringLiteral("%1 ms").arg(worst));
+    // Filling in the ToC page numbers relaid the whole book once per line
+    // (~10 s for this book, 275 pages); now once.
+    check(pdf1 < 6000 && tocMs < 6000, "Z8 whole-book PDF and Insert/Update ToC take seconds, not tens",
+          QStringLiteral("%1 / %2 ms").arg(pdf1).arg(tocMs));
+    check(saveMs < 1000, "Z8 saving a chapter is quick", QStringLiteral("%1 ms").arg(saveMs));
+    ed->document()->setModified(false);
+}
+
 void testUsabilityFixes(const QString &root)
 {
     const QString lib = root + QStringLiteral("/lib-usab");
@@ -2211,6 +2405,16 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_Z")) { // quick local runs
+        testBigBookTimings(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_Y")) { // quick local runs
+        testTocPagesRetest(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_X")) { // quick local runs
         testHeadingsRetest(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -2318,6 +2522,8 @@ int main(int argc, char **argv)
     testUsabilityFixes(dataDir.path());
     testSidebarRetest(dataDir.path());
     testHeadingsRetest(dataDir.path());
+    testTocPagesRetest(dataDir.path());
+    testBigBookTimings(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

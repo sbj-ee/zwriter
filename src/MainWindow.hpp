@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BookExport.hpp"
+#include "BookToc.hpp"
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
 
@@ -54,6 +55,8 @@ public:
     bool chromeShown() const;
     // Ctrl+Tab: the editor to the chapter list and back.
     void swapEditorAndChapters();
+    // The book's ToC entries with the whole-book PDF's page numbers.
+    QList<BookToc::Entry> bookTocEntries() const;
     // After a rename in the Book sidebar: the chapter's title heading follows.
     void retitleChapterHeading(const QString &path, const QString &oldTitle, const QString &newTitle);
     explicit MainWindow(QWidget *parent = nullptr);

@@ -3,6 +3,33 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.11.0] — unreleased
+
+Tables of contents with page numbers and a home of their own, from the Author's 1.10.3 retest
+(N2, N4, N8).
+
+- **The generated table of contents shows page numbers (N2).** Each entry is followed by the page
+  that the whole-book PDF puts it on (same Export Book options and Page Setup), on a right tab at
+  the column edge with dot leaders. The numbers are found by laying out the book exactly as
+  Export Book does, so they match the PDF, not the editor's own page view. They come from the saved
+  chapter files and are refreshed when the Contents chapter is opened or the book changes. They are
+  saved to ODT as LibreOffice writes them (entry, tab, page).
+- **Dot leaders in the editor (N2):** an existing LibreOffice table of contents (and zwriter's own)
+  shows dots across the tab to its right-aligned page numbers. They are painted only; the text and
+  the file are not changed.
+- **Insert/Update Table of Contents goes to the Contents chapter (N4).** That is the chapter titled
+  "Contents"; if there is none, it is created as `00 Contents.odt`, first in the book. It is opened
+  (after the usual save prompt), the table is put at its top, and it is saved. The table lists every
+  other chapter. Before, the table went in at the caret of whatever chapter was open and left that
+  chapter out.
+- **Whole-book PDF and the ToC page numbers are ~10× faster (N8).** Filling in the numbers relaid
+  the whole joined book once per ToC line (a 275-page test book: 10.8 s per export, every time).
+  It is now one edit, laid out once (1.0 s).
+- **N8 typing lag / out-of-order keys: not reproduced.** In a 30-chapter, ~90,000-word book
+  (offscreen), the slowest keystroke took 9–15 ms, including deferred work. Saving a chapter
+  takes ~20 ms and opening one ~30 ms. The lag the Author saw is most likely the test machine's
+  display; mainwindow_test group Z now prints these timings on every CI run.
+
 ## [1.10.5] — unreleased
 
 Headings and chapter files, from the Author's 1.10.3 retest (N3, N5, minor items).

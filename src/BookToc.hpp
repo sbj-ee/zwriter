@@ -27,7 +27,10 @@ struct Entry {
     int level = 1;   // 1 chapter, 2 heading inside it, 3 sub-heading
     QString text;
     int chapter = 0; // index in book.json
+    int page = 0;    // page in the whole-book PDF (0 = not known): shown after a tab
 };
+// "text<TAB>page" (just the text without a page).
+QString lineText(const Entry &e);
 
 // Headings of one chapter file: (level, text), in order. .odt by its
 // headings, .md by its # lines (code fences skipped), .txt has none.

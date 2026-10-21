@@ -2343,18 +2343,44 @@ bool MainWindow::insertMarkdownPicture(const QByteArray &data)
 
 bool MainWindow::insertBookToc()
 {
-    if (m_markdownMode || !m_book || !m_book->hasBook()) {
-        statusBar()->showMessage(QStringLiteral("Open a book (and an .odt or new document) to insert its table of contents."), 5000);
+    if (!m_book || !m_book->hasBook()) {
+        statusBar()->showMessage(QStringLiteral("Open a book to insert its table of contents."), 5000);
         return false;
     }
-    QTextCursor at = m_editor->textCursor();
+    // The table of contents lives in the book's Contents chapter (created as
+    // "00 Contents.odt", first in the book, if there is none), not wherever the
+    // caret happens to be; it lists every other chapter.
+    int row = m_book->contentsRow();
+    QString contents = row >= 0 ? m_book->book().absolutePath(row) : QString();
+    const bool isOpen = !contents.isEmpty() && !m_currentPath.isEmpty()
+        && QFileInfo(m_currentPath).absoluteFilePath() == QFileInfo(contents).absoluteFilePath();
+    if (!isOpen) {
+        if (!maybeSave()) {
+            return false;
+        }
+        if (contents.isEmpty()) {
+            contents = m_book->createContentsChapter();
+            if (contents.isEmpty()) {
+                return false;
+            }
+        }
+        if (!openPath(contents) || m_markdownMode) {
+            statusBar()->showMessage(QStringLiteral("The Contents chapter must be an .odt file for a table of contents."), 6000);
+            return false;
+        }
+    }
+    QTextCursor at(m_editor->document());
     const bool had = BookToc::hasToc(m_editor->document());
-    BookToc::insertOrUpdate(m_editor->document(), &at, BookToc::entries(m_book->book(), 2, m_currentPath));
+    BookToc::insertOrUpdate(m_editor->document(), &at, bookTocEntries());
+    alignKeptTocTabs();
     if (!at.block().next().isValid()) {
         at.movePosition(QTextCursor::End);
         at.insertBlock(QTextBlockFormat(), QTextCharFormat());
     }
-    statusBar()->showMessage(had ? QStringLiteral("Table of contents updated") : QStringLiteral("Table of contents inserted"), 4000);
+    fileSave(); // the Contents chapter is saved with its table
+    statusBar()->showMessage(had ? QStringLiteral("Table of contents updated in %1").arg(QFileInfo(contents).fileName())
+                                 : QStringLiteral("Table of contents inserted in %1").arg(QFileInfo(contents).fileName()),
+                             5000);
     m_editor->setFocus();
     return true;
 }
@@ -2502,12 +2528,52 @@ void MainWindow::retitleChapterHeading(const QString &path, const QString &oldTi
     refreshBookToc();
 }
 
+// The generated ToC's entries with page numbers: the pages the whole-book PDF
+// (File > Export Book > PDF, with its current options and the page setup) puts
+// each chapter and heading on. They are found by laying the book out exactly as
+// the export does, so they match the PDF, not the editor's own pages.
+QList<BookToc::Entry> MainWindow::bookTocEntries() const
+{
+    QList<BookToc::Entry> list = BookToc::entries(m_book->book(), 2, m_currentPath);
+    BookExport::Options options = m_bookExportOptions;
+    options.pagesOnly = true;
+    const QPageLayout layout = m_printer ? m_printer->pageLayout() : QPageLayout();
+    PrintLayout::Page page;
+    page.sheetMm = PrintLayout::sheetSizeMm(layout);
+    page.marginsMm = layout.margins(QPageLayout::Millimeter);
+    const BookExport::Result r = BookExport::build(m_book->book(), options, page, m_editor->document()->defaultFont());
+    QHash<int, int> chapterPage;
+    QHash<QPair<int, QString>, int> headingPage;
+    int chapter = -1;
+    static const QRegularExpression numbered(QStringLiteral("^(\\d+)\\. "));
+    for (const BookExport::TocLine &line : r.toc) {
+        if (line.level == 1) {
+            const auto m = numbered.match(line.text);
+            chapter = m.hasMatch() ? m.captured(1).toInt() - 1 : -1;
+            if (chapter >= 0 && !chapterPage.contains(chapter)) {
+                chapterPage.insert(chapter, line.page);
+            }
+        } else if (chapter >= 0) {
+            const QPair<int, QString> key{chapter, line.text};
+            if (!headingPage.contains(key)) {
+                headingPage.insert(key, line.page);
+            }
+        }
+    }
+    for (BookToc::Entry &e : list) {
+        e.page = e.level == 1 ? chapterPage.value(e.chapter) : headingPage.value({e.chapter, e.text});
+    }
+    return list;
+}
+
 bool MainWindow::refreshBookToc()
 {
     if (m_markdownMode || !m_book || !m_book->hasBook() || !BookToc::hasToc(m_editor->document())) {
         return false;
     }
-    return BookToc::insertOrUpdate(m_editor->document(), nullptr, BookToc::entries(m_book->book(), 2, m_currentPath));
+    const bool changed = BookToc::insertOrUpdate(m_editor->document(), nullptr, bookTocEntries());
+    alignKeptTocTabs();
+    return changed;
 }
 
 bool MainWindow::addCaption(int position)
@@ -3556,10 +3622,15 @@ int MainWindow::alignKeptTocTabs()
     int n = 0;
     for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
         QTextBlockFormat f = b.blockFormat();
-        if (!f.hasProperty(DocumentIo::TocProperty) || !b.text().contains(QLatin1Char('\t'))) {
+        if (!(f.hasProperty(DocumentIo::TocProperty) || f.hasProperty(DocumentIo::GeneratedTocProperty))
+            || !b.text().contains(QLatin1Char('\t'))) {
             continue;
         }
-        f.setTabPositions({QTextOption::Tab(column - f.leftMargin() - f.rightMargin() - 2, QTextOption::RightTab)});
+        const QList<QTextOption::Tab> tabs{QTextOption::Tab(column - f.leftMargin() - f.rightMargin() - 2, QTextOption::RightTab)};
+        if (f.tabPositions() == tabs) {
+            continue;
+        }
+        f.setTabPositions(tabs);
         QTextCursor(b).setBlockFormat(f);
         ++n;
     }

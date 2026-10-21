@@ -81,6 +81,12 @@ public:
     // book folder with the title as its first heading, appends it to book.json
     // and opens it. Returns the new file's path, or "" (message() says why).
     QString createChapter(const QString &title, const QString &suffix);
+    // The book's Contents chapter: titled "Contents" (or a file named "NN Contents").
+    // -1 if there is none.
+    int contentsRow() const;
+    // Creates "00 Contents.odt" as the book's first chapter (does not open it).
+    // Returns its absolute path, empty on failure.
+    QString createContentsChapter();
     void chooseNewChapter();                // asks for title + format (non-blocking)
     static QString chapterFileName(int number, const QString &title, const QString &suffix);
     // F2: edit the chapter's title (book.json) in place in the list.

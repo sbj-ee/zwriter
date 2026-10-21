@@ -2059,9 +2059,14 @@ QString generatedTocContent(const QString &src, const QTextDocument *copy)
             tocStyles.insert(QStringLiteral("p%1").arg(b.blockFormatIndex()));
             const int level = qBound(1, f.intProperty(GeneratedTocProperty), 9);
             maxLevel = qMax(maxLevel, level);
-            body += QStringLiteral("<text:p text:style-name=\"Contents_20_%1\">%2<text:tab/></text:p>")
+            // "entry<TAB>page" (zwriter puts the whole-book PDF's page numbers there).
+            const QString line = b.text();
+            const qsizetype tab = line.lastIndexOf(QLatin1Char('\t'));
+            const QString entry = tab >= 0 ? line.left(tab) : line;
+            const QString page = tab >= 0 ? line.mid(tab + 1) : QString();
+            body += QStringLiteral("<text:p text:style-name=\"Contents_20_%1\">%2<text:tab/>%3</text:p>")
                         .arg(level)
-                        .arg(b.text().toHtmlEscaped());
+                        .arg(entry.toHtmlEscaped(), page.toHtmlEscaped());
         }
     }
     if (tocStyles.isEmpty()) {

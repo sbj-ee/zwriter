@@ -1,4 +1,7 @@
 #include "PageWidgets.hpp"
+#include <cmath>
+#include <QTextLayout>
+#include "DocumentIo.hpp"
 #include "Images.hpp"
 
 #include <QBuffer>
@@ -301,10 +304,62 @@ void PageTextEdit::restartCaretBlink()
     }
 }
 
+// Dot leaders: a table of contents line "entry<TAB>page" (a LibreOffice one kept
+// from the file, or zwriter's generated one) gets dots across its tab, as it
+// prints. Qt's text layout has no leader tabs, so they are painted on top; the
+// document text is not changed.
+void PageTextEdit::paintLeaders(QPainter *p, const QRectF &docClip) const
+{
+    const QTextDocument *doc = document();
+    QAbstractTextDocumentLayout *layout = doc->documentLayout();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        const QTextBlockFormat f = b.blockFormat();
+        if (!(f.hasProperty(DocumentIo::TocProperty) || f.hasProperty(DocumentIo::GeneratedTocProperty))) {
+            continue;
+        }
+        const int tab = int(b.text().lastIndexOf(QLatin1Char('\t')));
+        if (tab < 0 || tab + 1 >= b.text().size()) {
+            continue;
+        }
+        const QRectF br = layout->blockBoundingRect(b);
+        if (!br.intersects(docClip)) {
+            continue;
+        }
+        const QTextLayout *tl = b.layout();
+        const QTextLine line = tl->lineForTextPosition(tab);
+        if (!line.isValid() || tl->lineForTextPosition(tab + 1).lineNumber() != line.lineNumber()) {
+            continue;
+        }
+        QTextCursor at(b);
+        at.setPosition(b.position() + tab + 1);
+        const QTextCharFormat cf = at.charFormat();
+        const QFontMetricsF fm(cf.font());
+        const qreal step = fm.horizontalAdvance(QStringLiteral(". "));
+        const qreal from = line.cursorToX(tab) + fm.horizontalAdvance(QLatin1Char(' '));
+        const qreal to = line.cursorToX(tab + 1) - fm.horizontalAdvance(QLatin1Char(' '));
+        if (step <= 0 || to - from < step) {
+            continue;
+        }
+        p->save();
+        p->setFont(cf.font());
+        p->setPen(cf.foreground().style() == Qt::NoBrush ? palette().color(QPalette::Text) : cf.foreground().color());
+        const qreal y = br.top() + line.y() + line.ascent();
+        // On a common grid, so the dots of all lines sit in columns.
+        for (qreal x = std::ceil(from / step) * step; x + fm.horizontalAdvance(QLatin1Char('.')) <= to; x += step) {
+            p->drawText(QPointF(br.left() + x, y), QStringLiteral("."));
+        }
+        p->restore();
+    }
+}
+
 void PageTextEdit::paintEvent(QPaintEvent *event)
 {
     if (!isZoomed()) {
         QTextEdit::paintEvent(event);
+        QPainter p(viewport());
+        const QPointF offset(horizontalScrollBar()->value(), verticalScrollBar()->value());
+        p.translate(-offset);
+        paintLeaders(&p, QRectF(event->rect()).translated(offset));
         return;
     }
     // Draw the true-size layout scaled, with the caret and selections QTextEdit
@@ -332,6 +387,7 @@ void PageTextEdit::paintEvent(QPaintEvent *event)
     }
     p.setClipRect(ctx.clip);
     document()->documentLayout()->draw(&p, ctx);
+    paintLeaders(&p, ctx.clip);
 }
 
 namespace {
