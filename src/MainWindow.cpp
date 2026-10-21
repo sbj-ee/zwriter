@@ -3149,7 +3149,10 @@ bool MainWindow::openPath(const QString &path)
     }
     const bool loaded = DocumentIo::load(m_editor->document(), path, &error);
     if (m_highlighter) {
+        // Highlight now (this also cancels the pass setDocument() queues,
+        // which would mark the just-opened document modified).
         m_highlighter->setDocument(m_editor->document());
+        m_highlighter->refreshAll();
     }
     if (!loaded) {
         QMessageBox::warning(this, QStringLiteral("Open failed"), error);
