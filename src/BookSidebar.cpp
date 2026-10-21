@@ -1,6 +1,7 @@
 #include "BookSidebar.hpp"
 
 #include "BookChapterDialog.hpp"
+#include "DocumentIo.hpp"
 
 #include <QAbstractItemModel>
 #include <QAction>
@@ -8,6 +9,12 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QComboBox>
+#include <QDialogButtonBox>
+#include <QFile>
+#include <QFormLayout>
+#include <QLineEdit>
+#include <QRegularExpression>
+#include <QTextDocument>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QKeyEvent>
@@ -63,12 +70,29 @@ BookSidebar::BookSidebar(QWidget *parent)
     m_libraryButton = tool(QStringLiteral("bookToLibrary"), QStringLiteral("Library"),
                            QStringLiteral("Show the Library sidebar instead (Ctrl+Shift+L)"));
     connect(m_libraryButton, &QToolButton::clicked, this, &BookSidebar::switchToLibrary);
+    // "+" is a menu, so a click always shows something: New Chapter… (writes a
+    // new file) or Add Existing Chapters… (picks files already in the folder).
     m_addButton = tool(QStringLiteral("bookAdd"), QStringLiteral("+"),
-                       QStringLiteral("Add chapters (.md / .txt / .odt inside the book folder)"));
-    connect(m_addButton, &QToolButton::clicked, this, &BookSidebar::chooseChapterFiles);
+                       QStringLiteral("New chapter, or add existing .md / .txt / .odt files"));
+    {
+        auto *addMenu = new QMenu(m_addButton);
+        addMenu->setObjectName(QStringLiteral("bookAddMenu"));
+        addMenu->addAction(QStringLiteral("New Chapter…"), this, &BookSidebar::chooseNewChapter);
+        addMenu->addAction(QStringLiteral("Add Existing Chapters…"), this, &BookSidebar::chooseChapterFiles);
+        m_addButton->setMenu(addMenu);
+        m_addButton->setPopupMode(QToolButton::InstantPopup);
+    }
+    // "New" makes a chapter when a book is open; with no book yet it starts a
+    // book (it never reopens New Book over an open book).
     m_newButton = tool(QStringLiteral("bookNew"), QStringLiteral("New"),
-                       QStringLiteral("New book: write book.json in a subfolder of the library"));
-    connect(m_newButton, &QToolButton::clicked, this, &BookSidebar::chooseNewBook);
+                       QStringLiteral("New chapter in this book"));
+    connect(m_newButton, &QToolButton::clicked, this, [this]() {
+        if (m_hasBook) {
+            chooseNewChapter();
+        } else {
+            chooseNewBook();
+        }
+    });
     layout->addWidget(header);
 
     m_hintBox = new QWidget(this);
@@ -326,6 +350,8 @@ void BookSidebar::updateHeader()
     m_picker->setToolTip(m_book.bookDir());
     m_addButton->setEnabled(m_hasBook);
     m_newButton->setEnabled(library);
+    m_newButton->setToolTip(m_hasBook ? QStringLiteral("New chapter in this book")
+                                      : QStringLiteral("New book: write book.json in a subfolder of the library"));
     m_view->setVisible(m_hasBook);
     m_footer->setVisible(m_hasBook);
     m_hintBox->setVisible(!m_hasBook);
@@ -594,8 +620,13 @@ QMenu *BookSidebar::buildContextMenu(int row)
             ->setToolTip(QStringLiteral("The file itself is kept"));
         menu->addSeparator();
     }
-    menu->addAction(QStringLiteral("Add Chapters…"), this, &BookSidebar::chooseChapterFiles)
+    menu->addAction(QStringLiteral("New Chapter…"), this, &BookSidebar::chooseNewChapter)
         ->setEnabled(m_hasBook);
+    menu->addAction(QStringLiteral("Add Existing Chapters…"), this, &BookSidebar::chooseChapterFiles)
+        ->setEnabled(m_hasBook);
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("New Book…"), this, &BookSidebar::chooseNewBook)
+        ->setEnabled(!m_root.isEmpty());
     return menu;
 }
 
@@ -668,4 +699,119 @@ void BookSidebar::applyTheme(const ThemeColors &c)
         "QListWidget#bookList::item:selected { background-color: %5; color: %6; }")
                       .arg(c.barBg.name(), c.fg.name(), c.muted.name(), c.hover.name(),
                            c.accentSoft.name(), c.accentFg.name(), c.border.name()));
+}
+
+QString BookSidebar::chapterFileName(int number, const QString &title, const QString &suffix)
+{
+    static const QRegularExpression bad(QStringLiteral(R"([/\\:*?"<>|\x00-\x1f])"));
+    QString t = title;
+    t.replace(bad, QStringLiteral(" "));
+    t = t.simplified();
+    while (t.startsWith(QLatin1Char('.'))) {
+        t.remove(0, 1);
+    }
+    if (t.isEmpty()) {
+        t = QStringLiteral("Chapter %1").arg(number);
+    }
+    return QStringLiteral("%1 %2.%3").arg(number, 2, 10, QLatin1Char('0')).arg(t, suffix);
+}
+
+QString BookSidebar::createChapter(const QString &title, const QString &suffixIn)
+{
+    if (!m_hasBook) {
+        emit message(QStringLiteral("Open or create a book first"));
+        return {};
+    }
+    const QString suffix = suffixIn.toLower();
+    if (!BookManifest::isChapterSuffix(suffix)) {
+        emit message(QStringLiteral("Chapters are .odt, .md or .txt files"));
+        return {};
+    }
+    const QString heading = title.simplified().isEmpty()
+        ? QStringLiteral("Chapter %1").arg(m_book.count() + 1)
+        : title.simplified();
+    const QDir dir(m_book.bookDir());
+    QString name = chapterFileName(m_book.count() + 1, heading, suffix);
+    for (int n = 2; QFileInfo::exists(dir.filePath(name)); ++n) {
+        name = chapterFileName(m_book.count() + 1, heading + QStringLiteral(" %1").arg(n), suffix);
+    }
+    const QString path = dir.filePath(name);
+    bool ok = false;
+    if (suffix == QLatin1String("odt")) {
+        QTextDocument doc;
+        doc.setHtml(QStringLiteral("<h1>%1</h1><p></p>").arg(heading.toHtmlEscaped()));
+        ok = DocumentIo::save(&doc, path, DocumentIo::Format::Odt);
+    } else {
+        QFile f(path);
+        const QByteArray text = suffix == QLatin1String("md")
+            ? (QStringLiteral("# ") + heading + QStringLiteral("\n\n")).toUtf8()
+            : (heading + QStringLiteral("\n\n")).toUtf8();
+        ok = f.open(QIODevice::WriteOnly | QIODevice::NewOnly) && f.write(text) == text.size();
+    }
+    if (!ok) {
+        emit message(QStringLiteral("Could not create %1").arg(name));
+        return {};
+    }
+    const int at = m_book.add(path);
+    if (at < 0 || !commit(at)) {
+        emit message(QStringLiteral("Created %1, but book.json could not be saved").arg(name));
+        return path;
+    }
+    emit message(QStringLiteral("New chapter %1").arg(name));
+    emit fileActivated(QDir::cleanPath(path));
+    return path;
+}
+
+void BookSidebar::chooseNewChapter()
+{
+    if (!m_hasBook) {
+        chooseNewBook();
+        return;
+    }
+    if (m_newChapterDialog) {
+        m_newChapterDialog->raise();
+        return;
+    }
+    auto *dlg = new QDialog(window());
+    dlg->setObjectName(QStringLiteral("bookNewChapterDialog"));
+    dlg->setWindowTitle(QStringLiteral("New Chapter"));
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+    dlg->setWindowModality(Qt::WindowModal);
+    auto *form = new QFormLayout(dlg);
+    auto *title = new QLineEdit(dlg);
+    title->setObjectName(QStringLiteral("chapterTitle"));
+    title->setPlaceholderText(QStringLiteral("Chapter %1").arg(m_book.count() + 1));
+    form->addRow(QStringLiteral("&Title:"), title);
+    auto *format = new QComboBox(dlg);
+    format->setObjectName(QStringLiteral("chapterFormat"));
+    format->addItem(QStringLiteral("ODT document (.odt)"), QStringLiteral("odt"));
+    format->addItem(QStringLiteral("Markdown (.md)"), QStringLiteral("md"));
+    format->addItem(QStringLiteral("Plain text (.txt)"), QStringLiteral("txt"));
+    // Default to the format most chapters already use.
+    QMap<QString, int> uses;
+    for (int i = 0; i < m_book.count(); ++i) {
+        ++uses[QFileInfo(m_book.at(i).path).suffix().toLower()];
+    }
+    int best = 0;
+    for (int i = 0; i < format->count(); ++i) {
+        if (uses.value(format->itemData(i).toString()) > uses.value(format->itemData(best).toString())) {
+            best = i;
+        }
+    }
+    format->setCurrentIndex(best);
+    form->addRow(QStringLiteral("&Format:"), format);
+    auto *where = new QLabel(QStringLiteral("Saved in %1 and added at the end of the book.")
+                                 .arg(QDir::toNativeSeparators(m_book.bookDir())), dlg);
+    where->setWordWrap(true);
+    form->addRow(where);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dlg);
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Create"));
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
+    connect(dlg, &QDialog::accepted, this, [this, title, format]() {
+        createChapter(title->text(), format->currentData().toString());
+    });
+    m_newChapterDialog = dlg;
+    dlg->open();
 }

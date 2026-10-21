@@ -75,6 +75,12 @@ public:
     bool setChapter(int row, const BookChapter &chapter);
     void editChapter(int row);              // opens the details dialog (non-blocking)
     void chooseChapterFiles();
+    // New Chapter: writes "<NN> <title>.<suffix>" (suffix odt / md / txt) in the
+    // book folder with the title as its first heading, appends it to book.json
+    // and opens it. Returns the new file's path, or "" (message() says why).
+    QString createChapter(const QString &title, const QString &suffix);
+    void chooseNewChapter();                // asks for title + format (non-blocking)
+    static QString chapterFileName(int number, const QString &title, const QString &suffix);
 
     QListWidget *view() const { return m_view; }
     QPushButton *createButton() const { return m_createButton; }
@@ -82,6 +88,8 @@ public:
     QInputDialog *newBookDialog() const { return m_newBookDialog.data(); }
     BookChapterDialog *chapterDialog() const { return m_dialog.data(); }
     QFileDialog *fileDialog() const { return m_fileDialog.data(); }
+    QDialog *newChapterDialog() const { return m_newChapterDialog.data(); }
+    QToolButton *addButton() const { return m_addButton; }
     QMenu *buildContextMenu(int row); // caller owns
     QString lastError() const { return m_lastError; }
     int currentRow() const;
@@ -135,4 +143,5 @@ private:
     QLabel *m_footer = nullptr;
     QPointer<BookChapterDialog> m_dialog;
     QPointer<QFileDialog> m_fileDialog;
+    QPointer<QDialog> m_newChapterDialog;
 };

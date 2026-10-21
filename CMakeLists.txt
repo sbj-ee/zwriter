@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.5.3 LANGUAGES CXX)
+project(zwriter VERSION 1.5.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -309,6 +309,18 @@ if(ZWRITER_BUILD_TESTS)
   add_test(NAME images COMMAND images_test)
   set_tests_properties(images PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+  add_executable(toc_preserve_test
+    tests/toc_preserve_test.cpp
+    src/DocumentIo.cpp
+    src/Images.cpp
+    src/Alignment.cpp
+  )
+  target_include_directories(toc_preserve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_compile_definitions(toc_preserve_test PRIVATE ZW_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(toc_preserve_test PRIVATE Qt6::Gui)
+  add_test(NAME toc_preserve COMMAND toc_preserve_test)
+  set_tests_properties(toc_preserve PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
   # GUI-test regressions: print scale, ODT manifest/styles, RTF import/export, tables.
   add_executable(regression_test
     tests/regression_test.cpp
@@ -444,7 +456,8 @@ if(TARGET Qt6::Widgets)
     src/Theme.hpp
   )
   target_include_directories(book_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ZWRITER_GENERATED_DIR})
-  target_link_libraries(book_test PRIVATE Qt6::Widgets)
+  find_package(Qt6 REQUIRED COMPONENTS Test)
+  target_link_libraries(book_test PRIVATE Qt6::Widgets Qt6::Test)
   add_test(NAME book COMMAND book_test)
   add_test(NAME deb_depends COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_CURRENT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/deb_depends_test.cmake)
   set_tests_properties(book PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config-book_test")
@@ -465,6 +478,7 @@ if(TARGET Qt6::Widgets)
   endforeach()
   find_package(Qt6 REQUIRED COMPONENTS Test)
   target_link_libraries(mainwindow_test PRIVATE Qt6::Test)
+  target_compile_definitions(mainwindow_test PRIVATE ZW_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME mainwindow COMMAND mainwindow_test)
   set_tests_properties(mainwindow PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion"

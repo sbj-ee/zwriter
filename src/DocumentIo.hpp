@@ -53,6 +53,10 @@ void resetMarkdownFileFormat(QTextDocument *doc);
 // line endings / has lone CRs, or is not valid UTF-8 (shown as U+FFFD).
 bool markdownLoadWasLossy(const QTextDocument *doc);
 
+// Block property of paragraphs that came from an ODT text:table-of-content
+// (value: index of the table in the file). Saving to ODT writes the original
+// table back in their place, unchanged (see the "zwriter.odtTocs" property).
+constexpr int TocProperty = 0x100000 + 0x5B01; // QTextFormat::UserProperty + 0x5B01
 bool load(QTextDocument *doc, const QString &path, QString *error = nullptr);
 bool save(QTextDocument *doc, const QString &path, Format format, QString *error = nullptr);
 
