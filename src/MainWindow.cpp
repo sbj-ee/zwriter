@@ -2115,6 +2115,9 @@ bool MainWindow::insertMarkdownPicture(const QByteArray &data)
         return false;
     }
     QTextCursor c = m_editor->textCursor();
+    if (c.hasSelection()) { // keep the selected text: insert after it
+        c.setPosition(c.selectionEnd());
+    }
     c.insertText(Images::markdownImageLink(rel));
     m_editor->setTextCursor(c);
     m_editor->setFocus();

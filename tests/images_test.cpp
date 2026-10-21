@@ -403,6 +403,29 @@ void testMarkdownAssets(const QString &dir)
           "M link escapes spaces", Images::markdownImageLink(a));
 }
 
+// 1.5.4 fix: inserting a picture with text selected keeps the text and puts
+// the picture after the selection.
+void testInsertKeepsSelection()
+{
+    QTextDocument doc;
+    doc.setPlainText(QStringLiteral("Keep this sentence."));
+    QTextCursor c(&doc);
+    c.setPosition(5);
+    c.setPosition(9, QTextCursor::KeepAnchor); // "this"
+    check(Images::insertImage(c, encoded(solid(20, 10, Qt::red), "PNG")), "S insert with a selection");
+    const QString text = doc.toPlainText();
+    check(text == QStringLiteral("Keep this") + QChar(0xFFFC) + QStringLiteral(" sentence."),
+          "S selected text kept; picture inserted at the selection's end", text);
+    check(!c.hasSelection() && c.position() == 10, "S caret after the picture");
+    // Backwards selection (anchor after position) too.
+    QTextCursor b(&doc);
+    b.setPosition(4);
+    b.setPosition(0, QTextCursor::KeepAnchor);
+    Images::insertImage(b, encoded(solid(20, 10, Qt::blue), "PNG"));
+    check(doc.toPlainText().startsWith(QStringLiteral("Keep") + QChar(0xFFFC)), "S backwards selection kept too",
+          doc.toPlainText());
+}
+
 void testRichToMarkdown(const QString &dir)
 {
     QTextDocument doc;
@@ -548,6 +571,7 @@ int main(int argc, char **argv)
     testInsert();
     testRtf(tmp.path());
     testMarkdownAssets(tmp.path());
+    testInsertKeepsSelection();
     testRichToMarkdown(tmp.path());
     testLibreOffice(tmp.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
