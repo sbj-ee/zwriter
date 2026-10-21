@@ -20,13 +20,39 @@ on:
 permissions:
   contents: read
 
+# One release per tag at a time; a second run for the same tag waits, then
+# finds the release already published and stops (see the gate job).
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  # GitHub can deliver the same tag push twice (v1.10.3 got two runs created
+  # in the same second; the second failed at "release already exists").
+  # Runs are serialised above; this gate makes the later one a no-op.
+  gate:
+    name: Check ${{ github.ref_name }} is not published yet
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::Release $GITHUB_REF_NAME already exists; nothing to do (duplicate run)."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
   linux:
     name: Build Linux ${{ github.ref_name }}
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -90,6 +116,8 @@ jobs:
           if-no-files-found: error
 
   macos:
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
     name: Build macOS ${{ github.ref_name }}
     runs-on: macos-14
     permissions:
@@ -217,6 +245,12 @@ jobs:
           fi
           minisign -V -P "$pub" -m out/SHA256SUMS -x out/SHA256SUMS.minisig
 
+          # Last check (a run that started before another finished publishing):
+          # never replace a published release's assets.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::Release $GITHUB_REF_NAME already exists; not publishing again."
+            exit 0
+          fi
           gh release create "$GITHUB_REF_NAME" \
             "out/zwriter-${version}-Linux-amd64.deb" \
             "out/zwriter-${version}-Darwin.dmg" \

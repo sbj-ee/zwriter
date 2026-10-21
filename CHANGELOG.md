@@ -25,6 +25,12 @@ Tables of contents with page numbers and a home of their own, from the Author's 
 - **Whole-book PDF and the ToC page numbers are ~10× faster (N8).** Filling in the numbers relaid
   the whole joined book once per ToC line (a 275-page test book: 10.8 s per export, every time).
   It is now one edit, laid out once (1.0 s).
+- **Release workflow: one release per tag, even if a run is duplicated.** The v1.10.3 tag push
+  started two Release runs (same tag, same commit, created in the same second). The runs were
+  already serialised, so the second waited, rebuilt and signed, then failed at "a release with the
+  same tag name already exists". The published release was not affected. A gate job now skips the
+  builds when the release already exists, and the publish step re-checks before creating it, so a
+  duplicate run ends green without touching the published assets.
 - **N8 typing lag / out-of-order keys: not reproduced.** In a 30-chapter, ~90,000-word book
   (offscreen), the slowest keystroke took 9–15 ms, including deferred work. Saving a chapter
   takes ~20 ms and opening one ~30 ms. The lag the Author saw is most likely the test machine's
