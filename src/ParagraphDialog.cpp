@@ -3,6 +3,7 @@
 #include "ParagraphStyles.hpp"
 
 #include <QComboBox>
+#include <QLabel>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -51,7 +52,10 @@ ParagraphDialog::ParagraphDialog(const QTextBlockFormat &f, QWidget *parent)
     m_by = cmBox(indents);
     specialRow->addWidget(m_special);
     specialRow->addWidget(m_by);
-    fi->addRow(QStringLiteral("&Special:"), specialRow);
+    // A row that is a layout gets no buddy, so "&" would show: label it by hand.
+    auto *specialLabel = new QLabel(QStringLiteral("&Special:"), indents);
+    specialLabel->setBuddy(m_special);
+    fi->addRow(specialLabel, specialRow);
     top->addWidget(indents);
 
     auto *spacing = new QGroupBox(QStringLiteral("Spacing"), this);
@@ -72,7 +76,9 @@ ParagraphDialog::ParagraphDialog(const QTextBlockFormat &f, QWidget *parent)
     m_percent->setSuffix(QStringLiteral(" %"));
     lineRow->addWidget(m_line);
     lineRow->addWidget(m_percent);
-    fs->addRow(QStringLiteral("Li&ne spacing:"), lineRow);
+    auto *lineLabel = new QLabel(QStringLiteral("Li&ne spacing:"), spacing);
+    lineLabel->setBuddy(m_line);
+    fs->addRow(lineLabel, lineRow);
     top->addWidget(spacing);
 
     auto *fa = new QFormLayout;
