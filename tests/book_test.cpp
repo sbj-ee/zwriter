@@ -547,7 +547,10 @@ void usabilityTests()
     saved.load(dir);
     check(saved.at(1).title == "Songbirds of the Prairie" && list->item(1)->text().startsWith("2. Songbirds of the Prairie\n"),
           "U  Enter saves the new title to book.json", saved.at(1).title);
-    check(QFile::exists(dir + "/02_Songbirds.md"), "U  ... the file keeps its name");
+    // 1.11.3 (M4): the file follows the title, its number prefix kept.
+    check(QFile::exists(dir + "/02_Songbirds of the Prairie.md") && !QFile::exists(dir + "/02_Songbirds.md")
+              && saved.at(1).path == "02_Songbirds of the Prairie.md",
+          "U  ... the file is renamed to match, number kept", saved.at(1).path);
     QTest::keyClick(list, Qt::Key_F2);
     editor = list->viewport()->findChild<QLineEdit *>();
     if (editor) {

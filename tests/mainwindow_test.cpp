@@ -1857,7 +1857,7 @@ void testHeadingsRetest(const QString &root)
     // N3, a chapter that is not open (Markdown): its "# " line follows.
     check(win->openPathForTest(book + QStringLiteral("/02 Beta.odt")), "X chapter 2 open");
     rename(0, QStringLiteral("Prairie"));
-    QFile md(book + QStringLiteral("/01 Alpha.md"));
+    QFile md(book + QStringLiteral("/01 Prairie.md")); // 1.11.3: the file follows the title
     md.open(QIODevice::ReadOnly);
     const QByteArray mdNow = md.readAll();
     md.close();
@@ -1865,13 +1865,13 @@ void testHeadingsRetest(const QString &root)
           QString::fromUtf8(mdNow));
     // ... a closed ODT chapter whose only heading is the title.
     rename(2, QStringLiteral("Zeta"));
-    check(fileText(QStringLiteral("03 Gamma.odt")).startsWith(QLatin1String("Zeta")), "X3 ... and an ODT one",
-          fileText(QStringLiteral("03 Gamma.odt")));
+    check(fileText(QStringLiteral("03 Zeta.odt")).startsWith(QLatin1String("Zeta")), "X3 ... and an ODT one",
+          fileText(QStringLiteral("03 Zeta.odt")));
     // The open chapter, nothing unsaved: changed in the editor and saved; Ctrl+Z undoes it.
     QTextEdit *ed = editorOf(*win);
     rename(1, QStringLiteral("Marsh"));
     check(ed->document()->firstBlock().text() == QLatin1String("Marsh") && !ed->document()->isModified()
-              && fileText(QStringLiteral("02 Beta.odt")).startsWith(QLatin1String("Marsh")),
+              && fileText(QStringLiteral("02 Marsh.odt")).startsWith(QLatin1String("Marsh")),
           "X3 rename the open chapter: heading changed and saved", ed->document()->firstBlock().text());
     ed->setFocus();
     QTest::keySequence(ed, QKeySequence::Undo);
@@ -1907,7 +1907,7 @@ void testHeadingsRetest(const QString &root)
     wait(300);
     qApp->setProperty("zwHoldPrompts", false);
     check(ed->document()->firstBlock().text() == QLatin1String("Marshes") && ed->document()->isModified()
-              && fileText(QStringLiteral("02 Beta.odt")).startsWith(QLatin1String("Marsh\n")),
+              && fileText(QStringLiteral("02 Marshes.odt")).startsWith(QLatin1String("Marsh\n")),
           "X3 ... Change Heading changes it in the editor only (still unsaved)", ed->document()->firstBlock().text());
     QMetaObject::invokeMethod(win.get(), "fileSave");
     // The generated ToC: titles once, no old title or lone title heading as a section.
@@ -1958,11 +1958,11 @@ void testHeadingsRetest(const QString &root)
     QMetaObject::invokeMethod(win.get(), "fileSave");
 
     // Minor: Renumber Files… is offered, asks, and is never automatic.
-    side->moveChapter(2, 0); // Zeta (03 Gamma.odt) first
+    side->moveChapter(2, 0); // Zeta (03 Zeta.odt) first
     QApplication::processEvents();
-    check(QFileInfo::exists(book + QStringLiteral("/03 Gamma.odt")), "XR a reorder renames nothing");
+    check(QFileInfo::exists(book + QStringLiteral("/03 Zeta.odt")), "XR a reorder renames nothing");
     const auto plan = side->renumberPlan();
-    check(plan.size() == 3 && plan.at(0).first == QLatin1String("03 Gamma.odt") && plan.at(0).second == QLatin1String("01 Gamma.odt"),
+    check(plan.size() == 3 && plan.at(0).first == QLatin1String("03 Zeta.odt") && plan.at(0).second == QLatin1String("01 Zeta.odt"),
           "XR the plan renumbers in book order", plan.isEmpty() ? QString() : plan.at(0).second);
     qApp->setProperty("zwHoldPrompts", true);
     QTimer::singleShot(200, []() {
@@ -1970,18 +1970,18 @@ void testHeadingsRetest(const QString &root)
             box->reject();
         }
     });
-    check(!side->renumberFiles(true) && QFileInfo::exists(book + QStringLiteral("/03 Gamma.odt")), "XR Cancel renames nothing");
+    check(!side->renumberFiles(true) && QFileInfo::exists(book + QStringLiteral("/03 Zeta.odt")), "XR Cancel renames nothing");
     qApp->setProperty("zwHoldPrompts", false);
     const QString title0 = side->book().displayTitle(0);
     check(side->renumberFiles(false), "XR Rename Files");
-    check(QFileInfo::exists(book + QStringLiteral("/01 Gamma.odt")) && QFileInfo::exists(book + QStringLiteral("/02 Alpha.md"))
-              && QFileInfo::exists(book + QStringLiteral("/03 Beta.odt")) && side->book().at(0).path == QLatin1String("01 Gamma.odt")
+    check(QFileInfo::exists(book + QStringLiteral("/01 Zeta.odt")) && QFileInfo::exists(book + QStringLiteral("/02 Prairie.md"))
+              && QFileInfo::exists(book + QStringLiteral("/03 Marshes.odt")) && side->book().at(0).path == QLatin1String("01 Zeta.odt")
               && side->book().displayTitle(0) == title0 && side->renumberPlan().isEmpty(),
           "XR files follow the order; titles stay", side->book().at(0).path + QLatin1Char(' ') + side->book().displayTitle(0));
-    check(win->windowTitle().contains(QLatin1String("03 Beta")), "XR the open chapter follows its new name", win->windowTitle());
+    check(win->windowTitle().contains(QLatin1String("03 Marshes")), "XR the open chapter follows its new name", win->windowTitle());
     BookManifest again;
     again.load(book);
-    check(again.count() == 3 && again.at(2).path == QLatin1String("03 Beta.odt"), "XR book.json saved");
+    check(again.count() == 3 && again.at(2).path == QLatin1String("03 Marshes.odt"), "XR book.json saved");
     ed->document()->setModified(false);
 }
 
@@ -2508,7 +2508,85 @@ void testRetest1111(const QString &root)
         wait(50);
         check(list->visualItemRect(list->item(2)).top() == below, "R M6 ... nor after Esc");
     }
-    // @@R1111_MORE@@
+    // M4: renaming a chapter renames its file, number kept; book.json and the
+    // open chapter follow; Renumber keeps names and titles in sync.
+    {
+        check(win->openPathForTest(book + QStringLiteral("/02 Beta.odt")), "R M4 Beta open");
+        side->renameChapter(1);
+        QApplication::processEvents();
+        if (auto *line = side->view()->findChild<QLineEdit *>()) {
+            line->setText(QStringLiteral("Bravo"));
+            QTest::keyClick(line, Qt::Key_Return);
+        }
+        wait(150);
+        check(QFileInfo::exists(book + QStringLiteral("/02 Bravo.odt")) && !QFileInfo::exists(book + QStringLiteral("/02 Beta.odt")),
+              "R M4 02 Beta.odt renamed to 02 Bravo.odt");
+        check(side->book().at(1).path == QLatin1String("02 Bravo.odt"), "R M4 book.json follows", side->book().at(1).path);
+        {
+            BookManifest saved;
+            check(saved.load(book) && saved.at(1).path == QLatin1String("02 Bravo.odt"), "R M4 ... and is saved");
+        }
+        check(win->windowTitle().contains(QLatin1String("02 Bravo.odt")), "R M4 the open chapter follows", win->windowTitle());
+        QTextDocument d;
+        DocumentIo::load(&d, book + QStringLiteral("/02 Bravo.odt"));
+        check(d.begin().text() == QLatin1String("Bravo"), "R M4 its heading follows too", d.begin().text());
+        // A name that is taken is never overwritten.
+        writeFile(book + QStringLiteral("/03 Taken.md"), "keep me\n");
+        BookChapter g = side->book().at(2);
+        g.title = QStringLiteral("Taken");
+        side->setChapter(2, g);
+        QString err;
+        check(!side->renameChapterFile(2, &err) && QFileInfo::exists(book + QStringLiteral("/03 Gamma.md")) && !err.isEmpty(),
+              "R M4 an existing file is not overwritten", err);
+        QFile keep(book + QStringLiteral("/03 Taken.md"));
+        keep.open(QIODevice::ReadOnly);
+        check(keep.readAll() == "keep me\n", "R M4 ... its contents are untouched");
+        keep.close();
+        QFile::remove(book + QStringLiteral("/03 Taken.md"));
+        // Renumber brings both the number and the title into the name.
+        g.title = QStringLiteral("Delta");
+        side->setChapter(2, g);
+        side->moveChapter(2, 0);
+        QApplication::processEvents();
+        const auto plan = side->renumberPlan();
+        QStringList shown;
+        for (const auto &p : plan) {
+            shown << p.first + QStringLiteral("->") + p.second;
+        }
+        check(shown.contains(QStringLiteral("03 Gamma.md->01 Delta.md")) && shown.contains(QStringLiteral("01 Alpha.md->02 Alpha.md"))
+                  && shown.contains(QStringLiteral("02 Bravo.odt->03 Bravo.odt")),
+              "R M4 Renumber plan: numbers and titles", shown.join(QStringLiteral(", ")));
+        check(side->renumberFiles(false) && side->renumberPlan().isEmpty() && QFileInfo::exists(book + QStringLiteral("/01 Delta.md")),
+              "R M4 Renumber done: names in sync");
+    }
+
+    // M5: dialogs start in the current book's folder, not one left from before.
+    {
+        const QString stale = root + QStringLiteral("/stale-folder");
+        QDir().mkpath(stale);
+        QDir().mkpath(lib + QStringLiteral("/export"));
+        {
+            QSettings s;
+            s.setValue(QStringLiteral("files/lastDir"), stale);
+            s.setValue(QStringLiteral("export/bookDir"), stale);
+            s.setValue(QStringLiteral("export/bookDirFor"), root + QStringLiteral("/Old Book"));
+        }
+        check(QFileInfo(win->openStartDir()) == QFileInfo(book), "R M5 Open starts in the book folder", win->openStartDir());
+        check(QFileInfo(win->bookExportStartDir()) == QFileInfo(book), "R M5 Export Book: not another book's export folder",
+              win->bookExportStartDir());
+        win->exportBookEpubTo(stale + QStringLiteral("/R.epub"), BookExport::Options());
+        check(QFileInfo(win->bookExportStartDir()) == QFileInfo(stale), "R M5 ... but this book's last export folder",
+              win->bookExportStartDir());
+        side->chooseNewBook();
+        QApplication::processEvents();
+        if (QInputDialog *nb = side->newBookDialog()) {
+            check(nb->textValue().isEmpty() && nb->labelText().contains(QDir::toNativeSeparators(lib)),
+                  "R M5 New Book starts empty, in the library folder", nb->textValue() + QLatin1Char('|') + nb->labelText());
+            nb->reject();
+        } else {
+            check(false, "R M5 New Book dialog");
+        }
+    }
     win->close();
 }
 

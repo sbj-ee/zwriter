@@ -89,6 +89,11 @@ public:
     QString createContentsChapter();
     void chooseNewChapter();                // asks for title + format (non-blocking)
     static QString chapterFileName(int number, const QString &title, const QString &suffix);
+    // Renames chapter row's file to follow its title, keeping its number:
+    // "02 Beta.odt" -> "02 Bravo.odt" (1.11.3). Never overwrites another file;
+    // book.json and an open chapter follow. False when nothing was renamed.
+    bool renameChapterFile(int row, QString *error = nullptr);
+    static QString fileTitle(const QString &title);
     // F2: edit the chapter's title (book.json) in place in the list.
     void renameChapter(int row);
     // Delete: asks first. "Remove from Book" (the default) keeps the file;

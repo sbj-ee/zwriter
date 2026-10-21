@@ -3,6 +3,23 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.11.3] — unreleased
+
+Book files and dialog folders, from the Author's 1.11.0 retest (M4, M5).
+
+- **Renaming a chapter renames its file (M4).** Beta → Bravo turns `02 Beta.odt` into
+  `02 Bravo.odt` (number kept); `book.json`, the open chapter and its title heading follow. An
+  existing file of that name is never overwritten (the file keeps its name and the status bar says
+  why), and a case-only rename works on macOS too.
+- **Renumber Files… keeps names and titles in sync (M4).** It now uses the chapter's title as well
+  as its place, so older renamed chapters catch up (`03 Gamma.md` titled Delta and moved first
+  becomes `01 Delta.md`).
+- **Dialogs start in the current book's folder (M5).** Open starts in the open book's folder (else
+  the open file's, else the folder used last). Export Book reuses the folder used last only when it
+  was for this book. Export PDF starts next to the file (or in the book folder). New Book starts
+  with an empty name and shows the full library path, instead of offering the first spare folder
+  (often an old export folder).
+
 ## [1.11.2] — unreleased
 
 Editor fixes from the Author's 1.11.0 retest (M2, M6).

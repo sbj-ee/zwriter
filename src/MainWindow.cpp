@@ -3910,7 +3910,7 @@ QString MainWindow::runOpenDocumentDialog()
     dlg.setNameFilters(DocumentIo::openFilter().split(QStringLiteral(";;")));
     dlg.selectNameFilter(m_markdownMode ? QStringLiteral("Markdown (*.md *.markdown)")
                                         : QStringLiteral("OpenDocument Text (*.odt)"));
-    dlg.setDirectory(documentsStartDir());
+    dlg.setDirectory(openStartDir());
 
     if (dlg.exec() != QDialog::Accepted) {
         return {};
@@ -3932,7 +3932,7 @@ QString MainWindow::runExportPdfDialog()
     dlg.setNameFilters({QStringLiteral("PDF (*.pdf)")});
     dlg.selectNameFilter(QStringLiteral("PDF (*.pdf)"));
     dlg.setDefaultSuffix(QStringLiteral("pdf"));
-    dlg.setDirectory(documentsStartDir());
+    dlg.setDirectory(saveStartDir(m_book && m_book->hasBook() ? m_book->book().bookDir() : QString()));
     dlg.selectFile(dlg.directory().filePath(defaultBaseName() + QStringLiteral(".pdf")));
 
     if (dlg.exec() != QDialog::Accepted) {
@@ -4025,16 +4025,35 @@ bool MainWindow::bookReadyForExport()
 // book's own folder.
 QString MainWindow::bookExportStartDir() const
 {
-    const QString last = QSettings().value(QStringLiteral("export/bookDir")).toString();
-    if (!last.isEmpty() && QFileInfo(last).isDir()) {
+    // The folder used last for this book (1.11.3: not one left from another book).
+    const QString bookDir = m_book && m_book->hasBook() ? m_book->book().bookDir() : QString();
+    const QSettings s;
+    const QString last = s.value(QStringLiteral("export/bookDir")).toString();
+    const QString lastFor = s.value(QStringLiteral("export/bookDirFor")).toString();
+    if (!last.isEmpty() && QFileInfo(last).isDir()
+        && (bookDir.isEmpty() || QDir::cleanPath(lastFor) == QDir::cleanPath(bookDir))) {
         return last;
     }
-    return m_book ? m_book->book().bookDir() : QString();
+    return !bookDir.isEmpty() ? bookDir : openStartDir();
 }
 
 void MainWindow::rememberBookExportDir(const QString &exportedFile)
 {
-    QSettings().setValue(QStringLiteral("export/bookDir"), QFileInfo(exportedFile).absolutePath());
+    QSettings s;
+    s.setValue(QStringLiteral("export/bookDir"), QFileInfo(exportedFile).absolutePath());
+    s.setValue(QStringLiteral("export/bookDirFor"), m_book && m_book->hasBook() ? m_book->book().bookDir() : QString());
+}
+
+QString MainWindow::openStartDir() const
+{
+    // The open book's folder, else the open file's, else the last used / Documents.
+    if (m_book && m_book->hasBook() && QDir(m_book->book().bookDir()).exists()) {
+        return m_book->book().bookDir();
+    }
+    if (!m_currentPath.isEmpty() && QFileInfo(m_currentPath).absoluteDir().exists()) {
+        return QFileInfo(m_currentPath).absolutePath();
+    }
+    return documentsStartDir();
 }
 
 QString MainWindow::runBookExportPath(const QString &title, const QString &filter, const QString &suffix)

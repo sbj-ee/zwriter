@@ -110,6 +110,9 @@ public:
     bool openPathForTest(const QString &path) { return openPath(path); }
     int alignKeptTocTabs();
     QString bookExportStartDir() const;
+    // Folder the Open dialog starts in (1.11.3): the open book's folder, else
+    // the open file's folder, else the last-used / Documents folder.
+    QString openStartDir() const;
     bool saveToPathForTest(const QString &path) { return saveToPath(path, DocumentIo::Format::Odt); }
     // File → Export as PDF without the dialog (also used by tests).
     bool exportPdfTo(const QString &path);
