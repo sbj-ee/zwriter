@@ -38,6 +38,18 @@ using NewPageFn = std::function<bool()>;
 // (pageRect is the whole sheet in device pixels), for headers/footers.
 using OverlayFn = std::function<void(QPainter *, const QRectF &pageRect, int page, int pages)>;
 
+// The copy of `src` that gets painted. QTextDocument::clone() drops the
+// first paragraph's format (margins, line height, page break); it is put back.
+QTextDocument *copyForPrint(const QTextDocument &src);
+
+// Gives `doc` the page size and margins paintDocument uses (layout pixels),
+// so its layout matches the printed pages. Document margin is set to 0.
+void preparePages(QTextDocument *doc, const Page &page);
+// 1-based page of the block in a document set up by preparePages.
+int pageOf(QTextDocument *doc, int position);
+// Text width of a page in layout pixels.
+qreal textWidth(const Page &page);
+
 // Lays out a clone of `src` at layout DPI for `page` and paints every page.
 // `painter` must be active on a device of deviceDpiX/Y whose origin is the
 // sheet's top-left corner (QPrinter with fullPage(true)). Returns the page count.

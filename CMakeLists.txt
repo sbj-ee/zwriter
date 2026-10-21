@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.9.0 LANGUAGES CXX)
+project(zwriter VERSION 1.10.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -151,6 +151,10 @@ add_executable(zwriter
   src/BookToc.cpp
   src/BookToc.hpp
   src/Captions.cpp
+  src/BookExport.cpp
+  src/BookExport.hpp
+  src/BookExportDialog.cpp
+  src/BookExportDialog.hpp
   src/Captions.hpp
   src/BookSidebar.hpp
   src/icons.qrc
@@ -358,6 +362,22 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(book_toc_test PRIVATE Qt6::Gui)
   add_test(NAME book_toc COMMAND book_toc_test)
   set_tests_properties(book_toc PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+  add_executable(book_export_test
+    tests/book_export_test.cpp
+    src/BookExport.cpp
+    src/BookManifest.cpp
+    src/Captions.cpp
+    src/DocumentIo.cpp
+    src/Images.cpp
+    src/ParagraphStyles.cpp
+    src/Alignment.cpp
+    src/PrintLayout.cpp
+  )
+  target_include_directories(book_export_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(book_export_test PRIVATE Qt6::Widgets Qt6::PrintSupport)
+  add_test(NAME book_export COMMAND book_export_test)
+  set_tests_properties(book_export PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
   add_executable(captions_test
     tests/captions_test.cpp

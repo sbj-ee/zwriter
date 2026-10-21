@@ -120,6 +120,10 @@ signals:
     void switchToLibrary();
     void bookChanged(); // after every successful save
     void tocRequested(); // "Insert/Update Table of Contents" from the menu
+    // Export Book > PDF / EPUB and Print Book from the menu (1.10.0).
+    void exportBookPdfRequested();
+    void exportBookEpubRequested();
+    void printBookRequested();
 
 private:
     void loadCurrent();

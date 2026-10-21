@@ -3,6 +3,25 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.10.0] — unreleased
+
+Export and print the whole book.
+
+- **File → Export Book → PDF… / EPUB…** and **File → Print Book…**, also in the Book sidebar
+  menu. All chapters in book.json order, each starting on a new page under its title.
+- **Options dialog** before each: title page, table of contents, figure numbers.
+- **PDF / print**: one layout for both (Print Book goes through the print dialog, then paints
+  the same pages). The table of contents lists chapters and their headings with real page
+  numbers and dot leaders; pages are numbered through the book (none on the title page).
+- **EPUB 3** (validated with EPUBCheck 5.4 in CI): one XHTML file per chapter, a navigation
+  document, pictures as PNG, numbered captions, and a stylesheet with every paragraph's style,
+  indents, spacing and alignment.
+- Unsaved changes in the open chapter are offered for saving first (the export reads the files).
+- Fix in the tests: `mainwindow_test` runs the F, T and N groups in the full run again.
+- Tests: `book_export_test` (joined book, ToC pages, options, PDF via QPrinter, EPUB
+  structure), `mainwindow_test` X (menus, export, Print Book to a PDF printer). Screenshots
+  `book-export-menu.png`, `book-export-sidebar.png`, `book-export-dialog.png`, `book-export-pdf.png`.
+
 ## [1.9.0] — unreleased
 
 Automatic figure numbers.

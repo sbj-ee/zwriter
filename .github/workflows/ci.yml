@@ -37,6 +37,14 @@ jobs:
       - name: Test (ODT round-trip, regressions, updater)
         run: ctest --test-dir build --output-on-failure
 
+      - name: EPUBCheck (whole-book EPUB export)
+        run: |
+          curl -sSfL -o epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.4.0/epubcheck-5.4.0.zip
+          unzip -q epubcheck.zip
+          QT_QPA_PLATFORM=offscreen ZW_EPUB_OUT="$PWD/book.epub" ./build/book_export_test > /dev/null
+          java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book.epub
+          java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book-bare.epub
+
       - name: Package .deb
         run: |
           cd build
@@ -74,6 +82,14 @@ jobs:
 
       - name: Test (ODT round-trip, regressions, updater)
         run: ctest --test-dir build --output-on-failure
+
+      - name: EPUBCheck (whole-book EPUB export)
+        run: |
+          curl -sSfL -o epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.4.0/epubcheck-5.4.0.zip
+          unzip -q epubcheck.zip
+          QT_QPA_PLATFORM=offscreen ZW_EPUB_OUT="$PWD/book.epub" ./build/book_export_test > /dev/null
+          java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book.epub
+          java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book-bare.epub
 
       - name: Package .dmg (zwriter.app, macdeployqt, ad-hoc sign)
         run: |

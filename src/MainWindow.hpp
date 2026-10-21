@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BookExport.hpp"
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
 
@@ -101,6 +102,12 @@ public:
     bool saveToPathForTest(const QString &path) { return saveToPath(path, DocumentIo::Format::Odt); }
     // File → Export as PDF without the dialog (also used by tests).
     bool exportPdfTo(const QString &path);
+    // Whole book (1.10.0), without the dialogs (also used by tests). Print
+    // Book and Export Book > PDF share the layout: BookExport::build + paint.
+    bool exportBookPdfTo(const QString &path, const BookExport::Options &options, int *pages = nullptr);
+    bool exportBookEpubTo(const QString &path, const BookExport::Options &options);
+    int printBookTo(QPrinter *printer, const BookExport::Options &options);
+    QMenu *fileMenu() const { return m_fileMenu; }
     // Markdown mode: copy the picture into "<name>.assets/" and type a link.
     bool insertMarkdownPicture(const QByteArray &data);
 
@@ -153,6 +160,9 @@ private slots:
     void fileSave();
     void fileSaveAs();
     void exportPdf();
+    void exportBookPdf();
+    void exportBookEpub();
+    void printBook();
     void filePrint();
     void filePageSetup();
     void filePrintPreview();
@@ -302,6 +312,11 @@ private:
     QLabel *m_statsLabel = nullptr;
     QLabel *m_styleLabel = nullptr;
     QAction *m_tocAction = nullptr;
+    QMenu *m_exportBookMenu = nullptr;
+    QAction *m_printBookAction = nullptr;
+    BookExport::Options m_bookExportOptions;
+    bool bookReadyForExport();
+    QString runBookExportPath(const QString &title, const QString &filter, const QString &suffix);
     class QTimer *m_captionTimer = nullptr;
     bool m_renumbering = false;
     QToolBar *m_formatBar = nullptr;
