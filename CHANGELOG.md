@@ -3,6 +3,28 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.7.0] — unreleased
+
+Paragraph formatting.
+
+- **Format → Paragraph…** sets left, right, first-line and hanging indents, spacing before and
+  after, line spacing (single, 1.15, 1.5, double, or a percentage) and alignment.
+- **Increase / Decrease Indent** (Ctrl+M / Ctrl+Shift+M, and Indent/Outdent on the toolbar) move
+  the selected paragraphs by 1.27 cm.
+- **View → Ruler** (off by default) shows the paragraph's first-line, left and right indents; drag
+  the markers to change them (0.25 cm steps).
+- **New styles:** Title, Subtitle, Block Quote, Caption and Bibliography (hanging indent). Captions
+  added with Insert Caption use the Caption style.
+- **Files keep it.** ODT writes `fo:margin-*`, `fo:text-indent`, `fo:line-height` and named
+  styles (`style:parent-style-name` plus a styles.xml with their definitions), and reads them back,
+  including from LibreOffice files. RTF writes and reads `\li \ri \fi \sb \sa \sl\slmult1`.
+- PDF export prints the indents and spacing as shown. `ParagraphStyles::blockCss` gives the same
+  geometry as CSS for the coming EPUB export.
+- Tests: `paragraph_test` (styles, indent steps, ODT and RTF round trips including a Word-style
+  RTF paragraph, the dialog, CSS, hanging-indent layout) and `mainwindow_test` G (Ctrl+M,
+  ruler drag, Paragraph… OK, style list, a reopened Bibliography paragraph). Screenshots
+  `para-styles-ruler.png`, `para-dialog.png`, `para-style-list.png`.
+
 ## [1.6.0] — unreleased
 
 Book sidebar usability, guided by the Birds of the Midwest test.

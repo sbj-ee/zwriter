@@ -6,6 +6,8 @@
 #include "UpdateHost.hpp"
 
 #include <QMainWindow>
+#include <QPointer>
+#include "ParagraphDialog.hpp"
 #include <QString>
 #include <QPair>
 #include <QStringList>
@@ -48,6 +50,11 @@ class MainWindow : public QMainWindow, public zwriter::UpdateHost
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+
+    // Paragraph formatting (1.7.0); public for tests.
+    void showParagraphDialog();                 // Format → Paragraph… (non-blocking)
+    class ParagraphDialog *paragraphDialog() const { return m_paragraphDialog.data(); }
+    class Ruler *ruler() const { return m_ruler; }
 
     // Open a file handed to us by the OS (file manager, command line, macOS open
     // event). Asks about unsaved changes first; unrecognised extensions open as
@@ -317,6 +324,15 @@ private:
     QAction *m_h1Action = nullptr;
     QAction *m_h2Action = nullptr;
     QAction *m_h3Action = nullptr;
+    QList<QAction *> m_namedStyleActions; // Title, Subtitle, Block Quote, Caption, Bibliography
+    QAction *m_paragraphDialogAction = nullptr;
+    QAction *m_indentAction = nullptr;
+    QAction *m_outdentAction = nullptr;
+    QAction *m_rulerAction = nullptr;
+    class Ruler *m_ruler = nullptr;
+    QPointer<class ParagraphDialog> m_paragraphDialog;
+    void applyNamedStyle(const QString &name);
+    void syncStyleControls();
     QAction *m_paragraphAction = nullptr;
     QAction *m_pageGuidesAction = nullptr;
     QAction *m_fullPageViewAction = nullptr;
