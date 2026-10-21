@@ -3,7 +3,25 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [1.5.3] — unreleased
+## [1.5.4] — unreleased
+
+- **New Chapter.** You can now make a new chapter from inside the Book sidebar. It asks for a title
+  and a format (.odt, .md or .txt; the default is the format most chapters in the book already
+  use), writes `NN Title.ext` in the book folder with the title as the first heading (Heading 1 in
+  ODT, `# Title` in Markdown, a plain first line in TXT), adds it to the end of book.json, selects it
+  and opens it. Characters that can't go in a file name are dropped, and an existing file is never
+  overwritten (" 2", " 3", ... is added instead).
+- **The "+" button is a menu**: New Chapter… and Add Existing Chapters…. Before, it went straight
+  to a file dialog in the book folder, which often looked like nothing had happened.
+- **The header "New" button makes a chapter when a book is open.** It used to open New Book again
+  over the open book. With no book yet it still starts one.
+- **Right-click menu**: New Chapter…, Add Existing Chapters… and New Book….
+- **File menu**: New Book… and New Chapter…. Both show the Book sidebar first.
+- Tests: `book_test` N (file names, all three formats, book.json order, opening, the "+" menu,
+  "New" with a book open), `mainwindow_test` B (File menu actions). Screenshots
+  `book-new-chapter-dialog.png`, `book-add-menu.png`, `file-menu-books.png`.
+
+## [1.5.3] — 2026-10-20
 
 Fixes from the Birds of the Midwest test of 1.5.2 (Debian 13, a real book with .md and .odt
 chapters).

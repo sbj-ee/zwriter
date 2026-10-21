@@ -543,6 +543,24 @@ void MainWindow::buildFileMenu()
         "Start a plain-text Markdown document with iA-style view defaults (Ctrl+Alt+N)"));
     connect(m_newMarkdownAction, &QAction::triggered, this, &MainWindow::fileNewMarkdown);
 
+    // Books: both open the Book sidebar first, so the result is visible.
+    auto *newBookAct = m_fileMenu->addAction(QStringLiteral("New &Book…"));
+    newBookAct->setObjectName(QStringLiteral("fileNewBook"));
+    connect(newBookAct, &QAction::triggered, this, [this]() {
+        if (!m_book->isVisibleTo(this)) {
+            showSidebar(true);
+        }
+        m_book->chooseNewBook();
+    });
+    auto *newChapterAct = m_fileMenu->addAction(QStringLiteral("New &Chapter…"));
+    newChapterAct->setObjectName(QStringLiteral("fileNewChapter"));
+    connect(newChapterAct, &QAction::triggered, this, [this]() {
+        if (!m_book->isVisibleTo(this)) {
+            showSidebar(true);
+        }
+        m_book->chooseNewChapter();
+    });
+
     auto *openAct = m_fileMenu->addAction(QStringLiteral("&Open…"));
     openAct->setShortcut(QKeySequence::Open);
     connect(openAct, &QAction::triggered, this, &MainWindow::fileOpen);

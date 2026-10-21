@@ -22,6 +22,7 @@
 #include "MainWindow.hpp"
 #include "BookManifest.hpp"
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include "BookSidebar.hpp"
@@ -866,6 +867,29 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
     saved.load(book);
     check(saved.at(1).path == QLatin1String("02 Songbirds.md"), "B Alt+Up in the editor moves it back");
     check(prompts.seen == 0, "B no save prompts");
+
+    // File → New Chapter… / New Book… open the Book sidebar's dialogs (1.5.4).
+    {
+        auto *newChapter = win->findChild<QAction *>(QStringLiteral("fileNewChapter"));
+        auto *newBook = win->findChild<QAction *>(QStringLiteral("fileNewBook"));
+        check(newChapter && newBook, "B File menu has New Book… and New Chapter…");
+        if (newChapter && newBook) {
+            newChapter->trigger();
+            wait(50);
+            QDialog *d = side->newChapterDialog();
+            check(d && side->isVisible(), "B File → New Chapter… shows the New Chapter dialog");
+            if (d) {
+                d->reject();
+            }
+            newBook->trigger();
+            wait(50);
+            check(side->newBookDialog() != nullptr, "B File → New Book… shows the New Book dialog");
+            if (side->newBookDialog()) {
+                side->newBookDialog()->reject();
+            }
+            wait(50);
+        }
+    }
 
     // The Library lists .odt files.
     check(LibrarySidebar::acceptsFile(QStringLiteral("04 Owls.odt"))

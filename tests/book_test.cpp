@@ -38,6 +38,9 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
+#include <QDialog>
+#include <QTextBlock>
+#include <QToolButton>
 #include <QTextDocument>
 
 #include <cstdio>
@@ -368,6 +371,73 @@ void feedbackTests()
     }
 }
 
+// 1.5.4: New Chapter (sidebar "+" menu, "New", context menu), file names,
+// formats, book.json, and "New" never reopening New Book over an open book.
+void newChapterTests()
+{
+    check(BookSidebar::chapterFileName(3, "The Pass", "md") == "03 The Pass.md", "N  file name: number + title");
+    check(BookSidebar::chapterFileName(12, " a/b:c?  ", "odt") == "12 a b c.odt", "N  unsafe characters dropped",
+          BookSidebar::chapterFileName(12, " a/b:c?  ", "odt"));
+    check(BookSidebar::chapterFileName(4, "...", "txt") == "04 Chapter 4.txt", "N  empty title → Chapter N");
+
+    QTemporaryDir tmp;
+    const QString lib = tmp.path() + "/Library";
+    const QString dir = lib + "/Birds";
+    write(dir + "/01 Intro.md", "# Intro\n");
+    QMainWindow win;
+    auto *side = new BookSidebar(&win);
+    win.setCentralWidget(side);
+    win.show();
+    side->setRootPath(lib);
+    check(side->createBook("Birds") && side->view()->count() == 1, "N  book with one chapter");
+
+    QStringList opened;
+    QObject::connect(side, &BookSidebar::fileActivated, [&opened](const QString &p) { opened << p; });
+    const QString md = side->createChapter("Songbirds", "md");
+    check(md.endsWith("/Birds/02 Songbirds.md") && readAll(md) == "# Songbirds\n\n", "N  .md chapter written with its heading",
+          md);
+    const QString odt = side->createChapter("Raptors", "odt");
+    QTextDocument doc;
+    check(DocumentIo::load(&doc, odt) && doc.firstBlock().text() == "Raptors"
+              && doc.firstBlock().blockFormat().headingLevel() == 1,
+          "N  .odt chapter opens with the title as Heading 1", doc.toPlainText());
+    const QString txt = side->createChapter("Raptors", "txt");
+    check(txt.endsWith("/04 Raptors.txt") && readAll(txt) == "Raptors\n\n", "N  .txt chapter", txt);
+    BookManifest saved;
+    saved.load(dir);
+    check(order(saved) == QStringList({"01 Intro.md", "02 Songbirds.md", "03 Raptors.odt", "04 Raptors.txt"}),
+          "N  each new chapter is appended to book.json", order(saved).join(","));
+    check(opened.size() == 3 && opened.last() == QDir::cleanPath(txt), "N  the new chapter is opened");
+    check(side->view()->currentRow() == 3, "N  ... and selected in the sidebar");
+    check(side->createChapter("x", "docx").isEmpty(), "N  other formats refused");
+
+    // Header "New" with a book open: the New Chapter dialog, never New Book.
+    auto *newButton = side->findChild<QToolButton *>("bookNew");
+    newButton->click();
+    QDialog *dlg = side->newChapterDialog();
+    check(dlg && !side->newBookDialog(), "N  'New' with a book open asks for a chapter, not a book");
+    if (dlg) {
+        auto *format = dlg->findChild<QComboBox *>("chapterFormat");
+        check(format && format->currentData().toString() == "md", "N  format defaults to the book's usual one (.md)",
+              format ? format->currentData().toString() : QString());
+        dlg->findChild<QLineEdit *>("chapterTitle")->setText("Owls");
+        dlg->accept();
+        QCoreApplication::processEvents();
+        check(QFileInfo::exists(dir + "/05 Owls.md") && side->view()->count() == 5, "N  Create writes and lists it");
+    }
+    // "+" is a menu with both actions.
+    QToolButton *add = side->addButton();
+    QStringList addTexts;
+    if (add && add->menu()) {
+        for (QAction *a : add->menu()->actions()) {
+            addTexts << a->text();
+        }
+    }
+    check(add && add->popupMode() == QToolButton::InstantPopup
+              && addTexts == QStringList({"New Chapter…", "Add Existing Chapters…"}),
+          "N  '+' opens a menu: New Chapter…, Add Existing Chapters…", addTexts.join(" | "));
+}
+
 void sidebarTests()
 {
     QTemporaryDir tmp;
@@ -485,7 +555,8 @@ void sidebarTests()
     }
     delete menu;
     check(texts == QStringList({"Open", "Edit Details…", "Move Up(off)", "Move Down",
-                                "Remove from Book", "Add Chapters…"}),
+                                "Remove from Book", "New Chapter…", "Add Existing Chapters…",
+                                "New Book…"}),
           "S  context menu", texts.join(" | "));
 
     // Outside paths: refused with a message, the book unchanged.
@@ -554,6 +625,7 @@ int main(int argc, char **argv)
     outsideTests();
     odtTests();
     feedbackTests();
+    newChapterTests();
     wordTests();
     sidebarTests();
     check(QVersionNumber::fromString(QString::fromLatin1(zwriter::kVersionString)) >= QVersionNumber(1, 4, 0),
