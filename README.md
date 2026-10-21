@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.9.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.10.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -110,6 +110,7 @@ never installed.
 - **Paragraph formatting** — Format → Paragraph… sets left/right/first-line/hanging indents, spacing before/after, line spacing and alignment; Increase/Decrease Indent (`Ctrl+M` / `Ctrl+Shift+M`); View → Ruler (off by default) shows and drags the indents. Styles Title, Subtitle, Block Quote, Caption and Bibliography (hanging indent). Saved to ODT (`fo:margin-*`, `fo:text-indent`, `fo:line-height`, named styles) and RTF (`\li \ri \fi \sb \sa \sl`)
 - **Table of contents** — File → Insert/Update Table of Contents (or the Book sidebar menu) inserts the open book's chapters, in book order, with their headings; it updates itself when chapters are reordered, added or renamed, and is saved as a real ODF table of contents (dot leaders in LibreOffice)
 - **Figure numbers** — Insert Caption labels each caption "Figure <chapter>.<n>." (chapter = place in the open book); the numbers update when figures are added, removed or moved and when the chapter moves in the book
+- **Export / print the whole book** — File → Export Book → PDF or EPUB, and File → Print Book… (also in the Book sidebar menu): every chapter in book order, each on a new page, with an optional title page, table of contents (page numbers, dot leaders) and figure numbers; pages are numbered through the book. EPUB is EPUB 3 (checked with EPUBCheck in CI) with the paragraph styles and indents in its stylesheet
 - **Manual page break** (Format → Insert Page Break, `Ctrl+Enter`): splits the paragraph and starts a new page; Backspace at the start of the new page removes it. Saved to ODT (`fo:break-before="page"`) and honoured in Full Page view, print and PDF
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
 - **Help** menu: About zwriter (shows PROJECT_VERSION), Check for Updates and Check for Updates at Startup — see [Updates](#updates)
@@ -231,7 +232,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.9.0 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.10.0 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:

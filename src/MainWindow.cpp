@@ -2,6 +2,7 @@
 #include "ParagraphDialog.hpp"
 #include "ParagraphStyles.hpp"
 #include "BookToc.hpp"
+#include "BookExportDialog.hpp"
 #include "Captions.hpp"
 #include "Ruler.hpp"
 #include "Images.hpp"
@@ -278,6 +279,9 @@ MainWindow::MainWindow(QWidget *parent)
         renumberCaptions(); // the chapter may have moved
     });
     connect(m_book, &BookSidebar::tocRequested, this, [this]() { insertBookToc(); });
+    connect(m_book, &BookSidebar::exportBookPdfRequested, this, &MainWindow::exportBookPdf);
+    connect(m_book, &BookSidebar::exportBookEpubRequested, this, &MainWindow::exportBookEpub);
+    connect(m_book, &BookSidebar::printBookRequested, this, &MainWindow::printBook);
     connect(m_book, &BookSidebar::chooseLibraryRequested, this, &MainWindow::chooseLibraryFolder);
     connect(m_book, &BookSidebar::message, this,
             [this](const QString &text) { statusBar()->showMessage(text, 6000); });
@@ -633,6 +637,21 @@ void MainWindow::buildFileMenu()
     auto *exportAct = m_fileMenu->addAction(QStringLiteral("&Export as PDF…"));
     exportAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
     connect(exportAct, &QAction::triggered, this, &MainWindow::exportPdf);
+
+    m_exportBookMenu = m_fileMenu->addMenu(QStringLiteral("Export &Book"));
+    m_exportBookMenu->setObjectName(QStringLiteral("fileExportBook"));
+    m_exportBookMenu->addAction(QStringLiteral("&PDF…"), this, &MainWindow::exportBookPdf)
+        ->setObjectName(QStringLiteral("fileExportBookPdf"));
+    m_exportBookMenu->addAction(QStringLiteral("&EPUB…"), this, &MainWindow::exportBookEpub)
+        ->setObjectName(QStringLiteral("fileExportBookEpub"));
+    m_printBookAction = m_fileMenu->addAction(QStringLiteral("Print B&ook…"));
+    m_printBookAction->setObjectName(QStringLiteral("filePrintBook"));
+    connect(m_printBookAction, &QAction::triggered, this, &MainWindow::printBook);
+    connect(m_fileMenu, &QMenu::aboutToShow, this, [this]() {
+        const bool book = m_book && m_book->hasBook() && m_book->book().count() > 0;
+        m_exportBookMenu->setEnabled(book);
+        m_printBookAction->setEnabled(book);
+    });
 
     auto *printAct = m_fileMenu->addAction(QStringLiteral("&Print…"));
     printAct->setShortcut(QKeySequence::Print);
@@ -3666,6 +3685,144 @@ bool MainWindow::exportPdfTo(const QString &path)
     doPrint(&pdf);
     statusBar()->showMessage(QStringLiteral("Exported PDF: %1").arg(QFileInfo(path).fileName()), 4000);
     return QFileInfo(path).size() > 0;
+}
+
+// ------------------------------------------------------------ whole book
+
+bool MainWindow::bookReadyForExport()
+{
+    if (!m_book || !m_book->hasBook() || m_book->book().count() == 0) {
+        statusBar()->showMessage(QStringLiteral("Open a book with chapters first."), 4000);
+        return false;
+    }
+    // The export reads the chapter files; unsaved changes would be left out.
+    if (m_editor->document()->isModified() && !m_currentPath.isEmpty() && m_book->book().indexOf(m_currentPath) >= 0) {
+        return maybeSave();
+    }
+    return true;
+}
+
+QString MainWindow::runBookExportPath(const QString &title, const QString &filter, const QString &suffix)
+{
+    QFileDialog dlg(this, title);
+    setupNativeFileDialog(dlg);
+    dlg.setAcceptMode(QFileDialog::AcceptSave);
+    dlg.setFileMode(QFileDialog::AnyFile);
+    dlg.setNameFilters({filter});
+    dlg.setDefaultSuffix(suffix);
+    const BookManifest &b = m_book->book();
+    dlg.setDirectory(b.bookDir());
+    const QString name = b.title().trimmed().isEmpty() ? QFileInfo(b.bookDir()).fileName() : b.title().trimmed();
+    dlg.selectFile(QDir(b.bookDir()).filePath(name + QLatin1Char('.') + suffix));
+    if (dlg.exec() != QDialog::Accepted || dlg.selectedFiles().isEmpty()) {
+        return QString();
+    }
+    return dlg.selectedFiles().constFirst();
+}
+
+void MainWindow::exportBookPdf()
+{
+    if (!bookReadyForExport()) {
+        return;
+    }
+    BookExportDialog opts(QStringLiteral("Export Book as PDF"), QStringLiteral("Export…"), m_bookExportOptions, this);
+    if (opts.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_bookExportOptions = opts.options();
+    const QString path = runBookExportPath(QStringLiteral("Export Book as PDF"), QStringLiteral("PDF (*.pdf)"),
+                                           QStringLiteral("pdf"));
+    if (!path.isEmpty()) {
+        exportBookPdfTo(path, m_bookExportOptions);
+    }
+}
+
+void MainWindow::exportBookEpub()
+{
+    if (!bookReadyForExport()) {
+        return;
+    }
+    BookExportDialog opts(QStringLiteral("Export Book as EPUB"), QStringLiteral("Export…"), m_bookExportOptions, this);
+    if (opts.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_bookExportOptions = opts.options();
+    const QString path = runBookExportPath(QStringLiteral("Export Book as EPUB"), QStringLiteral("EPUB (*.epub)"),
+                                           QStringLiteral("epub"));
+    if (!path.isEmpty()) {
+        exportBookEpubTo(path, m_bookExportOptions);
+    }
+}
+
+void MainWindow::printBook()
+{
+    if (!bookReadyForExport()) {
+        return;
+    }
+    BookExportDialog opts(QStringLiteral("Print Book"), QStringLiteral("Continue…"), m_bookExportOptions, this);
+    if (opts.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_bookExportOptions = opts.options();
+    QPrintDialog dlg(m_printer, this);
+    dlg.setWindowTitle(QStringLiteral("Print Book"));
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    savePrinterSettings();
+    printBookTo(m_printer, m_bookExportOptions);
+}
+
+int MainWindow::printBookTo(QPrinter *printer, const BookExport::Options &options)
+{
+    if (!printer || !m_book || !m_book->hasBook()) {
+        return 0;
+    }
+    const QPageLayout layout = printer->pageLayout();
+    PrintLayout::Page page;
+    page.sheetMm = PrintLayout::sheetSizeMm(layout);
+    page.marginsMm = layout.margins(QPageLayout::Millimeter);
+    const BookExport::Result r = BookExport::build(m_book->book(), options, page, m_editor->document()->defaultFont());
+    if (r.chapters == 0) {
+        statusBar()->showMessage(QStringLiteral("No chapter of the book could be read."), 5000);
+        return 0;
+    }
+    const int pages = BookExport::paint(*r.doc, printer, options);
+    statusBar()->showMessage(QStringLiteral("Printed %1 pages%2").arg(pages).arg(
+                                 r.skipped.isEmpty() ? QString()
+                                                     : QStringLiteral(" (skipped: %1)").arg(r.skipped.join(QStringLiteral(", ")))),
+                             5000);
+    return pages;
+}
+
+bool MainWindow::exportBookPdfTo(const QString &path, const BookExport::Options &options, int *pages)
+{
+    if (!m_book || !m_book->hasBook()) {
+        return false;
+    }
+    QString err;
+    int n = 0;
+    const bool ok = BookExport::writePdf(m_book->book(), options, m_printer->pageLayout(),
+                                         m_editor->document()->defaultFont(), path, &n, &err);
+    if (pages) {
+        *pages = n;
+    }
+    statusBar()->showMessage(ok ? QStringLiteral("Exported book PDF: %1 (%2 pages)").arg(QFileInfo(path).fileName()).arg(n)
+                                : err,
+                             5000);
+    return ok;
+}
+
+bool MainWindow::exportBookEpubTo(const QString &path, const BookExport::Options &options)
+{
+    if (!m_book || !m_book->hasBook()) {
+        return false;
+    }
+    QString err;
+    QStringList skipped;
+    const bool ok = BookExport::writeEpub(m_book->book(), options, path, &err, &skipped);
+    statusBar()->showMessage(ok ? QStringLiteral("Exported book EPUB: %1").arg(QFileInfo(path).fileName()) : err, 5000);
+    return ok;
 }
 
 void MainWindow::doPrint(QPrinter *printer)

@@ -711,6 +711,12 @@ QMenu *BookSidebar::buildContextMenu(int row)
         ->setEnabled(!m_root.isEmpty());
     menu->addAction(QStringLiteral("Insert/Update Table of Contents"), this, &BookSidebar::tocRequested)
         ->setEnabled(m_hasBook);
+    QMenu *exportMenu = menu->addMenu(QStringLiteral("Export Book"));
+    exportMenu->setEnabled(m_hasBook && m_book.count() > 0);
+    exportMenu->addAction(QStringLiteral("PDF…"), this, &BookSidebar::exportBookPdfRequested);
+    exportMenu->addAction(QStringLiteral("EPUB…"), this, &BookSidebar::exportBookEpubRequested);
+    menu->addAction(QStringLiteral("Print Book…"), this, &BookSidebar::printBookRequested)
+        ->setEnabled(m_hasBook && m_book.count() > 0);
     menu->addAction(QStringLiteral("Change Library Folder…"), this, &BookSidebar::chooseLibraryRequested)
         ->setToolTip(QStringLiteral("The folder your books are in (each book is a subfolder)"));
     return menu;

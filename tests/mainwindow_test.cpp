@@ -21,6 +21,9 @@
 #include "PageWidgets.hpp"
 #include "MainWindow.hpp"
 #include <QMenu>
+#include <QPageLayout>
+#include <QPageSize>
+#include <QPrinter>
 #include "BookToc.hpp"
 #include "Captions.hpp"
 #include <QLabel>
@@ -1311,6 +1314,86 @@ void testFigureNumbers(const QString &root)
     ed->document()->setModified(false);
 }
 
+// 1.10.0: Export Book (PDF / EPUB) and Print Book. Dialogs are not opened:
+// the *To entry points take the options, and Print Book prints to a PDF
+// QPrinter, the same build + paint path the print dialog leads to.
+void testBookExport(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/exportLib");
+    const QString dir = lib + QStringLiteral("/Birds");
+    QDir().mkpath(dir);
+    auto put = [](const QString &p, const QByteArray &b) {
+        QFile f(p);
+        f.open(QIODevice::WriteOnly);
+        f.write(b);
+    };
+    QByteArray prairie = "# Prairie\n\n";
+    for (int i = 0; i < 30; ++i) {
+        prairie += "Meadowlarks sang from the fence posts all along the road to the river.\n\n";
+    }
+    put(dir + QStringLiteral("/01 Prairie.md"), prairie);
+    put(dir + QStringLiteral("/02 Marsh.md"), "# Marsh\n\n## Rails\n\nHidden in the reeds.\n");
+    MainWindow w;
+    w.resize(1100, 800);
+    w.show();
+    wait(50);
+    auto *side = w.findChild<BookSidebar *>();
+    side->setRootPath(lib);
+    check(side->createBook(QStringLiteral("Birds")) && side->book().count() == 2, "X book with two chapters");
+
+    QMenu *exportMenu = w.findChild<QMenu *>(QStringLiteral("fileExportBook"));
+    QAction *printBook = w.findChild<QAction *>(QStringLiteral("filePrintBook"));
+    emit w.fileMenu()->aboutToShow();
+    QStringList sub;
+    if (exportMenu) {
+        for (QAction *a : exportMenu->actions()) {
+            sub << a->text();
+        }
+    }
+    check(exportMenu && exportMenu->isEnabled() && sub == QStringList({QStringLiteral("&PDF…"), QStringLiteral("&EPUB…")}),
+          "X File > Export Book > PDF / EPUB", sub.join(QLatin1Char(',')));
+    check(printBook && printBook->isEnabled(), "X File > Print Book…");
+
+    std::unique_ptr<QMenu> m(side->buildContextMenu(-1));
+    QStringList sideTexts;
+    for (QAction *a : m->actions()) {
+        sideTexts << a->text();
+        if (a->menu()) {
+            for (QAction *s : a->menu()->actions()) {
+                sideTexts << QStringLiteral(">") + s->text();
+            }
+        }
+    }
+    check(sideTexts.contains(QStringLiteral("Export Book")) && sideTexts.contains(QStringLiteral(">PDF…"))
+              && sideTexts.contains(QStringLiteral(">EPUB…")) && sideTexts.contains(QStringLiteral("Print Book…")),
+          "X the same in the Book sidebar menu", sideTexts.join(QStringLiteral(" | ")));
+
+    QTemporaryDir out;
+    BookExport::Options opt;
+    int pages = 0;
+    const QString pdf = out.path() + QStringLiteral("/Birds.pdf");
+    const bool pdfOk = w.exportBookPdfTo(pdf, opt, &pages);
+    check(pdfOk && pages >= 4, "X Export Book > PDF", QString::number(pages));
+    {
+        QPrinter printer(QPrinter::HighResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(out.path() + QStringLiteral("/printed.pdf"));
+        printer.setPageLayout(QPageLayout(QPageSize(QPageSize::A4), QPageLayout::Portrait, QMarginsF(20, 20, 20, 20)));
+        const int printed = w.printBookTo(&printer, opt);
+        check(printed >= 3 && QFileInfo(out.path() + QStringLiteral("/printed.pdf")).size() > 0,
+              "X Print Book prints every chapter (to a PDF printer)", QString::number(printed));
+    }
+    BookExport::Options off;
+    off.toc = off.titlePage = false;
+    int fewer = 0;
+    const bool bareOk = w.exportBookPdfTo(out.path() + QStringLiteral("/bare.pdf"), off, &fewer);
+    check(bareOk && fewer == pages - 2,
+          "X without title page and contents: two pages fewer", QStringLiteral("%1 vs %2").arg(fewer).arg(pages));
+    check(w.exportBookEpubTo(out.path() + QStringLiteral("/Birds.epub"), opt)
+              && QFileInfo(out.path() + QStringLiteral("/Birds.epub")).size() > 0,
+          "X Export Book > EPUB");
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -1326,6 +1409,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_EXPORT")) { // quick local runs
+        testBookExport(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_FIGURES")) { // quick local runs
         testFigureNumbers(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -1397,6 +1485,7 @@ int main(int argc, char **argv)
     testReportFixes(dataDir.path());
     testBookToc(dataDir.path());
     testFigureNumbers(dataDir.path());
+    testBookExport(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }
