@@ -89,6 +89,10 @@ public:
     // automatic update of an existing one when the book changes.
     bool insertBookToc();
     bool refreshBookToc();
+    // Figure <chapter>.<n> labels on Caption paragraphs; chapter = place of
+    // this file in the open book (0 = not in one).
+    int renumberCaptions(bool joinPrevious = false);
+    int chapterNumber() const;
     // Folder the Save dialog opens in: the file's own folder, else the open
     // book's folder (bookDir), else the last-used / Documents folder.
     QString saveStartDir(const QString &bookDir) const;
@@ -298,6 +302,8 @@ private:
     QLabel *m_statsLabel = nullptr;
     QLabel *m_styleLabel = nullptr;
     QAction *m_tocAction = nullptr;
+    class QTimer *m_captionTimer = nullptr;
+    bool m_renumbering = false;
     QToolBar *m_formatBar = nullptr;
     QMenu *m_fileMenu = nullptr;
     QMenu *m_viewMenu = nullptr;

@@ -2,6 +2,7 @@
 #include "ParagraphDialog.hpp"
 #include "ParagraphStyles.hpp"
 #include "BookToc.hpp"
+#include "Captions.hpp"
 #include "Ruler.hpp"
 #include "Images.hpp"
 #include "ImagePropertiesDialog.hpp"
@@ -272,7 +273,10 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_book, &BookSidebar::currentBookChanged, this, [this]() { saveBookSettings(); });
     // A generated table of contents follows the book: reorders, renames,
     // chapters added or removed.
-    connect(m_book, &BookSidebar::bookChanged, this, [this]() { refreshBookToc(); });
+    connect(m_book, &BookSidebar::bookChanged, this, [this]() {
+        refreshBookToc();
+        renumberCaptions(); // the chapter may have moved
+    });
     connect(m_book, &BookSidebar::tocRequested, this, [this]() { insertBookToc(); });
     connect(m_book, &BookSidebar::chooseLibraryRequested, this, &MainWindow::chooseLibraryFolder);
     connect(m_book, &BookSidebar::message, this,
@@ -398,6 +402,18 @@ MainWindow::MainWindow(QWidget *parent)
     // Key sounds fire from the editor keyPress eventFilter (typing + Return),
     // not textChanged — avoids clicks on paste/programmatic edits/nav side-effects.
     connect(m_editor, &QTextEdit::cursorPositionChanged, this, &MainWindow::onCursorMoved);
+    // Figures moved, cut or pasted: renumber a moment after the edit.
+    m_captionTimer = new QTimer(this);
+    m_captionTimer->setSingleShot(true);
+    m_captionTimer->setInterval(250);
+    // Joined to the edit that caused it, so one Undo takes back both; and
+    // only after edits (undoCommandAdded), not after Undo/Redo themselves.
+    connect(m_captionTimer, &QTimer::timeout, this, [this]() { renumberCaptions(true); });
+    connect(m_editor->document(), &QTextDocument::undoCommandAdded, this, [this]() {
+        if (!m_renumbering && !m_suppressDirty) {
+            m_captionTimer->start();
+        }
+    });
     connect(m_editor, &QTextEdit::currentCharFormatChanged, this,
             [this](const QTextCharFormat &) { syncFormatActions(); });
 
@@ -2240,6 +2256,24 @@ bool MainWindow::insertBookToc()
     return true;
 }
 
+int MainWindow::chapterNumber() const
+{
+    if (!m_book || !m_book->hasBook() || m_currentPath.isEmpty()) {
+        return 0;
+    }
+    const int i = m_book->book().indexOf(QFileInfo(m_currentPath).absoluteFilePath());
+    return i >= 0 ? i + 1 : 0;
+}
+
+int MainWindow::renumberCaptions(bool joinPrevious)
+{
+    if (m_markdownMode || m_renumbering || !m_editor) {
+        return 0;
+    }
+    const QScopedValueRollback guard(m_renumbering, true);
+    return Captions::renumber(m_editor->document(), chapterNumber(), joinPrevious);
+}
+
 bool MainWindow::refreshBookToc()
 {
     if (m_markdownMode || !m_book || !m_book->hasBook() || !BookToc::hasToc(m_editor->document())) {
@@ -2284,8 +2318,15 @@ bool MainWindow::addCaption(int position)
     cf.setFontPointSize(qMax(8.0, body - 2.0));
     c.insertBlock(bf, cf);
     c.insertText(QStringLiteral("Caption"), cf);
+    // "Figure <chapter>.<n>. " goes in front (same undo step); select the
+    // word "Caption" to type over.
+    const int captionBlock = c.blockNumber();
+    renumberCaptions();
     c.endEditBlock();
-    c.movePosition(QTextCursor::StartOfBlock, QTextCursor::KeepAnchor);
+    const QTextBlock cb = doc->findBlockByNumber(captionBlock);
+    c = QTextCursor(cb);
+    c.setPosition(cb.position() + Captions::labelLength(cb));
+    c.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
     m_editor->setTextCursor(c);
     m_editor->setFocus();
     return true;
@@ -3332,9 +3373,13 @@ bool MainWindow::openPath(const QString &path)
                            "saving will normalise it"),
             8000);
     }
-    // A generated table of contents catches up with chapters edited since.
+    // A generated table of contents catches up with chapters edited since,
+    // and figure numbers with the chapter's place in the book.
     if (refreshBookToc()) {
         statusBar()->showMessage(QStringLiteral("Table of contents updated to the current book"), 5000);
+    }
+    if (renumberCaptions() > 0) {
+        statusBar()->showMessage(QStringLiteral("Figure numbers updated"), 5000);
     }
     return true;
 }
