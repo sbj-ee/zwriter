@@ -20,6 +20,8 @@
 #include "ImagePropertiesDialog.hpp"
 #include "PageWidgets.hpp"
 #include "MainWindow.hpp"
+#include <QMenu>
+#include "BookToc.hpp"
 #include <QLabel>
 #include <QProcess>
 #include <QComboBox>
@@ -1175,6 +1177,56 @@ void testReportFixes(const QString &root)
     }
 }
 
+// 1.8.0: File > Insert/Update Table of Contents, kept in step with the book.
+void testBookToc(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/tocLib");
+    const QString dir = lib + QStringLiteral("/Birds");
+    QDir().mkpath(dir);
+    auto put = [](const QString &p, const QByteArray &b) {
+        QFile f(p);
+        f.open(QIODevice::WriteOnly);
+        f.write(b);
+    };
+    put(dir + QStringLiteral("/01 Prairie.md"), "# Prairie\n\n## Meadowlarks\n");
+    put(dir + QStringLiteral("/02 Marsh.md"), "# Marsh\n\n## Rails\n");
+    MainWindow w;
+    w.resize(1100, 800);
+    w.show();
+    wait(50);
+    auto *side = w.findChild<BookSidebar *>();
+    side->setRootPath(lib);
+    check(side->createBook(QStringLiteral("Birds")) && side->book().count() == 2, "T book with two chapters");
+    QTextEdit *ed = editorOf(w);
+    ed->clear();
+    QAction *toc = w.findChild<QAction *>(QStringLiteral("fileToc"));
+    check(toc != nullptr, "T File > Insert/Update Table of Contents");
+    if (toc) {
+        toc->trigger();
+    }
+    QStringList lines;
+    auto collect = [&]() {
+        lines.clear();
+        for (QTextBlock b = ed->document()->begin(); b.isValid(); b = b.next()) {
+            if (b.blockFormat().hasProperty(BookToc::GeneratedProperty)) {
+                lines << b.text();
+            }
+        }
+        return lines.join(QStringLiteral(" | "));
+    };
+    check(collect() == QLatin1String("1. Prairie | Meadowlarks | 2. Marsh | Rails"), "T inserted in book order", collect());
+    side->moveChapter(1, 0);
+    QApplication::processEvents();
+    check(collect() == QLatin1String("1. Marsh | Rails | 2. Prairie | Meadowlarks"), "T a reorder updates it", collect());
+    std::unique_ptr<QMenu> m(side->buildContextMenu(-1));
+    bool inMenu = false;
+    for (QAction *a : m->actions()) {
+        inMenu = inMenu || a->text() == QLatin1String("Insert/Update Table of Contents");
+    }
+    check(inMenu, "T also in the Book sidebar menu");
+    ed->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -1190,6 +1242,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_TOC")) { // quick local runs
+        testBookToc(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_PARAGRAPH")) { // quick local runs
         testParagraphFormatting();
     testReportFixes(dataDir.path());

@@ -3,6 +3,25 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.8.0] — unreleased
+
+Generated table of contents for a book.
+
+- **File → Insert/Update Table of Contents** (also on the Book sidebar's right-click menu) puts
+  the open book's contents at the cursor: a "Contents" title, then each chapter in book.json
+  order, numbered as in the sidebar ("1. Introduction"), with its headings under it. A chapter's
+  first heading is left out when it repeats the title, and the document holding the table is
+  not listed in it. Choosing it again updates the table in place.
+- **It keeps up with the book.** Reordering, adding, removing or renaming chapters updates an
+  open table at once; opening a document with a table brings it up to date with chapters edited
+  since (that counts as an edit, so you are asked to save).
+- **Saved as a real ODF table of contents** (`text:table-of-content` named `zwriter-toc`) with
+  Contents 1/2 styles whose right tab has dot leaders, so LibreOffice shows it as a table of
+  contents. zwriter reads it back as its own. A table made in LibreOffice is still kept
+  unchanged (1.5.4).
+- Tests: `book_toc_test` (entries, update, ODT write/read, LibreOffice reads it when installed),
+  `mainwindow_test` T (menu, reorder, sidebar menu). Screenshot `book-toc.png`.
+
 ## [1.7.0] — unreleased
 
 Paragraph formatting.

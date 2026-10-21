@@ -119,6 +119,7 @@ signals:
     void message(const QString &text); // e.g. a file outside the book was refused
     void switchToLibrary();
     void bookChanged(); // after every successful save
+    void tocRequested(); // "Insert/Update Table of Contents" from the menu
 
 private:
     void loadCurrent();

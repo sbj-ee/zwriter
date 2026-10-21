@@ -709,6 +709,8 @@ QMenu *BookSidebar::buildContextMenu(int row)
     menu->addSeparator();
     menu->addAction(QStringLiteral("New Book…"), this, &BookSidebar::chooseNewBook)
         ->setEnabled(!m_root.isEmpty());
+    menu->addAction(QStringLiteral("Insert/Update Table of Contents"), this, &BookSidebar::tocRequested)
+        ->setEnabled(m_hasBook);
     menu->addAction(QStringLiteral("Change Library Folder…"), this, &BookSidebar::chooseLibraryRequested)
         ->setToolTip(QStringLiteral("The folder your books are in (each book is a subfolder)"));
     return menu;
