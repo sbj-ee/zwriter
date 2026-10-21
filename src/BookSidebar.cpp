@@ -20,6 +20,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
+#include <QSet>
 #include <QPainter>
 #include <QStyledItemDelegate>
 #include <QLocale>
@@ -228,7 +229,14 @@ BookSidebar::BookSidebar(QWidget *parent)
             const QString t = item->text().simplified();
             // An empty title goes back to the file name.
             c.title = t == QFileInfo(c.path).completeBaseName() ? QString() : t;
-            QTimer::singleShot(0, this, [this, row, c]() { setChapter(row, c); });
+            const QString oldTitle = m_book.displayTitle(row);
+            QTimer::singleShot(0, this, [this, row, c, oldTitle]() {
+                setChapter(row, c);
+                const int now = m_book.indexOf(m_book.absolutePath(row));
+                if (now >= 0 && m_book.displayTitle(now) != oldTitle) {
+                    emit chapterRenamed(m_book.absolutePath(now), oldTitle, m_book.displayTitle(now));
+                }
+            });
         }
     });
     connect(m_view->itemDelegate(), &QAbstractItemDelegate::closeEditor, this, [this]() {
@@ -798,6 +806,10 @@ QMenu *BookSidebar::buildContextMenu(int row)
         ->setEnabled(!m_root.isEmpty());
     menu->addAction(QStringLiteral("Insert/Update Table of Contents"), this, &BookSidebar::tocRequested)
         ->setEnabled(m_hasBook);
+    QAction *renumber = menu->addAction(QStringLiteral("Renumber Files…"), this, [this]() { renumberFiles(); });
+    renumber->setObjectName(QStringLiteral("bookRenumber"));
+    renumber->setToolTip(QStringLiteral("Rename the chapter files so their numbers follow the book order (asks first)"));
+    renumber->setEnabled(m_hasBook && !renumberPlan().isEmpty());
     QMenu *exportMenu = menu->addMenu(QStringLiteral("Export Book"));
     exportMenu->setEnabled(m_hasBook && m_book.count() > 0);
     exportMenu->addAction(QStringLiteral("PDF…"), this, &BookSidebar::exportBookPdfRequested);
@@ -892,6 +904,138 @@ void BookSidebar::applyTheme(const ThemeColors &c)
         "QListWidget#bookList::item:selected { background-color: %5; color: %6; }")
                       .arg(c.barBg.name(), c.fg.name(), c.muted.name(), c.hover.name(),
                            c.accentSoft.name(), c.accentFg.name(), c.border.name(), c.accent.name(), c.id == QLatin1String("paper") ? QStringLiteral("paper") : QStringLiteral("dark")));
+}
+
+static void fitButtons(QMessageBox *box);
+
+QList<QPair<QString, QString>> BookSidebar::renumberPlan() const
+{
+    QList<QPair<QString, QString>> plan;
+    static const QRegularExpression prefix(QStringLiteral(R"(^\d+[\s._-]+(?=\S))"));
+    const int width = m_book.count() >= 100 ? 3 : 2;
+    for (int i = 0; i < m_book.count(); ++i) {
+        const QString rel = m_book.at(i).path;
+        if (m_book.isOutside(i) || m_book.isMissing(i)) {
+            continue;
+        }
+        const QFileInfo fi(rel);
+        QString name = fi.completeBaseName();
+        name.remove(prefix);
+        const QString dir = fi.path() == QLatin1String(".") ? QString() : fi.path() + QLatin1Char('/');
+        QString wanted = dir + QStringLiteral("%1 %2").arg(i + 1, width, 10, QLatin1Char('0')).arg(name);
+        if (!fi.suffix().isEmpty()) {
+            wanted += QLatin1Char('.') + fi.suffix();
+        }
+        if (wanted != rel) {
+            plan.append({rel, wanted});
+        }
+    }
+    return plan;
+}
+
+bool BookSidebar::renumberFiles(bool ask, QString *error)
+{
+    const auto plan = renumberPlan();
+    if (plan.isEmpty()) {
+        return false;
+    }
+    const QDir dir(m_book.bookDir());
+    // Never overwrite a file that is not part of the plan.
+    QSet<QString> moving;
+    for (const auto &p : plan) {
+        moving.insert(p.first);
+    }
+    for (const auto &p : plan) {
+        if (!moving.contains(p.second) && QFileInfo::exists(dir.filePath(p.second))) {
+            const QString msg = QStringLiteral("%1 already exists; nothing was renamed.").arg(p.second);
+            if (error) {
+                *error = msg;
+            }
+            emit message(msg);
+            return false;
+        }
+    }
+    if (ask) {
+        QStringList lines;
+        for (const auto &p : plan) {
+            lines << QStringLiteral("%1  \u2192  %2").arg(p.first, p.second);
+        }
+        QMessageBox box(QMessageBox::Question, QStringLiteral("Renumber Files"),
+                        plan.size() == 1 ? QStringLiteral("Rename 1 chapter file to follow the book order?")
+                                         : QStringLiteral("Rename %1 chapter files to follow the book order?").arg(plan.size()),
+                        QMessageBox::NoButton, window());
+        box.setObjectName(QStringLiteral("bookRenumberDialog"));
+        box.setInformativeText(QStringLiteral("Titles, order and details stay the same. Links to these files from "
+                                              "outside the book will not follow."));
+        box.setDetailedText(lines.join(QLatin1Char('\n')));
+        QPushButton *yes = box.addButton(QStringLiteral("Rename Files"), QMessageBox::AcceptRole);
+        QPushButton *no = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(no);
+        box.setEscapeButton(no);
+        fitButtons(&box);
+        box.exec();
+        if (box.clickedButton() != yes) {
+            return false;
+        }
+    }
+    // Two steps (through temporary names), so 01<->02 swaps cannot collide.
+    QList<QPair<QString, QString>> done;
+    auto rollback = [&]() {
+        for (auto it = done.crbegin(); it != done.crend(); ++it) {
+            QFile::rename(dir.filePath(it->second), dir.filePath(it->first));
+        }
+    };
+    QList<QString> temps;
+    for (int k = 0; k < plan.size(); ++k) {
+        const QString tmp = plan.at(k).first + QStringLiteral(".zw-renumber-%1").arg(k);
+        if (!QFile::rename(dir.filePath(plan.at(k).first), dir.filePath(tmp))) {
+            rollback();
+            const QString msg = QStringLiteral("Could not rename %1; nothing was renamed.").arg(plan.at(k).first);
+            if (error) {
+                *error = msg;
+            }
+            emit message(msg);
+            return false;
+        }
+        done.append({plan.at(k).first, tmp});
+        temps << tmp;
+    }
+    for (int k = 0; k < plan.size(); ++k) {
+        if (!QFile::rename(dir.filePath(temps.at(k)), dir.filePath(plan.at(k).second))) {
+            rollback();
+            const QString msg = QStringLiteral("Could not rename %1; nothing was renamed.").arg(plan.at(k).first);
+            if (error) {
+                *error = msg;
+            }
+            emit message(msg);
+            return false;
+        }
+        done[k] = {plan.at(k).first, plan.at(k).second};
+    }
+    for (const auto &p : plan) {
+        const int i = m_book.indexOf(p.first);
+        if (i >= 0) {
+            BookChapter c = m_book.at(i);
+            c.path = p.second;
+            m_book.setChapter(i, c);
+        }
+    }
+    QString err;
+    if (!m_book.save(&err)) {
+        emit message(QStringLiteral("Files renamed, but the book could not be saved: %1").arg(err));
+    }
+    for (const auto &p : plan) {
+        const QString oldAbs = QFileInfo(dir.filePath(p.first)).absoluteFilePath();
+        const QString newAbs = QFileInfo(dir.filePath(p.second)).absoluteFilePath();
+        if (!m_currentFile.isEmpty() && QFileInfo(m_currentFile).absoluteFilePath() == oldAbs) {
+            m_currentFile = newAbs;
+        }
+        emit chapterFileMoved(oldAbs, newAbs);
+    }
+    rebuild(m_view->currentRow());
+    emit bookChanged();
+    emit message(QStringLiteral("Renumbered %1 chapter file(s)").arg(plan.size()));
+    return true;
 }
 
 QString BookSidebar::chapterFileName(int number, const QString &title, const QString &suffix)

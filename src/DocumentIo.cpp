@@ -17,6 +17,7 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextDocumentWriter>
+#include <QGuiApplication>
 #include <QSaveFile>
 #include <QStringDecoder>
 #include <QVariant>
@@ -2512,6 +2513,15 @@ bool saveWithWriter(QTextDocument *doc, const QString &path, const QByteArray &f
 }
 
 } // namespace
+
+QStringList headingFontFamilies()
+{
+    QStringList out{QGuiApplication::font().family(), QStringLiteral("Noto Sans"), QStringLiteral("DejaVu Sans"),
+                    QStringLiteral("Helvetica Neue"), QStringLiteral("Arial"), QStringLiteral("sans-serif")};
+    out.removeAll(QString());
+    out.removeDuplicates();
+    return out;
+}
 
 QStringList defaultFontFamilies()
 {

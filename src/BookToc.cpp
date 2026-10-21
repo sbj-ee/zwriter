@@ -115,9 +115,16 @@ QList<Entry> entries(const BookManifest &book, int maxLevel, const QString &skip
             for (const auto &h : std::as_const(hs)) {
                 sameLevel += h.first == top ? 1 : 0;
             }
+            // (A lone Heading 1 is the title even when it is the only heading.)
             if (hs.first().second.compare(title, Qt::CaseInsensitive) == 0
-                || (hs.first().first == top && sameLevel == 1 && hs.size() > 1)) {
+                || (hs.first().first == 1 && top == 1 && sameLevel == 1)) {
                 hs.removeFirst();
+            }
+        }
+        // No section repeats the chapter's own title.
+        for (int k = hs.size() - 1; k >= 0; --k) {
+            if (hs.at(k).second.compare(title, Qt::CaseInsensitive) == 0) {
+                hs.removeAt(k);
             }
         }
         // The chapter's top level of heading becomes level 2.

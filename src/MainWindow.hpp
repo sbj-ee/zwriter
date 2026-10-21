@@ -54,6 +54,8 @@ public:
     bool chromeShown() const;
     // Ctrl+Tab: the editor to the chapter list and back.
     void swapEditorAndChapters();
+    // After a rename in the Book sidebar: the chapter's title heading follows.
+    void retitleChapterHeading(const QString &path, const QString &oldTitle, const QString &newTitle);
     explicit MainWindow(QWidget *parent = nullptr);
 
     // Paragraph formatting (1.7.0); public for tests.

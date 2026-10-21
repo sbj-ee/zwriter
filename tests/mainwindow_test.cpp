@@ -1752,6 +1752,197 @@ void testSidebarRetest(const QString &root)
     ed->document()->setModified(false);
 }
 
+// 1.10.5 (retest N3, N5, minor): a rename changes the chapter's title heading;
+// headings take the document font; H2/H3 differ; Renumber Files… on request.
+void testHeadingsRetest(const QString &root)
+{
+    const QString lib = root + QStringLiteral("/lib-headings");
+    const QString book = lib + QStringLiteral("/Heading Book");
+    QDir().mkpath(book);
+    writeFile(book + QStringLiteral("/01 Alpha.md"), "# Alpha\n\nOne.\n");
+    {
+        QTextDocument d;
+        QTextCursor c(&d);
+        QTextBlockFormat h;
+        h.setHeadingLevel(1);
+        c.setBlockFormat(h);
+        c.insertText(QStringLiteral("Beta"));
+        c.insertBlock(QTextBlockFormat());
+        c.insertText(QStringLiteral("Body line."));
+        DocumentIo::save(&d, book + QStringLiteral("/02 Beta.odt"), DocumentIo::Format::Odt);
+        QTextDocument g;
+        QTextCursor gc(&g);
+        gc.setBlockFormat(h);
+        gc.insertText(QStringLiteral("Gamma"));
+        DocumentIo::save(&g, book + QStringLiteral("/03 Gamma.odt"), DocumentIo::Format::Odt);
+    }
+    BookManifest::fromFolder(book).save();
+    {
+        QSettings s;
+        s.setValue(QStringLiteral("view/fullPageView"), false);
+        s.setValue(QStringLiteral("view/chromePinned"), true);
+        s.setValue(QStringLiteral("library/rootPath"), lib);
+        s.setValue(QStringLiteral("library/visible"), false);
+        s.setValue(QStringLiteral("book/visible"), true);
+        s.setValue(QStringLiteral("book/current"), QStringLiteral("Heading Book"));
+        s.sync();
+    }
+    auto win = std::make_unique<MainWindow>();
+    win->resize(1024, 640);
+    win->show();
+    win->activateWindow();
+    QApplication::setActiveWindow(win.get());
+    wait(100);
+    auto *side = win->findChild<BookSidebar *>();
+    if (!side || side->book().count() != 3) {
+        check(false, "X book");
+        return;
+    }
+    auto rename = [&](int row, const QString &to) {
+        side->renameChapter(row);
+        QApplication::processEvents();
+        if (auto *line = side->view()->findChild<QLineEdit *>()) {
+            line->setText(to);
+            QTest::keyClick(line, Qt::Key_Return);
+        }
+        wait(100);
+    };
+    auto fileText = [&](const QString &rel) {
+        QTextDocument d;
+        DocumentIo::load(&d, book + QLatin1Char('/') + rel);
+        return d.toPlainText();
+    };
+    // N3, a chapter that is not open (Markdown): its "# " line follows.
+    check(win->openPathForTest(book + QStringLiteral("/02 Beta.odt")), "X chapter 2 open");
+    rename(0, QStringLiteral("Prairie"));
+    QFile md(book + QStringLiteral("/01 Alpha.md"));
+    md.open(QIODevice::ReadOnly);
+    const QByteArray mdNow = md.readAll();
+    md.close();
+    check(mdNow == "# Prairie\n\nOne.\n", "X3 rename a closed chapter: its heading line changes, nothing else",
+          QString::fromUtf8(mdNow));
+    // ... a closed ODT chapter whose only heading is the title.
+    rename(2, QStringLiteral("Zeta"));
+    check(fileText(QStringLiteral("03 Gamma.odt")).startsWith(QLatin1String("Zeta")), "X3 ... and an ODT one",
+          fileText(QStringLiteral("03 Gamma.odt")));
+    // The open chapter, nothing unsaved: changed in the editor and saved; Ctrl+Z undoes it.
+    QTextEdit *ed = editorOf(*win);
+    rename(1, QStringLiteral("Marsh"));
+    check(ed->document()->firstBlock().text() == QLatin1String("Marsh") && !ed->document()->isModified()
+              && fileText(QStringLiteral("02 Beta.odt")).startsWith(QLatin1String("Marsh")),
+          "X3 rename the open chapter: heading changed and saved", ed->document()->firstBlock().text());
+    ed->setFocus();
+    QTest::keySequence(ed, QKeySequence::Undo);
+    QApplication::processEvents();
+    check(ed->document()->firstBlock().text() == QLatin1String("Beta"), "X3 ... Ctrl+Z brings the old heading back",
+          ed->document()->firstBlock().text());
+    QTest::keySequence(ed, QKeySequence::Redo);
+    QMetaObject::invokeMethod(win.get(), "fileSave");
+    // The open chapter with unsaved changes: asks; Keep leaves the heading alone.
+    QTextCursor endC(ed->document());
+    endC.movePosition(QTextCursor::End);
+    endC.insertText(QStringLiteral(" More."));
+    auto answer = [&](const QString &button) {
+        qApp->setProperty("zwHoldPrompts", true);
+        QTimer::singleShot(200, [button]() {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                for (QAbstractButton *b : box->buttons()) {
+                    if (b->text() == button) {
+                        b->click();
+                    }
+                }
+            }
+        });
+    };
+    answer(QStringLiteral("Keep Heading"));
+    rename(1, QStringLiteral("Wetlands"));
+    wait(300);
+    qApp->setProperty("zwHoldPrompts", false);
+    check(ed->document()->firstBlock().text() == QLatin1String("Marsh") && side->book().displayTitle(1) == QLatin1String("Wetlands"),
+          "X3 unsaved chapter: asks; Keep Heading keeps it", ed->document()->firstBlock().text());
+    answer(QStringLiteral("Change Heading"));
+    rename(1, QStringLiteral("Marshes"));
+    wait(300);
+    qApp->setProperty("zwHoldPrompts", false);
+    check(ed->document()->firstBlock().text() == QLatin1String("Marshes") && ed->document()->isModified()
+              && fileText(QStringLiteral("02 Beta.odt")).startsWith(QLatin1String("Marsh\n")),
+          "X3 ... Change Heading changes it in the editor only (still unsaved)", ed->document()->firstBlock().text());
+    QMetaObject::invokeMethod(win.get(), "fileSave");
+    // The generated ToC: titles once, no old title or lone title heading as a section.
+    const auto entries = BookToc::entries(side->book(), 2);
+    QStringList texts;
+    for (const auto &e : entries) {
+        texts << e.text;
+    }
+    check(texts.join(QStringLiteral(" | ")) == QLatin1String("1. Prairie | 2. Marshes | 3. Zeta"),
+          "X3 the ToC lists each chapter once, by its new name", texts.join(QStringLiteral(" | ")));
+
+    // N5 + minor: a heading takes the document font; H2 and H3 look different.
+    QTextCursor c(ed->document());
+    c.movePosition(QTextCursor::End);
+    c.insertBlock(QTextBlockFormat());
+    QTextCharFormat courier;
+    courier.setFontFamilies({QStringLiteral("Courier")});
+    c.insertText(QStringLiteral("Typed in Courier"), courier);
+    ed->setTextCursor(c);
+    auto *combo = win->findChild<QComboBox *>(QStringLiteral("styleCombo"));
+    auto applyStyle = [&](const QString &name) {
+        const int k = combo->findText(name);
+        combo->setCurrentIndex(k);
+        combo->activated(k);
+        QApplication::processEvents();
+    };
+    applyStyle(QStringLiteral("Heading 2"));
+    const QTextBlock hb = ed->textCursor().block();
+    const QStringList fam = QTextCursor(hb).charFormat().fontFamilies().toStringList();
+    QTextCursor inside(hb);
+    inside.setPosition(hb.position() + 3);
+    check(!inside.charFormat().fontFamilies().toStringList().contains(QStringLiteral("Courier"))
+              && inside.charFormat().fontFamilies().toStringList() == DocumentIo::headingFontFamilies(),
+          "X5 Heading 2 replaces the run's Courier with the heading face",
+          inside.charFormat().fontFamilies().toStringList().join(QLatin1Char(',')));
+    const QTextCharFormat h2 = inside.charFormat();
+    applyStyle(QStringLiteral("Heading 3"));
+    QTextCursor in3(ed->textCursor().block());
+    in3.setPosition(ed->textCursor().block().position() + 3);
+    const QTextCharFormat h3 = in3.charFormat();
+    check(h2.fontPointSize() - h3.fontPointSize() >= 3 && h3.fontItalic() && !h2.fontItalic(),
+          "X H2 and H3 differ in size and slant", QStringLiteral("%1/%2").arg(h2.fontPointSize()).arg(h3.fontPointSize()));
+    applyStyle(QStringLiteral("Body Text"));
+    QTextCursor in0(ed->textCursor().block());
+    in0.setPosition(ed->textCursor().block().position() + 3);
+    check(!in0.charFormat().fontItalic(), "X back to Body Text drops Heading 3's italic");
+    Q_UNUSED(fam);
+    QMetaObject::invokeMethod(win.get(), "fileSave");
+
+    // Minor: Renumber Files… is offered, asks, and is never automatic.
+    side->moveChapter(2, 0); // Zeta (03 Gamma.odt) first
+    QApplication::processEvents();
+    check(QFileInfo::exists(book + QStringLiteral("/03 Gamma.odt")), "XR a reorder renames nothing");
+    const auto plan = side->renumberPlan();
+    check(plan.size() == 3 && plan.at(0).first == QLatin1String("03 Gamma.odt") && plan.at(0).second == QLatin1String("01 Gamma.odt"),
+          "XR the plan renumbers in book order", plan.isEmpty() ? QString() : plan.at(0).second);
+    qApp->setProperty("zwHoldPrompts", true);
+    QTimer::singleShot(200, []() {
+        if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+            box->reject();
+        }
+    });
+    check(!side->renumberFiles(true) && QFileInfo::exists(book + QStringLiteral("/03 Gamma.odt")), "XR Cancel renames nothing");
+    qApp->setProperty("zwHoldPrompts", false);
+    const QString title0 = side->book().displayTitle(0);
+    check(side->renumberFiles(false), "XR Rename Files");
+    check(QFileInfo::exists(book + QStringLiteral("/01 Gamma.odt")) && QFileInfo::exists(book + QStringLiteral("/02 Alpha.md"))
+              && QFileInfo::exists(book + QStringLiteral("/03 Beta.odt")) && side->book().at(0).path == QLatin1String("01 Gamma.odt")
+              && side->book().displayTitle(0) == title0 && side->renumberPlan().isEmpty(),
+          "XR files follow the order; titles stay", side->book().at(0).path + QLatin1Char(' ') + side->book().displayTitle(0));
+    check(win->windowTitle().contains(QLatin1String("03 Beta")), "XR the open chapter follows its new name", win->windowTitle());
+    BookManifest again;
+    again.load(book);
+    check(again.count() == 3 && again.at(2).path == QLatin1String("03 Beta.odt"), "XR book.json saved");
+    ed->document()->setModified(false);
+}
+
 void testUsabilityFixes(const QString &root)
 {
     const QString lib = root + QStringLiteral("/lib-usab");
@@ -2020,6 +2211,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
 
     PromptWatcher prompts;
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_X")) { // quick local runs
+        testHeadingsRetest(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_W")) { // quick local runs
         testSidebarRetest(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -2121,6 +2317,7 @@ int main(int argc, char **argv)
     testRulerDrag();
     testUsabilityFixes(dataDir.path());
     testSidebarRetest(dataDir.path());
+    testHeadingsRetest(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

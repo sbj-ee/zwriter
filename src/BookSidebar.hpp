@@ -95,6 +95,12 @@ public:
     static constexpr int OpenRole = Qt::UserRole + 20;
     static constexpr int ContextRole = Qt::UserRole + 21;
     int openRow() const;
+    // Renumber Files…: file renames (book-relative paths) that make the "NN "
+    // prefixes follow the book order. Only chapters inside the book folder whose
+    // name would change; never done automatically.
+    QList<QPair<QString, QString>> renumberPlan() const;
+    // Asks first (the list of renames), then renames. False if cancelled or failed.
+    bool renumberFiles(bool ask = true, QString *error = nullptr);
     int contextRow() const { return m_contextRow; }
     void setContextRow(int row);
     QColor accentColor() const { return m_accent; }
@@ -130,6 +136,10 @@ signals:
     void message(const QString &text); // e.g. a file outside the book was refused
     void switchToLibrary();
     void bookChanged(); // after every successful save
+    // A chapter was renamed in the list (F2 / Rename); its book entry is saved.
+    // Renumber Files… renamed a chapter's file (absolute paths).
+    void chapterFileMoved(const QString &oldPath, const QString &newPath);
+    void chapterRenamed(const QString &absolutePath, const QString &oldTitle, const QString &newTitle);
     void tocRequested(); // "Insert/Update Table of Contents" from the menu
     // Export Book > PDF / EPUB and Print Book from the menu (1.10.0).
     void exportBookPdfRequested();
