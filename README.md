@@ -188,7 +188,7 @@ Library sidebar (`Ctrl+Shift+L`): folders plus the `.md` / `.txt` / `.odt` files
 
 ![Library sidebar](docs/screenshots/library-sidebar.png)
 
-Book sidebar (`Ctrl+Alt+B`, or the **Book** / **Library** buttons in the sidebar headers): a book's
+Book sidebar (`Ctrl+Alt+B`, or the **Books** / **Files** buttons in the sidebar headers; **Folder…** chooses the library folder): a book's
 chapters in book order. Each book is a subfolder of the library with its own plain `book.json`
 (chapter paths relative to it), so one library can hold several books; the picker at the top
 switches between them and **New** makes a book of an existing or new subfolder, listing the

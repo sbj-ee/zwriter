@@ -86,8 +86,10 @@ BookSidebar::BookSidebar(QWidget *parent)
         bl->addWidget(b);
         return b;
     };
-    m_libraryButton = tool(QStringLiteral("bookToLibrary"), QStringLiteral("Library"),
-                           QStringLiteral("Show the Library sidebar instead (Ctrl+Shift+L)"));
+    // "Files", not "Library": it shows every file in the library folder as a
+    // tree (that sidebar's "Books" button comes back here).
+    m_libraryButton = tool(QStringLiteral("bookToLibrary"), QStringLiteral("Files"),
+                           QStringLiteral("Show all files in the library folder (Ctrl+Shift+L)"));
     connect(m_libraryButton, &QToolButton::clicked, this, &BookSidebar::switchToLibrary);
     // One clearly labelled button for chapters: a menu with New Chapter… and
     // Add Existing Chapters…. New Book is in the book picker, the right-click
@@ -707,6 +709,8 @@ QMenu *BookSidebar::buildContextMenu(int row)
     menu->addSeparator();
     menu->addAction(QStringLiteral("New Book…"), this, &BookSidebar::chooseNewBook)
         ->setEnabled(!m_root.isEmpty());
+    menu->addAction(QStringLiteral("Change Library Folder…"), this, &BookSidebar::chooseLibraryRequested)
+        ->setToolTip(QStringLiteral("The folder your books are in (each book is a subfolder)"));
     return menu;
 }
 

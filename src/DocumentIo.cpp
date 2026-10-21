@@ -733,6 +733,70 @@ QString documentToRtf(const QTextDocument *doc)
 // paragraphs, so the loader emits this private-use character and
 // normaliseImportedBlocks() removes it again after import.
 constexpr char16_t kBlankParagraphMark = 0xE000;
+// -qt-user-state base that carries "this paragraph is in ODT table of
+// contents n" through the HTML import (turned into TocProperty after it).
+constexpr int kTocUserState = 0x5B000;
+
+// The parts of an ODT needed to write its tables of contents back unchanged.
+struct OdtTocs {
+    QStringList raw;    // each text:table-of-content element, verbatim
+    QString styles;     // style:style definitions they use (and their parents)
+    QStringList ns;     // xmlns declarations of the original content.xml root
+};
+
+OdtTocs extractOdtTocs(const QString &content, const QString &stylesXml)
+{
+    OdtTocs out;
+    static const QRegularExpression tocRe(QStringLiteral(R"(<text:table-of-content\b.*?</text:table-of-content>)"),
+                                          QRegularExpression::DotMatchesEverythingOption);
+    auto it = tocRe.globalMatch(content);
+    while (it.hasNext()) {
+        out.raw << it.next().captured(0);
+    }
+    if (out.raw.isEmpty()) {
+        return out;
+    }
+    static const QRegularExpression rootRe(QStringLiteral(R"(<office:document-content\b[^>]*>)"));
+    static const QRegularExpression nsRe(QStringLiteral(R"re(xmlns:[\w.-]+="[^"]*")re"));
+    const QString root = rootRe.match(content).captured(0);
+    auto ns = nsRe.globalMatch(root);
+    while (ns.hasNext()) {
+        out.ns << ns.next().captured(0);
+    }
+    // Every style the tables name, then the styles those inherit from.
+    static const QRegularExpression refRe(QStringLiteral(R"re(\b[\w-]+:(?:style-name|parent-style-name)="([^"]*)")re"));
+    QStringList pending;
+    for (const QString &raw : std::as_const(out.raw)) {
+        auto r = refRe.globalMatch(raw);
+        while (r.hasNext()) {
+            pending << r.next().captured(1);
+        }
+    }
+    QSet<QString> done;
+    while (!pending.isEmpty()) {
+        const QString name = pending.takeFirst();
+        if (name.isEmpty() || done.contains(name)) {
+            continue;
+        }
+        done.insert(name);
+        const QRegularExpression defRe(
+            QStringLiteral(R"re(<style:style\b[^>]*\bstyle:name="%1"[^>]*?(?:/>|>.*?</style:style>))re")
+                .arg(QRegularExpression::escape(name)),
+            QRegularExpression::DotMatchesEverythingOption);
+        for (const QString *src : {&content, &stylesXml}) {
+            const QRegularExpressionMatch m = defRe.match(*src);
+            if (m.hasMatch()) {
+                out.styles += m.captured(0);
+                auto r = refRe.globalMatch(m.captured(0));
+                while (r.hasNext()) {
+                    pending << r.next().captured(1);
+                }
+                break;
+            }
+        }
+    }
+    return out;
+}
 
 const QString kTextNs = QStringLiteral("urn:oasis:names:tc:opendocument:xmlns:text:1.0");
 
@@ -1053,10 +1117,22 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
     bool pHasContent = false; // Qt's HTML import drops paragraphs with no content
     bool pendingSpace = false; // ODF: whitespace run seen, emit one space before next text
     bool atLineStart = true;   // ODF: leading whitespace of a paragraph/line is dropped
-    bool inStyleSpan = false;
     bool tabJustWritten = false; // last thing emitted was a text:tab element
+    int tocCurrent = -1; // inside the n-th text:table-of-content
+    int tocCount = 0;
 
+    // Open text:span elements, innermost last: each entry is the markup that
+    // closes it. A span inside a span ends only itself.
+    QStringList spanClosers;
+    auto closeSpan = [&]() {
+        if (!spanClosers.isEmpty()) {
+            html += spanClosers.takeLast();
+        }
+    };
     auto closeInline = [&]() {
+        while (!spanClosers.isEmpty()) {
+            closeSpan();
+        }
         if (inUnderline) {
             html += QStringLiteral("</u>");
             inUnderline = false;
@@ -1068,10 +1144,6 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
         if (inBold) {
             html += QStringLiteral("</b>");
             inBold = false;
-        }
-        if (inStyleSpan) {
-            html += QStringLiteral("</span>");
-            inStyleSpan = false;
         }
     };
 
@@ -1148,7 +1220,11 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
         pHasContent = false;
         pendingSpace = false;
         atLineStart = true;
-        QString styleAttr = QStringLiteral(" style=\"%1\"").arg(blockCss(info, level));
+        QString css = blockCss(info, level);
+        if (tocCurrent >= 0) {
+            css += QStringLiteral("-qt-user-state:%1;").arg(kTocUserState + tocCurrent);
+        }
+        QString styleAttr = QStringLiteral(" style=\"%1\"").arg(css);
         if (!info.align.isEmpty()) {
             // The align attribute, not CSS text-align: Qt's HTML importer
             // ignores "text-align:justify".
@@ -1275,7 +1351,13 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
             const QStringView name = reader.name();
             const bool wasTab = tabJustWritten;
             tabJustWritten = false;
-            if (name == QLatin1String("h")) {
+            if (name == QLatin1String("table-of-content") && reader.prefix() == QLatin1String("text")) {
+                closeParagraph();
+                tocCurrent = tocCount++;
+            } else if (name == QLatin1String("table-of-content-source")) {
+                reader.skipCurrentElement(); // templates, not text
+                continue;
+            } else if (name == QLatin1String("h")) {
                 const QStringView lvl = reader.attributes().value(QStringLiteral("text:outline-level"));
                 bool ok = false;
                 int level = lvl.toInt(&ok);
@@ -1294,9 +1376,10 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                 const QString style = reader.attributes().value(QStringLiteral("text:style-name")).toString();
                 const StyleInfo info = styles.value(style);
                 const QString css = cssFromStyle(info);
+                QString closer;
                 if (!css.isEmpty()) {
                     html += QStringLiteral("<span style=\"%1\">").arg(css);
-                    inStyleSpan = true;
+                    closer.prepend(QStringLiteral("</span>"));
                 }
                 const QString lower = style.toLower();
                 const bool bold = info.bold
@@ -1307,16 +1390,17 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                     || lower.contains(QLatin1String("emphas"));
                 if (bold) {
                     html += QStringLiteral("<b>");
-                    inBold = true;
+                    closer.prepend(QStringLiteral("</b>"));
                 }
                 if (italic) {
                     html += QStringLiteral("<i>");
-                    inItalic = true;
+                    closer.prepend(QStringLiteral("</i>"));
                 }
                 if (info.underline) {
                     html += QStringLiteral("<u>");
-                    inUnderline = true;
+                    closer.prepend(QStringLiteral("</u>"));
                 }
+                spanClosers << closer;
             } else if (name == QLatin1String("list")) {
                 closeParagraph(); // a nested list follows its item's paragraph
                 // A nested list usually has no style of its own (LibreOffice):
@@ -1430,7 +1514,7 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
         } else if (token == QXmlStreamReader::EndElement) {
             const QStringView name = reader.name();
             if (name == QLatin1String("span")) {
-                closeInline();
+                closeSpan();
             } else if (name == QLatin1String("list-item") || name == QLatin1String("list-header")) {
                 closeParagraph();
                 html += QStringLiteral("</li>");
@@ -1448,6 +1532,9 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                 html += QStringLiteral("</table>");
             } else if (name == QLatin1String("p") || name == QLatin1String("h")) {
                 closeParagraph();
+            } else if (name == QLatin1String("table-of-content")) {
+                closeParagraph();
+                tocCurrent = -1;
             }
         } else if (token == QXmlStreamReader::Characters && inP) {
             if (!reader.isWhitespace()) {
@@ -1623,7 +1710,24 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
             }
         }
     }
+    const OdtTocs tocs = extractOdtTocs(QString::fromUtf8(xml), QString::fromUtf8(stylesXml));
+    doc->setProperty("zwriter.odtTocs", tocs.raw);
+    doc->setProperty("zwriter.odtTocStyles", tocs.styles);
+    doc->setProperty("zwriter.odtTocNs", tocs.ns);
     doc->setHtml(odtXmlToHtml(xml, stylesXml, imageMembers));
+    if (!tocs.raw.isEmpty()) {
+        QTextCursor mark(doc);
+        for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+            const int st = b.userState();
+            if (st >= kTocUserState && st < kTocUserState + 0x1000) {
+                b.setUserState(-1);
+                mark.setPosition(b.position());
+                QTextBlockFormat f;
+                f.setProperty(TocProperty, st - kTocUserState);
+                mark.mergeBlockFormat(f);
+            }
+        }
+    }
     for (const QString &m : std::as_const(imageMembers)) {
         // setHtml() may drop resources on some Qt versions; put them back.
         if (doc->resource(QTextDocument::ImageResource, QUrl(m)).isNull()) {
@@ -1793,9 +1897,80 @@ QString framePatchedContent(const QString &xml, const QList<Images::Wrap> &wraps
     return out;
 }
 
+// Put the original tables of contents back over the paragraphs that show
+// them (Qt's writer would save them as plain paragraphs).
+QString tocRestoredContent(const QString &src, const QTextDocument *copy, const QTextDocument *original)
+{
+    const QStringList raw = original->property("zwriter.odtTocs").toStringList();
+    if (raw.isEmpty()) {
+        return src;
+    }
+    QHash<QString, int> styleToToc; // "p<format index>" -> table
+    for (QTextBlock b = copy->begin(); b.isValid(); b = b.next()) {
+        const QVariant t = b.blockFormat().property(TocProperty);
+        if (t.isValid() && t.toInt() >= 0 && t.toInt() < raw.size()) {
+            styleToToc.insert(QStringLiteral("p%1").arg(b.blockFormatIndex()), t.toInt());
+        }
+    }
+    if (styleToToc.isEmpty()) {
+        return src; // the table was deleted
+    }
+    static const QRegularExpression paraRe(QStringLiteral(
+        R"re(<text:(p|h)\b[^>]*?text:style-name="(p\d+)"[^>]*?(?:/>|>.*?</text:\1>))re"),
+        QRegularExpression::DotMatchesEverythingOption);
+    QHash<int, QPair<qsizetype, qsizetype>> spans; // table -> [first start, last end)
+    auto it = paraRe.globalMatch(src);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        const auto t = styleToToc.constFind(m.captured(2));
+        if (t == styleToToc.cend()) {
+            continue;
+        }
+        auto span = spans.find(*t);
+        if (span == spans.end()) {
+            spans.insert(*t, {m.capturedStart(0), m.capturedEnd(0)});
+        } else {
+            span->second = m.capturedEnd(0);
+        }
+    }
+    QList<int> order = spans.keys();
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return spans[a].first > spans[b].first; });
+    QString out = src;
+    for (int t : std::as_const(order)) { // back to front keeps offsets valid
+        out.replace(spans[t].first, spans[t].second - spans[t].first, raw.at(t));
+    }
+    // The styles they use, and any namespace the original declared.
+    const QString styles = original->property("zwriter.odtTocStyles").toString();
+    if (!styles.isEmpty()) {
+        const qsizetype at = out.indexOf(QLatin1String("</office:automatic-styles>"));
+        if (at >= 0) {
+            out.insert(at, styles);
+        } else {
+            const qsizetype body = out.indexOf(QLatin1String("<office:body"));
+            if (body >= 0) {
+                out.insert(body, QStringLiteral("<office:automatic-styles>%1</office:automatic-styles>").arg(styles));
+            }
+        }
+    }
+    const qsizetype rootStart = out.indexOf(QLatin1String("<office:document-content"));
+    const qsizetype rootEnd = rootStart >= 0 ? out.indexOf(QLatin1Char('>'), rootStart) : -1;
+    if (rootEnd > 0) {
+        const QString root = out.mid(rootStart, rootEnd - rootStart);
+        QString add;
+        for (const QString &decl : original->property("zwriter.odtTocNs").toStringList()) {
+            const QString prefix = decl.section(QLatin1Char('='), 0, 0);
+            if (!root.contains(prefix + QLatin1Char('='))) {
+                add += QLatin1Char(' ') + decl;
+            }
+        }
+        out.insert(rootEnd, add);
+    }
+    return out;
+}
+
 // Post-process content.xml written by QTextDocumentWriter: headings (text:h)
 // and table styling. Best effort: the document itself is already saved.
-bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
+bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error, const QTextDocument *source = nullptr)
 {
     QHash<QString, int> headingStyles;
     for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
@@ -1835,7 +2010,8 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
             }
         }
     }
-    if (headingStyles.isEmpty() && tables.isEmpty() && textStyleFamilies.isEmpty() && !anyFloat) {
+    const bool anyToc = source && !source->property("zwriter.odtTocs").toStringList().isEmpty();
+    if (headingStyles.isEmpty() && tables.isEmpty() && textStyleFamilies.isEmpty() && !anyFloat && !anyToc) {
         return true;
     }
     auto fail = [error](const QString &msg) {
@@ -1882,6 +2058,9 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error)
         }
         out += QStringView(patched).mid(last);
         patched = out;
+    }
+    if (anyToc) {
+        patched = tocRestoredContent(patched, doc, source);
     }
     if (patched == original) {
         return true;
@@ -2324,7 +2503,7 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
         }
         // Best effort, like the meta.xml patch: the body is already saved.
         QString headingError;
-        if (!patchOdtContent(copy.get(), path, &headingError)) {
+        if (!patchOdtContent(copy.get(), path, &headingError, doc)) {
             qWarning("zwriter: %s", qPrintable(headingError));
         }
         QString pictureError;

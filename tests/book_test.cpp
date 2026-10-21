@@ -16,6 +16,8 @@
 //   W  word counts
 //   V  version
 #include "BookChapterDialog.hpp"
+#include <QTest>
+#include <memory>
 #include "BookManifest.hpp"
 #include "BookSidebar.hpp"
 #include "DocumentIo.hpp"
@@ -478,6 +480,17 @@ void usabilityTests()
               && !side->findChild<QToolButton *>("bookNew")->isVisibleTo(side),
           "U  one labelled '+ Chapter' button; no second 'New' button");
     check(list->focusPolicy() == Qt::StrongFocus, "U  the list takes keyboard focus (Tab)");
+    {
+        auto *files = side->findChild<QToolButton *>("bookToLibrary");
+        check(files && files->text() == "Files" && files->toolTip().contains("all files"),
+              "U  the file-tree button says Files, not Library");
+        std::unique_ptr<QMenu> m(side->buildContextMenu(-1));
+        bool change = false;
+        for (QAction *a : m->actions()) {
+            change = change || a->text() == QStringLiteral("Change Library Folder…");
+        }
+        check(change, "U  right-click menu: Change Library Folder…");
+    }
 
     // Picker: the last entry starts a new book and leaves the current one picked.
     QComboBox *picker = side->picker();
@@ -702,7 +715,7 @@ void sidebarTests()
     delete menu;
     check(texts == QStringList({"Open", "Edit Details…", "Rename", "Move Up(off)", "Move Down",
                                 "Remove from Book…", "New Chapter…", "Add Existing Chapters…",
-                                "New Book…"}),
+                                "New Book…", "Change Library Folder…"}),
           "S  context menu", texts.join(" | "));
 
     // Outside paths: refused with a message, the book unchanged.
@@ -761,6 +774,62 @@ void sidebarTests()
 
 } // namespace
 
+// E (1.5.4): Edit Details stays responsive. The sidebar used to load every
+// .odt chapter (unzip + pictures) on each refresh, twice; with a few
+// chapters the window lagged for seconds and fast typing went astray.
+void detailsTests()
+{
+    QTemporaryDir tmp;
+    const QString lib = tmp.path() + "/Library";
+    const QString dir = lib + "/Birds";
+    for (int i = 1; i <= 6; ++i) {
+        writeOdt(dir + QStringLiteral("/%1 Chapter.odt").arg(i, 2, 10, QLatin1Char('0')),
+                 QStringLiteral("Words in chapter %1 here.").arg(i));
+    }
+    QMainWindow win;
+    auto *side = new BookSidebar(&win);
+    win.setCentralWidget(side);
+    win.show();
+    side->setRootPath(lib);
+    check(side->createBook("Birds") && side->view()->count() == 6, "E  book with six .odt chapters");
+    const int afterOpen = wordCountFileReads();
+    side->reload();
+    BookChapter c = side->book().at(2);
+    c.status = QStringLiteral("Revised");
+    side->setChapter(2, c);
+    check(wordCountFileReads() == afterOpen, "E  refresh and a details change read no chapter files again",
+          QStringLiteral("%1 -> %2").arg(afterOpen).arg(wordCountFileReads()));
+    check(side->view()->item(2)->text().contains("Revised"), "E  the list shows the change at once");
+    QTest::qWait(20);
+    writeOdt(dir + "/03 Chapter.odt", "Now this chapter has quite a few more words in it.");
+    side->reload();
+    check(wordCountFileReads() == afterOpen + 1 && side->view()->item(2)->text().contains("11 words"),
+          "E  a changed file is recounted (only that one)", side->view()->item(2)->text());
+
+    side->editChapter(0);
+    BookChapterDialog *dlg = side->chapterDialog();
+    check(dlg != nullptr, "E  Edit Details opens");
+    if (dlg) {
+        QTest::qWait(20);
+        check(dlg->focusWidget() == dlg->titleEdit(), "E  typing starts in Title");
+        check(dlg->titleEdit()->nextInFocusChain() == dlg->statusBox()
+                  && dlg->statusBox()->nextInFocusChain() == dlg->povEdit()
+                  && dlg->povEdit()->nextInFocusChain() == dlg->tagsEdit()
+                  && dlg->tagsEdit()->nextInFocusChain() == dlg->targetBox(),
+              "E  Tab goes Title, Status, POV, Tags, Target");
+        QTest::keyClicks(dlg->titleEdit(), "Waterfowl and Wetlands");
+        QTest::keyClicks(dlg->tagsEdit(), "toc, ducks, swans");
+        QTest::keyClicks(dlg->synopsisEdit(), "Dabblers and divers.");
+        dlg->accept();
+        const BookChapter got = side->book().at(0);
+        check(got.title == "Waterfowl and Wetlands" && got.tags == QStringList({"toc", "ducks", "swans"})
+                  && got.synopsis == "Dabblers and divers.",
+              "E  fast typing lands in the right fields", got.title + " | " + got.tags.join(",") + " | " + got.synopsis);
+        check(side->view()->item(0)->text().startsWith("1. Waterfowl and Wetlands"), "E  title shown at once");
+        check(wordCountFileReads() == afterOpen + 1, "E  saving details reads no chapter files");
+    }
+}
+
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
@@ -775,6 +844,7 @@ int main(int argc, char **argv)
     usabilityTests();
     wordTests();
     sidebarTests();
+    detailsTests();
     check(QVersionNumber::fromString(QString::fromLatin1(zwriter::kVersionString)) >= QVersionNumber(1, 4, 0),
           "V  version is 1.4.0 or later (the Book view shipped in 1.4.0)",
           QString::fromLatin1(zwriter::kVersionString));
