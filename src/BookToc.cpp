@@ -93,12 +93,12 @@ QList<Entry> entries(const BookManifest &book, int maxLevel, const QString &skip
         if (!skip.isEmpty() && QFileInfo(path).absoluteFilePath() == skip) {
             continue;
         }
-        if (book.isMissing(i)) {
-            continue;
+        if (book.isMissing(i) || book.isContents(i)) {
+            continue; // the Contents chapter holds the ToC; it is not listed in it
         }
         // Numbered as in the sidebar (and the figure numbers), by book position.
         const QString title = book.displayTitle(i);
-        out.append({1, QStringLiteral("%1. %2").arg(i + 1).arg(title), i});
+        out.append({1, QStringLiteral("%1. %2").arg(book.chapterNumber(i)).arg(title), i});
         if (maxLevel < 2) {
             continue;
         }

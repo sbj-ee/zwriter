@@ -36,6 +36,9 @@ constexpr int TitlePageProperty = QTextFormat::UserProperty + 0x5D03;
 constexpr int AnchorProperty = QTextFormat::UserProperty + 0x5D04;       // ToC target number + 1
 
 struct Options {
+    // The table of contents. When the book has a Contents chapter (1.11.1) the
+    // table is put there, in its place in the book, instead of a second one
+    // after the title page; with this off the Contents chapter is left out.
     bool toc = true;
     bool titlePage = true;
     bool figureNumbers = true; // "Figure <chapter>.<n>." labels; off = labels removed
@@ -48,6 +51,7 @@ struct TocLine {
     int level = 1;
     QString text;
     int page = 0;
+    int chapter = -1; // book.json index of the chapter the line belongs to
 };
 
 struct Result {

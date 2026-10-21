@@ -441,7 +441,10 @@ void BookSidebar::reload()
 QString BookSidebar::itemText(int row) const
 {
     const BookChapter &c = m_book.at(row);
-    const QString title = QStringLiteral("%1. %2").arg(row + 1).arg(m_book.displayTitle(row));
+    // The Contents chapter is not numbered; the chapters after it start at 1.
+    const int number = m_book.chapterNumber(row);
+    const QString title = number > 0 ? QStringLiteral("%1. %2").arg(number).arg(m_book.displayTitle(row))
+                                     : m_book.displayTitle(row);
     if (m_book.isOutside(row)) {
         return title + QStringLiteral("\nOutside the book folder: ") + c.path;
     }
@@ -809,7 +812,7 @@ QMenu *BookSidebar::buildContextMenu(int row)
     QAction *renumber = menu->addAction(QStringLiteral("Renumber Files…"), this, [this]() { renumberFiles(); });
     renumber->setObjectName(QStringLiteral("bookRenumber"));
     renumber->setToolTip(QStringLiteral("Rename the chapter files so their numbers follow the book order (asks first)"));
-    renumber->setEnabled(m_hasBook && !renumberPlan().isEmpty());
+    renumber->setEnabled(m_hasBook && m_book.count() > 0); // says so when nothing needs renaming
     QMenu *exportMenu = menu->addMenu(QStringLiteral("Export Book"));
     exportMenu->setEnabled(m_hasBook && m_book.count() > 0);
     exportMenu->addAction(QStringLiteral("PDF…"), this, &BookSidebar::exportBookPdfRequested);
@@ -922,7 +925,8 @@ QList<QPair<QString, QString>> BookSidebar::renumberPlan() const
         QString name = fi.completeBaseName();
         name.remove(prefix);
         const QString dir = fi.path() == QLatin1String(".") ? QString() : fi.path() + QLatin1Char('/');
-        QString wanted = dir + QStringLiteral("%1 %2").arg(i + 1, width, 10, QLatin1Char('0')).arg(name);
+        // Numbers follow the chapter numbers; the Contents chapter is 00.
+        QString wanted = dir + QStringLiteral("%1 %2").arg(m_book.chapterNumber(i), width, 10, QLatin1Char('0')).arg(name);
         if (!fi.suffix().isEmpty()) {
             wanted += QLatin1Char('.') + fi.suffix();
         }
@@ -937,6 +941,7 @@ bool BookSidebar::renumberFiles(bool ask, QString *error)
 {
     const auto plan = renumberPlan();
     if (plan.isEmpty()) {
+        emit message(QStringLiteral("The chapter files already follow the book order; nothing to rename."));
         return false;
     }
     const QDir dir(m_book.bookDir());
@@ -1101,12 +1106,7 @@ QString BookSidebar::createChapter(const QString &title, const QString &suffixIn
 
 int BookSidebar::contentsRow() const
 {
-    for (int i = 0; i < m_book.count(); ++i) {
-        if (m_book.displayTitle(i).compare(QLatin1String("Contents"), Qt::CaseInsensitive) == 0) {
-            return i;
-        }
-    }
-    return -1;
+    return m_book.contentsIndex();
 }
 
 QString BookSidebar::createContentsChapter()
