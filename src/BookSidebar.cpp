@@ -1219,6 +1219,9 @@ void BookSidebar::renameChapter(int row)
     }
     QListWidgetItem *item = m_view->item(row);
     m_rebuilding = true;
+    // The row keeps its two-line height while it shows just the title to edit,
+    // so the rows below do not jump (rebuild() makes fresh items afterwards).
+    item->setSizeHint(m_view->visualItemRect(item).size());
     item->setText(m_book.displayTitle(row));
     item->setFlags(item->flags() | Qt::ItemIsEditable);
     m_rebuilding = false;

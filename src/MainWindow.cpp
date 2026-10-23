@@ -858,6 +858,11 @@ void MainWindow::createFormatActions()
         m_namedStyleActions << a;
     }
     connect(styleGroup, &QActionGroup::triggered, this, [this](QAction *a) {
+        // A style chosen again (Heading 1 on a Heading 1 line) is not a toggle:
+        // triggering the checked action unchecks it, which read as Body Text.
+        if (!a->isChecked()) {
+            a->setChecked(true); // (the group unchecks the others)
+        }
         if (a->property("zwStyle").isValid()) {
             applyNamedStyle(a->property("zwStyle").toString());
         } else {

@@ -3,6 +3,17 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.11.2] — unreleased
+
+Editor fixes from the Author's 1.11.0 retest (M2, M6).
+
+- **Heading 1 chosen again stays Heading 1 (M2).** Picking a paragraph style from the style list
+  (or the Format menu) on a line that already has it toggled the style off, so Heading 1 on a
+  Heading 1 line became Body Text. A style is never a toggle now; Body Text is how to go back.
+- **The inline rename box no longer moves the rows below it (M6).** While a chapter is renamed in
+  the Book sidebar its row shows just the title, which made it one line shorter and pulled the rows
+  below up by about 12 px. The row keeps its height until the edit ends.
+
 ## [1.11.1] — unreleased
 
 Table of contents fixes from the Author's 1.11.0 retest (M1, M3).
