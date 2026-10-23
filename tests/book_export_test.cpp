@@ -292,6 +292,56 @@ int main(int argc, char **argv)
         QFile::copy(epub2, o2);
     }
 
+    // ------------------------------------------------------------ C (1.11.1, M1 + M3)
+    // A book with a Contents chapter: its table is the only one, in its place,
+    // with entries and page numbers; the Contents chapter is not numbered.
+    {
+        const QString cdir = tmp.path() + QStringLiteral("/Book C");
+        QDir().mkpath(cdir);
+        {
+            // A saved Contents chapter whose old table came back as plain text,
+            // as LibreOffice-edited files do: "1. Contents<TAB>3", a stray "3".
+            QTextDocument d;
+            QTextCursor c(&d);
+            c.insertText(QStringLiteral("1. Contents\t3"));
+            c.insertBlock();
+            c.insertText(QStringLiteral("3"));
+            check(DocumentIo::save(&d, cdir + QStringLiteral("/00 Contents.odt"), DocumentIo::Format::Odt),
+                  "C setup: Contents chapter saved");
+        }
+        write(cdir + QStringLiteral("/01 Alpha.md"), "# Alpha\n\nA.\n\n## First\n\nText.\n");
+        write(cdir + QStringLiteral("/02 Beta.md"), "# Beta\n\nB.\n");
+        BookManifest cb = BookManifest::fromFolder(cdir);
+        cb.setTitle(QStringLiteral("Book C"));
+        check(cb.contentsIndex() == 0 && cb.chapterNumber(0) == 0 && cb.chapterNumber(1) == 1 && cb.chapterNumber(2) == 2,
+              "C the Contents chapter is not numbered; Alpha is chapter 1");
+        BookExport::Result rc = BookExport::build(cb, BookExport::Options(), pageOf(layout), font);
+        const QStringList ct = tocOf(rc);
+        check(ct.size() == 3 && ct.value(0).startsWith(QLatin1String("1:1. Alpha@")) && ct.value(1).startsWith(QLatin1String("2:First@"))
+                  && ct.value(2).startsWith(QLatin1String("1:2. Beta@")),
+              "C one ToC: Alpha is 1, the Contents chapter is not listed", ct.join(QStringLiteral(" | ")));
+        int contentsHeads = 0;
+        bool stray = false;
+        for (QTextBlock b = rc.doc->begin(); b.isValid(); b = b.next()) {
+            contentsHeads += b.text() == QLatin1String("Contents") ? 1 : 0;
+            stray = stray || b.text().trimmed() == QLatin1String("3") || b.text().startsWith(QLatin1String("1. Contents"));
+        }
+        check(contentsHeads == 1, "C no second, automatic ToC", QString::number(contentsHeads));
+        check(!stray, "C the Contents page shows its entries, not the saved leftovers");
+        const QTextBlock head = findText(*rc.doc, QStringLiteral("Contents"));
+        const QTextBlock first = head.next();
+        check(first.isValid() && first.text().startsWith(QLatin1String("1. Alpha")) && first.text().contains(QLatin1Char('\t')),
+              "C entries follow the Contents heading, with page numbers", first.text());
+        check(PrintLayout::pageOf(rc.doc.get(), head.position()) == 2, "C Contents after the title page");
+        check(rc.toc.value(0).page == 3 && rc.toc.value(0).chapter == 1, "C Alpha on page 3",
+              QString::number(rc.toc.value(0).page));
+        BookExport::Options noToc;
+        noToc.toc = false;
+        BookExport::Result rn = BookExport::build(cb, noToc, pageOf(layout), font);
+        check(!findText(*rn.doc, QStringLiteral("Contents")).isValid() && rn.chapters == 2,
+              "C ToC off leaves the Contents chapter out");
+    }
+
     std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
     return g_failures ? 1 : 0;
 }

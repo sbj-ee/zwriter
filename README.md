@@ -20,7 +20,7 @@ Public repository: https://github.com/sbj-ee/zwriter
 
 ## Status
 
-**1.11.0** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
+**1.11.1** — stable. Downloads (Linux amd64 `.deb`, Apple Silicon `.dmg` with `zwriter.app`) are on the
 [Releases page](https://github.com/sbj-ee/zwriter/releases); changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ### Install
@@ -110,9 +110,9 @@ never installed.
 - **Header & Footer** (Format → Header & Footer…): left/center/right plain-text bands; `{page}` / `{pages}` tokens; visible in Full Page, print, and PDF; ODT meta.xml round-trip; **page numbers are opt-in and off by default** — Format → Page Numbers adds `{page}` to an empty footer band (centre first) and removes only what it added, so custom header/footer text survives an off/on cycle; drawn on every page
 - **Paragraph alignment** — Format → Align or the toolbar: Align Left (`Ctrl+L`), Center (`Ctrl+E`), Align Right (`Ctrl+R`), Justify (`Ctrl+J`); `Cmd` on macOS. Applies to the paragraph at the cursor or every paragraph a selection touches, as one undo step; choosing the alignment a paragraph already has changes nothing (no undo step, no unsaved-changes mark). Enter in an empty centered line keeps the centering. Saved to ODT (`fo:text-align`) and RTF (`\ql \qc \qr \qj`), and honoured in Full Page view, print, Print Preview and PDF; the last line of a justified paragraph stays ragged, as in other word processors
 - **Paragraph formatting** — Format → Paragraph… sets left/right/first-line/hanging indents, spacing before/after, line spacing and alignment; Increase/Decrease Indent (`Ctrl+M` / `Ctrl+Shift+M`); View → Ruler (off by default) shows and drags the indents. Styles Title, Subtitle, Block Quote, Caption and Bibliography (hanging indent). Saved to ODT (`fo:margin-*`, `fo:text-indent`, `fo:line-height`, named styles) and RTF (`\li \ri \fi \sb \sa \sl`)
-- **Table of contents** — File → Insert/Update Table of Contents (or the Book sidebar menu) puts the book's table of contents in its **Contents** chapter (made as `00 Contents.odt`, first in the book, if there is none) and opens it: every other chapter, in book order, with its headings and the page numbers of the whole-book PDF (from the Export Book options and Page Setup), on a right tab with dot leaders. It updates itself when chapters are reordered, added or renamed, and is saved as a real ODF table of contents. A LibreOffice table of contents in an opened file also shows its dot leaders and right-aligned page numbers
+- **Table of contents** — File → Insert/Update Table of Contents (or the Book sidebar menu) puts the book's table of contents in its **Contents** chapter (made as `00 Contents.odt`, first in the book, if there is none) and opens it: every other chapter, in book order, numbered from 1 (the Contents chapter itself is not numbered), with its headings and the page numbers of the whole-book PDF (from the Export Book options and Page Setup), on a right tab with dot leaders. It updates itself when chapters are reordered, added or renamed, and is saved as a real ODF table of contents. A LibreOffice table of contents in an opened file also shows its dot leaders and right-aligned page numbers
 - **Figure numbers** — Insert Caption labels each caption "Figure <chapter>.<n>." (chapter = place in the open book); the numbers update when figures are added, removed or moved and when the chapter moves in the book
-- **Export / print the whole book** — File → Export Book → PDF or EPUB, and File → Print Book… (also in the Book sidebar menu): every chapter in book order, each on a new page, with an optional title page, table of contents (page numbers, dot leaders) and figure numbers; pages are numbered through the book. EPUB is EPUB 3 (checked with EPUBCheck in CI) with the paragraph styles and indents in its stylesheet
+- **Export / print the whole book** — File → Export Book → PDF or EPUB, and File → Print Book… (also in the Book sidebar menu): every chapter in book order, each on a new page, with an optional title page, table of contents (page numbers, dot leaders) and figure numbers; a book with a Contents chapter gets its table there, in its place, and no second one; pages are numbered through the book. EPUB is EPUB 3 (checked with EPUBCheck in CI) with the paragraph styles and indents in its stylesheet
 - **Manual page break** (Format → Insert Page Break, `Ctrl+Enter`): splits the paragraph and starts a new page; Backspace at the start of the new page removes it. Saved to ODT (`fo:break-before="page"`) and honoured in Full Page view, print and PDF
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
 - **Help** menu: About zwriter (shows PROJECT_VERSION), Check for Updates and Check for Updates at Startup — see [Updates](#updates)
@@ -122,7 +122,7 @@ never installed.
 
 - Richer themes pack (beyond Paper / Dark room / Inverse), autosave + restore cursor, multi-document / sessions
 - Daily word / time goal, scene / chapter navigation (the Book sidebar lists chapters; there is no in-document outline yet)
-- Whole-book export limits: the table of contents goes two levels deep (chapters and their top headings) and long entries are cut to one line; the title page shows only the book title; EPUB has no cover or author, its language is English, tables become plain paragraphs, lists are not nested and only web links are kept. The page numbers in the editor's table of contents are the whole-book PDF's (not the editor's own pages) and are read from the saved chapter files, so they catch up when a chapter is saved; only "Figure" captions are numbered
+- Whole-book export limits: the table of contents goes two levels deep (chapters and their top headings; deeper headings such as Heading 3 are left out on purpose, to keep it to a page or two) and long entries are cut to one line; the title page shows only the book title; EPUB has no cover or author, its language is English, tables become plain paragraphs, lists are not nested and only web links are kept. The page numbers in the editor's table of contents are the whole-book PDF's (not the editor's own pages) and are read from the saved chapter files, so they catch up when a chapter is saved; only "Figure" captions are numbered
 - Richer ODT/RTF style round-trip (colours, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is best-effort (bold/italic/underline, paragraph alignment, headings by size, tables, Unicode; lists are exported as literal bullet/number text)
 - ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it. Headings are written as `text:h` the same way (a patch of `content.xml`); without `zip` they save as styled paragraphs and reopen as body text
 - macOS app is ad-hoc signed only — no Developer ID signature or notarization yet, so the first launch needs right-click → Open (see Install)
@@ -238,7 +238,7 @@ Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file
 a version header.
 
 ```cmake
-project(zwriter VERSION 1.11.0 LANGUAGES CXX)  # bump here only
+project(zwriter VERSION 1.11.1 LANGUAGES CXX)  # bump here only
 ```
 
 Semver `MAJOR.MINOR.PATCH`. GitHub Release tags: `vX.Y.Z`. Artifacts:

@@ -80,6 +80,14 @@ public:
     int indexOf(const QString &path) const;
     // Shown name: title, else the file's base name.
     QString displayTitle(int i) const;
+    // The Contents chapter (1.11.1): titled "Contents", or a file named
+    // "NN Contents" with no title. It holds the table of contents and is not a
+    // numbered chapter. contentsIndex() is the first one, or -1.
+    bool isContents(int i) const;
+    int contentsIndex() const;
+    // Chapter number as shown in the sidebar, the ToC and figure labels: book
+    // position counting only real chapters (the Contents chapter is 0).
+    int chapterNumber(int i) const;
 
     // Adds the file (absolute or relative) at the end, or at `at`. Returns the
     // new index, the existing index if it is already in the book, or -1 if it

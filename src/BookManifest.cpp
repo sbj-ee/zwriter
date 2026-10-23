@@ -306,6 +306,36 @@ int BookManifest::indexOf(const QString &path) const
     return -1;
 }
 
+bool BookManifest::isContents(int i) const
+{
+    if (i < 0 || i >= count()) {
+        return false;
+    }
+    return displayTitle(i).trimmed().compare(QLatin1String("Contents"), Qt::CaseInsensitive) == 0;
+}
+
+int BookManifest::contentsIndex() const
+{
+    for (int i = 0; i < count(); ++i) {
+        if (isContents(i)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int BookManifest::chapterNumber(int i) const
+{
+    if (i < 0 || i >= count() || isContents(i)) {
+        return 0;
+    }
+    int n = 0;
+    for (int k = 0; k <= i; ++k) {
+        n += isContents(k) ? 0 : 1;
+    }
+    return n;
+}
+
 QString BookManifest::displayTitle(int i) const
 {
     const BookChapter &c = m_chapters.at(i);

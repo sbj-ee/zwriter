@@ -92,7 +92,7 @@ bool loadChapter(const BookManifest &book, int i, const Options &o, const QFont 
         b = prev;
     }
     if (o.figureNumbers) {
-        Captions::renumber(d, i + 1);
+        Captions::renumber(d, book.chapterNumber(i));
     } else {
         for (QTextBlock b = d->begin(); b.isValid(); b = b.next()) {
             const int n = Captions::isCaption(b) ? Captions::labelLength(b) : 0;
@@ -203,7 +203,9 @@ Result build(const BookManifest &book, const Options &options, const PrintLayout
         c.insertText(bookTitle(book), cf);
     }
     int tocPos = -1;
-    if (options.toc) {
+    // A book with a Contents chapter gets its table there, not a second one here.
+    const int contentsAt = book.contentsIndex();
+    if (options.toc && contentsAt < 0) {
         QTextBlockFormat bf;
         if (!empty) {
             bf.setPageBreakPolicy(QTextFormat::PageBreak_AlwaysBefore);
@@ -217,6 +219,25 @@ Result build(const BookManifest &book, const Options &options, const PrintLayout
     }
 
     for (int i = 0; i < book.count(); ++i) {
+        if (i == contentsAt) {
+            // The Contents chapter: its saved table is replaced by the one built
+            // below (page numbers for this layout); left out without the ToC.
+            if (!options.toc) {
+                continue;
+            }
+            QTextBlockFormat bf;
+            if (!empty) {
+                bf.setPageBreakPolicy(QTextFormat::PageBreak_AlwaysBefore);
+            }
+            bf.setBottomMargin(12);
+            bf.setProperty(TocEntryProperty, 0);
+            const QTextCharFormat cf = headingChar(20);
+            newBlock(bf, cf);
+            c.insertText(book.displayTitle(i), cf);
+            tocPos = c.position();
+            ++r.chapters;
+            continue;
+        }
         QTextDocument ch;
         QString title;
         if (!loadChapter(book, i, options, defaultFont, &ch, &title)) {
@@ -277,10 +298,12 @@ Result build(const BookManifest &book, const Options &options, const PrintLayout
         if (f.hasProperty(ChapterStartProperty)) {
             inChapter = true;
             line.level = 1;
-            line.text = QStringLiteral("%1. %2").arg(f.intProperty(ChapterStartProperty)).arg(b.text());
+            line.chapter = f.intProperty(ChapterStartProperty) - 1;
+            line.text = QStringLiteral("%1. %2").arg(book.chapterNumber(line.chapter)).arg(b.text());
         } else if (inChapter && f.headingLevel() > 0 && f.headingLevel() <= 2 && !b.text().trimmed().isEmpty()) {
             line.level = 2;
             line.text = b.text().trimmed();
+            line.chapter = lines.isEmpty() ? -1 : lines.last().chapter;
         } else {
             continue;
         }
@@ -670,6 +693,9 @@ bool writeEpub(const BookManifest &book, const Options &options, const QString &
     }
     int written = 0;
     for (int i = 0; i < book.count(); ++i) {
+        if (book.isContents(i)) {
+            continue; // the EPUB's own navigation is the table of contents
+        }
         QTextDocument ch;
         QString ct;
         if (!loadChapter(book, i, options, QFont(), &ch, &ct)) {
@@ -681,11 +707,11 @@ bool writeEpub(const BookManifest &book, const Options &options, const QString &
         ++written;
         const QString file = QStringLiteral("ch%1.xhtml").arg(i + 1, 2, 10, QLatin1Char('0'));
         QList<NavHeading> heads;
-        writeFile(root, QStringLiteral("OEBPS/") + file, chapterXhtml(ch, ct, i + 1, &css, &images, &heads).toUtf8());
+        writeFile(root, QStringLiteral("OEBPS/") + file, chapterXhtml(ch, ct, book.chapterNumber(i), &css, &images, &heads).toUtf8());
         const QString id = QStringLiteral("ch%1").arg(i + 1);
         manifest << QStringLiteral("<item id=\"%1\" href=\"%2\" media-type=\"application/xhtml+xml\"/>").arg(id, file);
         spine << QStringLiteral("<itemref idref=\"%1\"/>").arg(id);
-        QString li = QStringLiteral("<li><a href=\"%1\">%2. %3</a>").arg(file).arg(i + 1).arg(esc(ct));
+        QString li = QStringLiteral("<li><a href=\"%1\">%2. %3</a>").arg(file).arg(book.chapterNumber(i)).arg(esc(ct));
         QStringList sub;
         for (const NavHeading &h : heads) {
             if (!h.id.isEmpty()) {

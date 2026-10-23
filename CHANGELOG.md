@@ -3,7 +3,25 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [1.11.0] — unreleased
+## [1.11.1] — unreleased
+
+Table of contents fixes from the Author's 1.11.0 retest (M1, M3).
+
+- **One table of contents in Export Book (M1).** When the book has a Contents chapter, the PDF
+  (and Print Book) puts the table there, in its place, with its entries and page numbers, and no
+  longer adds a second one after the title page. Before, the PDF had two: an automatic one listing
+  "1. Contents … 3", and the Contents page with only its heading and a stray "3". With the Table of
+  contents option off, the Contents chapter is left out. EPUB uses its own navigation and skips it.
+- **The Contents chapter is not numbered (M3).** The sidebar shows it as "Contents", and the first
+  real chapter is 1 in the sidebar, the table of contents, figure labels and EPUB ("1. Alpha", not
+  "2. Alpha").
+- **Renumber Files… is always available in a book (M3).** It was greyed out until the file numbers
+  disagreed with the book order (in practice, until a Contents chapter was added). With nothing to
+  rename it says so. The Contents chapter's file keeps "00"; chapters are numbered from 01.
+- **Heading 3 in the table of contents (M3): left out on purpose.** The table lists chapters and
+  their top headings (two levels), as before; this is now stated in the README.
+
+## [1.11.0] — 2026-10-21
 
 Tables of contents with page numbers and a home of their own, from the Author's 1.10.3 retest
 (N2, N4, N8).

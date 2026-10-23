@@ -1237,7 +1237,16 @@ void testBookToc(const QString &root)
         }
         return lines.join(QStringLiteral(" | "));
     };
-    check(collect() == QLatin1String("2. Prairie | Meadowlarks | 3. Marsh | Rails"), "T inserted in book order", collect());
+    check(collect() == QLatin1String("1. Prairie | Meadowlarks | 2. Marsh | Rails"), "T inserted in book order", collect());
+    {
+        // 1.11.1 (M3): the Contents chapter is not numbered; Prairie is 1, and
+        // "00 Contents, 01 Prairie, 02 Marsh" already follows the book order.
+        auto *list = side->findChild<QListWidget *>(QStringLiteral("bookList"));
+        check(list && list->item(0)->text().startsWith(QLatin1String("Contents"))
+                  && list->item(1)->text().startsWith(QLatin1String("1. Prairie")),
+              "T sidebar: Contents unnumbered, Prairie is 1", list ? list->item(0)->text() + QLatin1Char('|') + list->item(1)->text() : QString());
+        check(side->renumberPlan().isEmpty(), "T Renumber keeps 00 for Contents and 01 for chapter 1");
+    }
     // N2: the whole-book PDF's page numbers, after a right tab with dot leaders.
     bool pagesOk = !pages.isEmpty();
     for (int k = 0; k < pages.size(); ++k) {
@@ -1258,12 +1267,12 @@ void testBookToc(const QString &root)
     if (toc) {
         toc->trigger();
     }
-    check(side->book().count() == 3 && w.windowTitle().contains(QLatin1String("00 Contents")) && collect().startsWith(QLatin1String("2. Prairie")),
+    check(side->book().count() == 3 && w.windowTitle().contains(QLatin1String("00 Contents")) && collect().startsWith(QLatin1String("1. Prairie")),
           "T Insert/Update from another chapter goes back to Contents", w.windowTitle());
     ed = editorOf(w);
     side->moveChapter(2, 1);
     QApplication::processEvents();
-    check(collect() == QLatin1String("2. Marsh | Rails | 3. Prairie | Meadowlarks"), "T a reorder updates it", collect());
+    check(collect() == QLatin1String("1. Marsh | Rails | 2. Prairie | Meadowlarks"), "T a reorder updates it", collect());
     std::unique_ptr<QMenu> m(side->buildContextMenu(-1));
     bool inMenu = false;
     for (QAction *a : m->actions()) {
@@ -1281,12 +1290,12 @@ void testBookToc(const QString &root)
         QTest::keyClick(line, Qt::Key_Return);
     }
     wait(50);
-    check(collect() == QLatin1String("2. Wetlands | Rails | 3. Prairie | Meadowlarks"), "T a rename updates it", collect());
+    check(collect() == QLatin1String("1. Wetlands | Rails | 2. Prairie | Meadowlarks"), "T a rename updates it", collect());
     // A changed heading in a chapter file shows up too (the book saves when the file does).
     put(dir + QStringLiteral("/01 Prairie.md"), "# Prairie\n\n## Larks and Meadowlarks\n");
     side->setChapter(2, side->book().at(2)); // what saving a chapter does: the book is saved, bookChanged follows
     QApplication::processEvents();
-    check(collect() == QLatin1String("2. Wetlands | Rails | 3. Prairie | Larks and Meadowlarks"),
+    check(collect() == QLatin1String("1. Wetlands | Rails | 2. Prairie | Larks and Meadowlarks"),
           "T a changed heading updates it", collect());
     editorOf(w)->document()->setModified(false);
 }

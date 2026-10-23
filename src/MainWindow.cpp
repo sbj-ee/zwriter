@@ -2391,7 +2391,7 @@ int MainWindow::chapterNumber() const
         return 0;
     }
     const int i = m_book->book().indexOf(QFileInfo(m_currentPath).absoluteFilePath());
-    return i >= 0 ? i + 1 : 0;
+    return i >= 0 ? m_book->book().chapterNumber(i) : 0;
 }
 
 int MainWindow::renumberCaptions(bool joinPrevious)
@@ -2545,11 +2545,9 @@ QList<BookToc::Entry> MainWindow::bookTocEntries() const
     QHash<int, int> chapterPage;
     QHash<QPair<int, QString>, int> headingPage;
     int chapter = -1;
-    static const QRegularExpression numbered(QStringLiteral("^(\\d+)\\. "));
     for (const BookExport::TocLine &line : r.toc) {
         if (line.level == 1) {
-            const auto m = numbered.match(line.text);
-            chapter = m.hasMatch() ? m.captured(1).toInt() - 1 : -1;
+            chapter = line.chapter;
             if (chapter >= 0 && !chapterPage.contains(chapter)) {
                 chapterPage.insert(chapter, line.page);
             }
