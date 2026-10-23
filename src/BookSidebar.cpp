@@ -232,6 +232,10 @@ BookSidebar::BookSidebar(QWidget *parent)
             const QString oldTitle = m_book.displayTitle(row);
             QTimer::singleShot(0, this, [this, row, c, oldTitle]() {
                 setChapter(row, c);
+                // The file name follows the title ("02 Beta.odt" -> "02 Bravo.odt").
+                if (m_book.displayTitle(row) != oldTitle) {
+                    renameChapterFile(row);
+                }
                 const int now = m_book.indexOf(m_book.absolutePath(row));
                 if (now >= 0 && m_book.displayTitle(now) != oldTitle) {
                     emit chapterRenamed(m_book.absolutePath(now), oldTitle, m_book.displayTitle(now));
@@ -610,13 +614,13 @@ void BookSidebar::chooseNewBook()
     dlg->setObjectName(QStringLiteral("bookNewDialog"));
     dlg->setAttribute(Qt::WA_DeleteOnClose, true);
     dlg->setWindowTitle(QStringLiteral("New Book"));
-    dlg->setLabelText(QStringLiteral("Subfolder of %1 for the book (pick one or type a new name):")
-                          .arg(QFileInfo(m_root).fileName()));
+    dlg->setLabelText(QStringLiteral("Subfolder of %1 for the book (type a new name or pick one):")
+                          .arg(QDir::toNativeSeparators(m_root)));
     dlg->setComboBoxEditable(true);
     dlg->setComboBoxItems(candidateFolders());
-    if (!candidateFolders().isEmpty()) {
-        dlg->setTextValue(candidateFolders().first());
-    }
+    // Starts empty (1.11.3): it used to offer the first spare folder, often one
+    // left over from an earlier book or an export folder.
+    dlg->setTextValue(QString());
     dlg->setWindowModality(Qt::WindowModal);
     connect(dlg, &QInputDialog::textValueSelected, this,
             [this](const QString &name) { createBook(name); });
@@ -924,6 +928,11 @@ QList<QPair<QString, QString>> BookSidebar::renumberPlan() const
         const QFileInfo fi(rel);
         QString name = fi.completeBaseName();
         name.remove(prefix);
+        // The name follows the chapter's title too (1.11.3), so a renamed chapter's file catches up.
+        const QString titled = fileTitle(m_book.at(i).title);
+        if (!titled.isEmpty()) {
+            name = titled;
+        }
         const QString dir = fi.path() == QLatin1String(".") ? QString() : fi.path() + QLatin1Char('/');
         // Numbers follow the chapter numbers; the Contents chapter is 00.
         QString wanted = dir + QStringLiteral("%1 %2").arg(m_book.chapterNumber(i), width, 10, QLatin1Char('0')).arg(name);
@@ -1040,6 +1049,83 @@ bool BookSidebar::renumberFiles(bool ask, QString *error)
     rebuild(m_view->currentRow());
     emit bookChanged();
     emit message(QStringLiteral("Renumbered %1 chapter file(s)").arg(plan.size()));
+    return true;
+}
+
+// A title as a file name: no path or reserved characters, spaces tidied, at most 80 characters.
+QString BookSidebar::fileTitle(const QString &title)
+{
+    static const QRegularExpression bad(QStringLiteral(R"([/\\:*?"<>|\x00-\x1f])"));
+    QString t = title;
+    t.replace(bad, QStringLiteral(" "));
+    t = t.simplified().left(80).trimmed();
+    while (t.startsWith(QLatin1Char('.'))) {
+        t.remove(0, 1);
+    }
+    return t;
+}
+
+bool BookSidebar::renameChapterFile(int row, QString *error)
+{
+    auto fail = [&](const QString &m) {
+        if (error) {
+            *error = m;
+        }
+        emit message(m);
+        return false;
+    };
+    if (row < 0 || row >= m_book.count() || m_book.isOutside(row) || m_book.isMissing(row)) {
+        return false;
+    }
+    const QString title = fileTitle(m_book.at(row).title);
+    if (title.isEmpty()) {
+        return false; // no title: the name is the file's own
+    }
+    static const QRegularExpression prefix(QStringLiteral(R"(^(\d+[\s._-]+)(?=\S))"));
+    const QString rel = m_book.at(row).path;
+    const QFileInfo fi(rel);
+    const QRegularExpressionMatch m = prefix.match(fi.completeBaseName());
+    const QString number = m.hasMatch() ? m.captured(1) : QString();
+    const QString dirPart = fi.path() == QLatin1String(".") ? QString() : fi.path() + QLatin1Char('/');
+    QString wanted = dirPart + number + title;
+    if (!fi.suffix().isEmpty()) {
+        wanted += QLatin1Char('.') + fi.suffix();
+    }
+    if (wanted == rel) {
+        return false;
+    }
+    const QDir dir(m_book.bookDir());
+    const QString from = dir.filePath(rel);
+    const QString to = dir.filePath(wanted);
+    // Never overwrite another file (a case-only change is the same file).
+    if (QFileInfo::exists(to) && wanted.compare(rel, Qt::CaseInsensitive) != 0) {
+        return fail(QStringLiteral("%1 already exists; the chapter file keeps its name %2.").arg(wanted, rel));
+    }
+    // Through a temporary name, so a case-only rename also works on macOS.
+    const QString tmp = from + QStringLiteral(".zw-rename");
+    if (!QFile::rename(from, tmp)) {
+        return fail(QStringLiteral("Could not rename %1; it keeps its name.").arg(rel));
+    }
+    if (!QFile::rename(tmp, to)) {
+        QFile::rename(tmp, from);
+        return fail(QStringLiteral("Could not rename %1; it keeps its name.").arg(rel));
+    }
+    BookChapter c = m_book.at(row);
+    c.path = wanted;
+    m_book.setChapter(row, c);
+    QString err;
+    if (!m_book.save(&err)) {
+        emit message(QStringLiteral("File renamed, but the book could not be saved: %1").arg(err));
+    }
+    const QString oldAbs = QFileInfo(from).absoluteFilePath();
+    const QString newAbs = QFileInfo(to).absoluteFilePath();
+    if (!m_currentFile.isEmpty() && QFileInfo(m_currentFile).absoluteFilePath() == oldAbs) {
+        m_currentFile = newAbs;
+    }
+    emit chapterFileMoved(oldAbs, newAbs);
+    rebuild(m_view->currentRow());
+    emit bookChanged();
+    emit message(QStringLiteral("Renamed %1 to %2").arg(rel, wanted));
     return true;
 }
 
