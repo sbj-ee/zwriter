@@ -8,6 +8,8 @@
 #include "UpdateHost.hpp"
 
 #include <QMainWindow>
+#include <QPageLayout>
+#include <QPageSize>
 #include <QPointer>
 #include "ParagraphDialog.hpp"
 #include <QString>
@@ -108,6 +110,9 @@ public:
     QString saveStartDir(const QString &bookDir) const;
     void setCurrentPathForTest(const QString &path) { m_currentPath = path; }
     bool openPathForTest(const QString &path) { return openPath(path); }
+    // The open document's sheet (1.12.0); public for tests.
+    QPageLayout documentPageLayout() const;
+    void setDocumentPageSizeForTest(const QPageSize &size) { setDocumentPageSize(size, false); applyFullPageView(); }
     int alignKeptTocTabs();
     QString bookExportStartDir() const;
     // Folder the Open dialog starts in (1.11.3): the open book's folder, else
@@ -179,6 +184,7 @@ private slots:
     void printBook();
     void filePrint();
     void filePageSetup();
+    void filePageSizeAndUnits();
     void filePrintPreview();
     void fileProperties();
     void openRecentFile();
@@ -230,6 +236,8 @@ private:
     void loadSettings();
     void saveSettings() const;
     void loadPrinterSettings();
+    // The open document's sheet (1.12.0: per document; see PageSetup.hpp).
+    void setDocumentPageSize(const QPageSize &size, bool landscape);
     void savePrinterSettings() const;
     void revealHideAway();
     void scheduleHideAway();

@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.11.3 LANGUAGES CXX)
+project(zwriter VERSION 1.12.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -105,6 +105,10 @@ add_executable(zwriter
   src/ParagraphStyles.cpp
   src/ParagraphDialog.cpp
   src/Ruler.cpp
+  src/PageSetup.cpp
+  src/PageSetup.hpp
+  src/PageSettingsDialog.cpp
+  src/PageSettingsDialog.hpp
   src/Images.hpp
   src/DocumentIo.hpp
   src/DocumentMeta.cpp

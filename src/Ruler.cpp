@@ -4,6 +4,7 @@
 #include "ParagraphStyles.hpp"
 
 #include <QAbstractTextDocumentLayout>
+#include <QFontMetrics>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -23,11 +24,25 @@ Ruler::Ruler(QTextEdit *editor, QWidget *parent)
     setObjectName(QStringLiteral("ruler"));
     setFixedHeight(22);
     setMouseTracking(true);
-    setToolTip(QStringLiteral("Drag the top marker for the first line, the bottom-left one for the "
-                              "left indent, the right one for the right indent"));
+    setUnit(PageSetup::rulerUnit());
     connect(editor, &QTextEdit::cursorPositionChanged, this, qOverload<>(&QWidget::update));
     connect(editor->document(), &QTextDocument::contentsChanged, this, qOverload<>(&QWidget::update));
     connect(editor->horizontalScrollBar(), &QScrollBar::valueChanged, this, qOverload<>(&QWidget::update));
+}
+
+void Ruler::setUnit(PageSetup::Unit unit)
+{
+    m_unit = unit;
+    setToolTip(QStringLiteral("Ruler in %1 (change in File > Page Size && Ruler Units…). Drag the top "
+                              "marker for the first line, the bottom-left one for the left indent, the "
+                              "right one for the right indent")
+                   .arg(PageSetup::unitName(unit).toLower()));
+    update();
+}
+
+int Ruler::unitX(int n) const
+{
+    return originX() + qRound(PageSetup::unitToPx(n, m_unit) * zoom());
 }
 
 QSize Ruler::sizeHint() const
@@ -91,14 +106,36 @@ void Ruler::paintEvent(QPaintEvent *)
     QFont small = font();
     small.setPointSizeF(qMax(6.0, small.pointSizeF() - 3));
     p.setFont(small);
-    // Ticks every 0.5 cm, numbers every cm.
-    for (int half = 1; cmToPx(half * 0.5) * z <= w; ++half) {
-        const int x = o + qRound(cmToPx(half * 0.5) * z);
-        if (half % 2 == 0) {
-            p.drawText(QRect(x - 10, 4, 20, height() - 8), Qt::AlignCenter, QString::number(half / 2));
+    // Ticks every 1/8 in (longer at 1/2 in), or every 0.5 cm; numbers every
+    // whole inch / centimetre, from the text column's left edge.
+    const PageSetup::RulerScale sc = PageSetup::rulerScale(m_unit);
+    const qreal tickPx = sc.pxPerUnit / sc.ticksPerUnit;
+    const int mid = height() / 2;
+    for (int t = 1; tickPx * t * z <= w + 0.5; ++t) {
+        const int x = o + qRound(tickPx * t * z);
+        const int sub = t % sc.ticksPerUnit;
+        if (sub == 0) {
+            p.drawText(QRect(x - 10, 4, 20, height() - 8), Qt::AlignCenter, QString::number(t / sc.ticksPerUnit));
+        } else if (sc.midTick && sub == sc.midTick) {
+            p.drawLine(x, mid - 4, x, mid + 4);
+        } else if (sc.ticksPerUnit <= 2 || sub % 2 == 0) {
+            p.drawLine(x, mid - 2, x, mid + 2);
         } else {
-            p.drawLine(x, height() / 2 - 2, x, height() / 2 + 2);
+            p.drawLine(x, mid - 1, x, mid + 1);
         }
+    }
+    // Units label: in the margin left of the column when there is room, else
+    // just inside the column's left edge (before the first number).
+    {
+        QFont bold = small;
+        bold.setBold(true);
+        p.setFont(bold);
+        const QString label = unitLabel();
+        const int lw = QFontMetrics(bold).horizontalAdvance(label) + 6;
+        const QRect box = o - lw - 2 >= 0 ? QRect(o - lw - 2, 4, lw, height() - 8)
+                                          : QRect(qMax(0, o) + 2, 4, lw, height() - 8);
+        p.drawText(box, Qt::AlignCenter, label);
+        p.setFont(small);
     }
     auto triangle = [&](int x, bool down) {
         QPainterPath path;
@@ -163,8 +200,8 @@ void Ruler::mouseReleaseEvent(QMouseEvent *e)
 
 void Ruler::dragTo(int x)
 {
-    // Screen x -> document px (zoom), snapped to 0.25 cm.
-    const qreal step = cmToPx(0.25);
+    // Screen x -> document px (zoom), snapped to 1/16 in or 0.25 cm.
+    const qreal step = PageSetup::rulerScale(m_unit).snapPx;
     const qreal at = qRound((x - originX()) / zoom() / step) * step;
     // The text keeps at least 3 cm (or what the column allows).
     const qreal minText = qMin(cmToPx(3.0), columnWidth() / 2);

@@ -341,6 +341,61 @@ QString manifestWithEntries(const QString &manifest, const QStringList &paths)
 }
 
 
+qreal odfLengthToMm(const QString &length)
+{
+    static const QRegularExpression re(QStringLiteral("^\\s*([0-9]*\\.?[0-9]+)\\s*(mm|cm|in|pt|pc|px)?\\s*$"));
+    const QRegularExpressionMatch m = re.match(length);
+    if (!m.hasMatch()) {
+        return -1.0;
+    }
+    const qreal v = m.captured(1).toDouble();
+    const QString u = m.captured(2);
+    if (u == QLatin1String("cm")) return v * 10.0;
+    if (u == QLatin1String("in")) return v * 25.4;
+    if (u == QLatin1String("pt")) return v * 25.4 / 72.0;
+    if (u == QLatin1String("pc")) return v * 25.4 / 6.0;
+    if (u == QLatin1String("px")) return v * 25.4 / 96.0;
+    return v; // mm (or unitless)
+}
+
+bool parsePageSizeXml(const QByteArray &stylesXml, QSizeF *sheetMm, bool *landscape)
+{
+    // The first page layout with a width and height (zwriter writes one,
+    // "zwPage"; LibreOffice's master page normally uses the first too).
+    QXmlStreamReader r(stylesXml);
+    while (!r.atEnd()) {
+        r.readNext();
+        if (!r.isStartElement() || r.name() != QLatin1String("page-layout-properties")) {
+            continue;
+        }
+        const QXmlStreamAttributes a = r.attributes();
+        const qreal w = odfLengthToMm(a.value(QLatin1String("fo:page-width")).toString());
+        const qreal h = odfLengthToMm(a.value(QLatin1String("fo:page-height")).toString());
+        if (w < 20.0 || h < 20.0 || w > 2000.0 || h > 2000.0) {
+            continue;
+        }
+        if (sheetMm) {
+            *sheetMm = QSizeF(w, h);
+        }
+        if (landscape) {
+            const QString o = a.value(QLatin1String("style:print-orientation")).toString();
+            *landscape = o.isEmpty() ? w > h : o == QLatin1String("landscape");
+        }
+        return true;
+    }
+    return false;
+}
+
+bool readPageSizeFromOdt(const QString &odtPath, QSizeF *sheetMm, bool *landscape)
+{
+    QProcess proc;
+    proc.start(QStringLiteral("unzip"), {QStringLiteral("-p"), odtPath, QStringLiteral("styles.xml")});
+    if (!proc.waitForFinished(15000) || proc.exitCode() != 0) {
+        return false;
+    }
+    return parsePageSizeXml(proc.readAllStandardOutput(), sheetMm, landscape);
+}
+
 bool readFromOdt(const QString &odtPath, DocumentMeta *meta, QString *error)
 {
     if (!meta) {
