@@ -48,6 +48,13 @@ namespace OdtMeta {
 bool readFromOdt(const QString &odtPath, DocumentMeta *meta, QString *error = nullptr);
 bool writeToOdt(const QString &odtPath, const DocumentMeta &meta, QString *error = nullptr,
                 const OdtPageStyle &page = OdtPageStyle());
+// Sheet size (oriented, mm) and orientation stored in the package's
+// styles.xml page layout (1.12.0 reads it back; zwriter has always written it).
+// False when the file has no usable page size (then the caller uses A4).
+bool readPageSizeFromOdt(const QString &odtPath, QSizeF *sheetMm, bool *landscape = nullptr);
+bool parsePageSizeXml(const QByteArray &stylesXml, QSizeF *sheetMm, bool *landscape = nullptr);
+// "21cm", "8.5in", "215.9mm", "612pt" -> mm; < 0 when unparsable.
+qreal odfLengthToMm(const QString &length);
 // Pieces of the package, exposed for the regression tests.
 QString buildStylesXml(const DocumentMeta &meta, const OdtPageStyle &page);
 QString manifestWithEntries(const QString &manifest, const QStringList &paths);

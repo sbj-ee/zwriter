@@ -31,7 +31,10 @@
 #include <QProcess>
 #include <QComboBox>
 #include "ParagraphStyles.hpp"
+#include "PageSettingsDialog.hpp"
+#include "PageSetup.hpp"
 #include "Ruler.hpp"
+#include "DocumentMeta.hpp"
 #include "ParagraphDialog.hpp"
 #include <QDoubleSpinBox>
 #include "BookManifest.hpp"
@@ -62,6 +65,7 @@
 #include <QFile>
 #include <QMessageBox>
 #include <QSettings>
+#include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTextCursor>
@@ -2590,6 +2594,189 @@ void testRetest1111(const QString &root)
     win->close();
 }
 
+
+// 1.12.0: ruler units (in/cm, labelled) and per-document page size (Letter
+// for new documents, the stored size for .odt, A4 for files without one).
+QSizeF pdfMediaBoxPt(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    const QByteArray d = f.readAll();
+    static const QRegularExpression re(QStringLiteral("/MediaBox\\s*\\[\\s*0\\s+0\\s+([0-9.]+)\\s+([0-9.]+)\\s*\\]"));
+    const QRegularExpressionMatch m = re.match(QString::fromLatin1(d));
+    return m.hasMatch() ? QSizeF(m.captured(1).toDouble(), m.captured(2).toDouble()) : QSizeF();
+}
+
+bool sameSize(const QPageLayout &l, QPageSize::PageSizeId id)
+{
+    return l.pageSize().isEquivalentTo(QPageSize(id));
+}
+
+void testPageSizeAndUnits(const QString &root)
+{
+    // Pure helpers.
+    check(qAbs(OdtMeta::odfLengthToMm(QStringLiteral("21cm")) - 210.0) < 1e-6, "P odf cm");
+    check(qAbs(OdtMeta::odfLengthToMm(QStringLiteral("8.5in")) - 215.9) < 1e-6, "P odf in");
+    check(qAbs(OdtMeta::odfLengthToMm(QStringLiteral("612pt")) - 215.9) < 1e-6, "P odf pt");
+    check(OdtMeta::odfLengthToMm(QStringLiteral("wide")) < 0, "P odf junk");
+    check(PageSetup::sizeFromMm(QSizeF(215.9, 279.4)).id() == QPageSize::Letter, "P 215.9x279.4 is Letter");
+    check(PageSetup::sizeFromMm(QSizeF(297.0, 210.0)).id() == QPageSize::A4, "P landscape A4 is A4");
+    check(PageSetup::sizeFromMm(QSizeF(100.0, 150.0)).id() == QPageSize::Custom, "P odd size is custom");
+    {
+        QSizeF mm;
+        bool land = true;
+        const QByteArray xml = "<office:document-styles xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+                               "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" "
+                               "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\">"
+                               "<office:automatic-styles><style:page-layout style:name=\"pm1\">"
+                               "<style:page-layout-properties fo:page-width=\"8.5in\" fo:page-height=\"11in\" "
+                               "style:print-orientation=\"portrait\"/></style:page-layout></office:automatic-styles>"
+                               "</office:document-styles>";
+        check(OdtMeta::parsePageSizeXml(xml, &mm, &land) && qAbs(mm.width() - 215.9) < 0.01 && !land,
+              "P styles.xml page size read");
+        check(!OdtMeta::parsePageSizeXml("<a/>", &mm), "P no page layout -> false");
+    }
+
+    QVariantMap saved;
+    for (const char *k : {"view/fullPageView", "view/fitPageWidth", "view/ruler"}) {
+        saved.insert(QLatin1String(k), QSettings().value(QLatin1String(k)));
+    }
+    {
+        QSettings s;
+        s.remove(QLatin1String(PageSetup::kRulerUnitsKey));
+        s.remove(QLatin1String(PageSetup::kNewDocSizeKey));
+        s.setValue(QStringLiteral("view/fullPageView"), true);
+        s.setValue(QStringLiteral("view/fitPageWidth"), false);
+        s.setValue(QStringLiteral("view/ruler"), true);
+        s.sync();
+    }
+    check(PageSetup::rulerUnit() == PageSetup::Unit::Inch, "P default units inches");
+    check(PageSetup::newDocumentSizeId() == QPageSize::Letter, "P default new-doc size Letter");
+
+    const QString shots = qEnvironmentVariable("ZW_SHOT_DIR");
+    if (!shots.isEmpty()) {
+        QDir().mkpath(shots);
+    }
+    const QString legacyMd = root + QStringLiteral("/legacy-page.md");
+    writeFile(legacyMd, "# Old notes\n\nNo page size stored here.\n");
+    const QString letterOdt = root + QStringLiteral("/letter-page.odt");
+    const QString a4Odt = root + QStringLiteral("/a4-page.odt");
+    const QString legacyOdt = root + QStringLiteral("/legacy-page.odt");
+    {
+        MainWindow w;
+        w.resize(1100, 820);
+        w.show();
+        QApplication::processEvents();
+        check(sameSize(w.documentPageLayout(), QPageSize::Letter), "P startup document is Letter");
+        Ruler *r = w.ruler();
+        check(r && r->unit() == PageSetup::Unit::Inch && r->unitLabel() == QLatin1String("in"),
+              "P ruler labelled in");
+        if (r) {
+            const qreal px = (r->unitX(1) - r->originX()) / r->zoom();
+            check(qAbs(px - 96.0) <= 1.0, "P one ruler inch is 96 px", QString::number(px));
+            // Letter, 1 in margins: a 6.5 in column.
+            const qreal colIn = PageSetup::pxToUnit(r->columnWidth(), PageSetup::Unit::Inch);
+            check(qAbs(colIn - 6.5) < 0.05, "P Letter column is 6.5 in", QString::number(colIn));
+        }
+        QTextEdit *ed = editorOf(w);
+        { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.insertText(QStringLiteral("Dear reader,\n\nThe ruler above this page now says which units it uses. "
+                                        "This new document is on US Letter (8.5 × 11 in); the ruler counts "
+                                        "inches from the left margin.")); }
+        QTest::qWait(300);
+        check(qAbs(PageSetup::pxToUnit(r->columnWidth(), PageSetup::Unit::Inch) - 6.5) < 0.05,
+              "P Letter column still 6.5 in after typing");
+        if (!shots.isEmpty()) {
+            w.grab().save(shots + QStringLiteral("/ruler-inches-letter.png"));
+        }
+        check(w.saveToPathForTest(letterOdt), "P save Letter odt");
+        const QString pdf = root + QStringLiteral("/letter.pdf");
+        check(w.exportPdfTo(pdf), "P export Letter PDF");
+        const QSizeF mb = pdfMediaBoxPt(pdf);
+        check(qAbs(mb.width() - 612) < 2 && qAbs(mb.height() - 792) < 2, "P Letter PDF is 612x792 pt",
+              QStringLiteral("%1x%2").arg(mb.width()).arg(mb.height()));
+
+        // cm + A4
+        PageSetup::setRulerUnit(PageSetup::Unit::Cm);
+        r->setUnit(PageSetup::Unit::Cm);
+        w.setDocumentPageSizeForTest(QPageSize(QPageSize::A4));
+        QApplication::processEvents();
+        check(r->unitLabel() == QLatin1String("cm"), "P ruler labelled cm");
+        const qreal colCm = PageSetup::pxToUnit(r->columnWidth(), PageSetup::Unit::Cm);
+        check(qAbs(colCm - (21.0 - 5.08)) < 0.1, "P A4 column is 15.92 cm", QString::number(colCm));
+        { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.insertText(QStringLiteral("Ein Brief auf A4 (210 × 297 mm). The ruler counts centimetres from "
+                                        "the left margin.")); }
+        QTest::qWait(300);
+        if (!shots.isEmpty()) {
+            w.grab().save(shots + QStringLiteral("/ruler-cm-a4.png"));
+        }
+        check(w.saveToPathForTest(a4Odt), "P save A4 odt");
+        const QString pdf2 = root + QStringLiteral("/a4.pdf");
+        check(w.exportPdfTo(pdf2), "P export A4 PDF");
+        const QSizeF mb2 = pdfMediaBoxPt(pdf2);
+        check(qAbs(mb2.width() - 595) < 2 && qAbs(mb2.height() - 842) < 2, "P A4 PDF is 595x842 pt",
+              QStringLiteral("%1x%2").arg(mb2.width()).arg(mb2.height()));
+
+        // Settings dialog.
+        PageSettingsDialog dlg(PageSetup::Unit::Inch, QPageSize(QPageSize::Letter), QPageSize::Letter, &w);
+        check(dlg.unit() == PageSetup::Unit::Inch && dlg.documentSize().id() == QPageSize::Letter
+                  && dlg.newDocumentSize() == QPageSize::Letter, "P dialog shows current values");
+        dlg.unitCombo()->setCurrentIndex(1);
+        dlg.documentCombo()->setCurrentIndex(dlg.documentCombo()->findData(int(QPageSize::A4)));
+        check(dlg.unit() == PageSetup::Unit::Cm && dlg.documentSize().id() == QPageSize::A4, "P dialog picks");
+        dlg.unitCombo()->setCurrentIndex(0);
+        dlg.documentCombo()->setCurrentIndex(0);
+        dlg.show();
+        QApplication::processEvents();
+        if (!shots.isEmpty()) {
+            dlg.grab().save(shots + QStringLiteral("/settings-dialog.png"));
+        }
+        dlg.close();
+        PageSettingsDialog custom(PageSetup::Unit::Inch, PageSetup::sizeFromMm(QSizeF(100, 150)), QPageSize::A4, &w);
+        check(custom.documentSize().id() == QPageSize::Custom
+                  && qAbs(custom.documentSize().size(QPageSize::Millimeter).width() - 100) < 0.5,
+              "P dialog keeps a custom size");
+        ed->document()->setModified(false);
+    }
+    // Legacy ODT: same file without styles.xml.
+    QFile::copy(a4Odt, legacyOdt);
+    QProcess::execute(QStringLiteral("zip"), {QStringLiteral("-q"), QStringLiteral("-d"), legacyOdt, QStringLiteral("styles.xml")});
+    {
+        PageSetup::setNewDocumentSizeId(QPageSize::Letter);
+        MainWindow w;
+        w.show();
+        QApplication::processEvents();
+        check(w.openPathForTest(letterOdt) && sameSize(w.documentPageLayout(), QPageSize::Letter),
+              "P Letter odt reopens on Letter");
+        check(w.openPathForTest(a4Odt) && sameSize(w.documentPageLayout(), QPageSize::A4),
+              "P A4 odt reopens on A4 (new-doc default is Letter)");
+        check(w.openPathForTest(legacyOdt) && sameSize(w.documentPageLayout(), QPageSize::A4),
+              "P odt without a page size opens on A4");
+        check(w.openPathForTest(legacyMd) && sameSize(w.documentPageLayout(), QPageSize::A4),
+              "P Markdown opens on A4");
+        check(!w.hasUnsavedChanges(), "P opening sets no '*'");
+        PageSetup::setNewDocumentSizeId(QPageSize::A4);
+        QMetaObject::invokeMethod(&w, "fileNew");
+        QApplication::processEvents();
+        check(sameSize(w.documentPageLayout(), QPageSize::A4), "P new-doc size setting is used");
+        PageSetup::setNewDocumentSizeId(QPageSize::Letter);
+        QMetaObject::invokeMethod(&w, "fileNew");
+        QApplication::processEvents();
+        check(sameSize(w.documentPageLayout(), QPageSize::Letter), "P File > New is Letter");
+    }
+    PageSetup::setRulerUnit(PageSetup::Unit::Inch);
+    QSettings s; // leave the view settings as later tests expect them
+    for (auto it = saved.cbegin(); it != saved.cend(); ++it) {
+        if (it.value().isValid()) {
+            s.setValue(it.key(), it.value());
+        } else {
+            s.remove(it.key());
+        }
+    }
+    s.sync();
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -2661,6 +2848,11 @@ int main(int argc, char **argv)
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_PAGESIZE")) { // quick local runs / screenshots
+        testPageSizeAndUnits(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_PARAGRAPH")) { // quick local runs
         testParagraphFormatting();
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -2718,6 +2910,7 @@ int main(int argc, char **argv)
     testCaptionsPdfMarkdown(dataDir.path(), prompts);
     testBookFeedback(dataDir.path(), prompts);
     testPageGuidesContainText();
+    testPageSizeAndUnits(dataDir.path());
     testParagraphFormatting();
     testReportFixes(dataDir.path());
     testBookToc(dataDir.path());

@@ -3,6 +3,25 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.12.0] — unreleased
+
+Ruler units and page sizes. The ruler counted unlabelled centimetres (0–21, an A4 sheet), which
+read like nothing in particular to a US writer.
+
+- **The ruler says its units.** "in" or "cm" sits at its left end. Inches (the default) are ticked
+  every 1/8 in with a longer 1/2 in tick and numbered every inch; centimetres every 0.5 cm and
+  numbered every cm. Indent drags snap to 1/16 in or 0.25 cm.
+- **File → Page Size & Ruler Units…** picks the ruler's units, this document's page size and the
+  size new documents start with (US Letter, A4, US Legal, A5).
+- **New documents start on US Letter (8.5 × 11 in).** The Full Page view, page guides, ruler,
+  print, print preview and PDF export all use the document's page.
+- **Each document keeps its own page size.** `.odt` files already stored it in `styles.xml`; it is
+  now read back on open, so an A4 document stays A4. Files that do not store one (older `.odt`
+  without `styles.xml`, Markdown, plain text) open on A4, the size they always had. Changing the
+  size of an `.odt` (here or in Page Setup) marks it changed so the new size is saved. Margins and
+  orientation still come from Page Setup; the old app-wide `print/pageSize*` setting is no longer
+  read.
+
 ## [1.11.3] — unreleased
 
 Book files and dialog folders, from the Author's 1.11.0 retest (M4, M5).

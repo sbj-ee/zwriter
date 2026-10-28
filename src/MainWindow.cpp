@@ -4,6 +4,8 @@
 #include "BookToc.hpp"
 #include "BookExportDialog.hpp"
 #include "Captions.hpp"
+#include "PageSettingsDialog.hpp"
+#include "PageSetup.hpp"
 #include "Ruler.hpp"
 #include "Images.hpp"
 #include "ImagePropertiesDialog.hpp"
@@ -157,10 +159,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_meta.ensureDefaults();
 
     m_printer = new QPrinter(QPrinter::HighResolution);
-    // Shipping default: A4 (210×297 mm). Overridden by QSettings when present.
-    m_printer->setPageSize(QPageSize(QPageSize::A4));
     m_printer->setPageMargins(QMarginsF(25.4, 25.4, 25.4, 25.4), QPageLayout::Millimeter);
     loadPrinterSettings();
+    // The untitled document at startup is a new document: US Letter unless
+    // the user picked another size for new documents (1.12.0).
+    setDocumentPageSize(QPageSize(PageSetup::newDocumentSizeId()), false);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -551,22 +554,8 @@ void MainWindow::loadPrinterSettings()
         return;
     }
     QSettings s;
-    // First-run / missing key → A4 (210 × 297 mm).
-    const int idVal = s.value(QStringLiteral("print/pageSizeId"),
-                              static_cast<int>(QPageSize::A4)).toInt();
-    QPageSize pageSize;
-    if (idVal == static_cast<int>(QPageSize::Custom)) {
-        const qreal wMm = s.value(QStringLiteral("print/pageWidthMm"), 210.0).toDouble();
-        const qreal hMm = s.value(QStringLiteral("print/pageHeightMm"), 297.0).toDouble();
-        pageSize = QPageSize(QSizeF(wMm, hMm), QPageSize::Millimeter,
-                             QStringLiteral("Custom"), QPageSize::ExactMatch);
-    } else {
-        pageSize = QPageSize(static_cast<QPageSize::PageSizeId>(idVal));
-    }
-    if (!pageSize.isValid()) {
-        pageSize = QPageSize(QPageSize::A4);
-    }
-    m_printer->setPageSize(pageSize);
+    // The page size is per document since 1.12.0 (PageSetup.hpp); the old
+    // print/pageSize* keys are no longer read. Orientation and margins stay here.
 
     const int orientVal = s.value(QStringLiteral("print/orientation"),
                                   static_cast<int>(QPageLayout::Portrait)).toInt();
@@ -586,13 +575,6 @@ void MainWindow::savePrinterSettings() const
     }
     QSettings s;
     const QPageLayout layout = m_printer->pageLayout();
-    const QPageSize ps = layout.pageSize();
-    s.setValue(QStringLiteral("print/pageSizeId"), static_cast<int>(ps.id()));
-    if (ps.id() == QPageSize::Custom) {
-        const QSizeF mm = ps.size(QPageSize::Millimeter);
-        s.setValue(QStringLiteral("print/pageWidthMm"), mm.width());
-        s.setValue(QStringLiteral("print/pageHeightMm"), mm.height());
-    }
     s.setValue(QStringLiteral("print/orientation"), static_cast<int>(layout.orientation()));
     const QMarginsF m = layout.margins(QPageLayout::Millimeter);
     s.setValue(QStringLiteral("print/marginLeftMm"), m.left());
@@ -698,6 +680,10 @@ void MainWindow::buildFileMenu()
 
     auto *pageAct = m_fileMenu->addAction(QStringLiteral("Page Set&up…"));
     connect(pageAct, &QAction::triggered, this, &MainWindow::filePageSetup);
+
+    auto *sizeAct = m_fileMenu->addAction(QStringLiteral("Page Si&ze && Ruler Units…"));
+    sizeAct->setObjectName(QStringLiteral("filePageSizeUnits"));
+    connect(sizeAct, &QAction::triggered, this, &MainWindow::filePageSizeAndUnits);
 
     m_fileMenu->addSeparator();
 
@@ -3132,6 +3118,7 @@ void MainWindow::startNewDocument(bool markdown)
     m_meta = DocumentMeta{};
     m_meta.ensureDefaults();
     forgetPageNumberState();
+    setDocumentPageSize(QPageSize(PageSetup::newDocumentSizeId()), false);
     setMarkdownMode(markdown);
     applyDocumentDefaults();
     applyFullPageView(); // clear() resets the page margins/size
@@ -3672,6 +3659,17 @@ bool MainWindow::openPath(const QString &path)
     }
     m_meta = DocumentMeta{};
     m_meta.ensureDefaults();
+    {
+        // The file's own page size; legacy ODT (none stored), Markdown and
+        // text open on A4, the size they always had (1.12.0).
+        QSizeF sheetMm;
+        bool landscape = false;
+        if (fmt == DocumentIo::Format::Odt && OdtMeta::readPageSizeFromOdt(path, &sheetMm, &landscape)) {
+            setDocumentPageSize(PageSetup::sizeFromMm(sheetMm), landscape);
+        } else {
+            setDocumentPageSize(QPageSize(PageSetup::kLegacySizeId), false);
+        }
+    }
     if (fmt == DocumentIo::Format::Odt) {
         OdtMeta::readFromOdt(path, &m_meta);
         m_meta.ensureDefaults();
@@ -4230,10 +4228,54 @@ void MainWindow::filePrint()
     doPrint(m_printer);
 }
 
+QPageLayout MainWindow::documentPageLayout() const
+{
+    return m_printer ? m_printer->pageLayout() : QPageLayout();
+}
+
+void MainWindow::setDocumentPageSize(const QPageSize &size, bool landscape)
+{
+    if (!m_printer) {
+        return;
+    }
+    m_printer->setPageSize(size.isValid() ? size : QPageSize(PageSetup::kLegacySizeId));
+    m_printer->setPageOrientation(landscape ? QPageLayout::Landscape : QPageLayout::Portrait);
+}
+
+void MainWindow::filePageSizeAndUnits()
+{
+    const QPageLayout before = m_printer->pageLayout();
+    PageSettingsDialog dlg(m_ruler ? m_ruler->unit() : PageSetup::rulerUnit(), before.pageSize(),
+                           PageSetup::newDocumentSizeId(), this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    PageSetup::setRulerUnit(dlg.unit());
+    if (m_ruler) {
+        m_ruler->setUnit(dlg.unit());
+    }
+    PageSetup::setNewDocumentSizeId(dlg.newDocumentSize());
+    const QPageSize size = dlg.documentSize();
+    if (!size.isEquivalentTo(before.pageSize())) {
+        setDocumentPageSize(size, before.orientation() == QPageLayout::Landscape);
+        applyFullPageView();
+        m_editor->viewport()->update();
+        if (m_currentFormat == DocumentIo::Format::Odt) {
+            m_editor->document()->setModified(true); // the size is saved in the .odt
+        }
+    }
+}
+
 void MainWindow::filePageSetup()
 {
+    const QPageLayout before = m_printer->pageLayout();
     QPageSetupDialog dlg(m_printer, this);
     if (dlg.exec() == QDialog::Accepted) {
+        const QPageLayout after = m_printer->pageLayout();
+        if (m_currentFormat == DocumentIo::Format::Odt && (!after.pageSize().isEquivalentTo(before.pageSize())
+                                || after.orientation() != before.orientation())) {
+            m_editor->document()->setModified(true); // saved with the document now
+        }
         savePrinterSettings();
         applyFullPageView(); // new sheet size / orientation / margins, either view
         m_editor->viewport()->update();
