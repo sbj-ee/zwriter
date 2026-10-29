@@ -99,6 +99,7 @@ QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = 
         bool bold = false;
         bool italic = false;
         bool underline = false;
+        int vpos = 0; // 1 \super, -1 \sub (1.13.0)
         int halfPoints = 24;
         int uc = 1; // chars to skip after \uN
         char align = 'l'; // paragraph alignment: \ql \qc \qr \qj (reset by \pard)
@@ -119,10 +120,11 @@ QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = 
         bool italic = false;
         bool underline = false;
         int halfPoints = 24;
+        int vpos = 0;
         bool operator==(const Inline &o) const
         {
             return bold == o.bold && italic == o.italic && underline == o.underline
-                && halfPoints == o.halfPoints;
+                && halfPoints == o.halfPoints && vpos == o.vpos;
         }
     };
     static const QSet<QByteArray> skipDestinations = {
@@ -157,8 +159,9 @@ QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = 
         if (st.skip || text.isEmpty()) {
             return;
         }
-        const Inline want{st.bold, st.italic, st.underline, st.halfPoints};
-        const bool plain = !want.bold && !want.italic && !want.underline && want.halfPoints < 26;
+        const Inline want{st.bold, st.italic, st.underline, st.halfPoints, st.vpos};
+        const bool plain = !want.bold && !want.italic && !want.underline && want.halfPoints < 26
+            && want.vpos == 0;
         if (spanOpen && !(emitted == want)) {
             closeSpan();
         }
@@ -172,6 +175,9 @@ QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = 
             }
             if (want.underline) {
                 css += QStringLiteral("text-decoration:underline;");
+            }
+            if (want.vpos != 0) {
+                css += want.vpos > 0 ? QStringLiteral("vertical-align:super;") : QStringLiteral("vertical-align:sub;");
             }
             if (want.halfPoints >= 26) {
                 // Only headings-sized text keeps its size; body text follows
@@ -468,10 +474,17 @@ QString rtfToHtml(const QByteArray &rtf, QHash<QString, QByteArray> *pictures = 
             st.underline = on;
         } else if (word == "ulnone") {
             st.underline = false;
+        } else if (word == "super") {
+            st.vpos = on ? 1 : 0;
+        } else if (word == "sub") {
+            st.vpos = on ? -1 : 0;
+        } else if (word == "nosupersub") {
+            st.vpos = 0;
         } else if (word == "fs" && hasParam && param > 0) {
             st.halfPoints = param;
         } else if (word == "plain") {
             st.bold = st.italic = st.underline = false;
+            st.vpos = 0;
             st.halfPoints = 24;
         } else if (word == "uc" && hasParam) {
             st.uc = qMax(0, param);
@@ -701,6 +714,11 @@ QString documentToRtf(const QTextDocument *doc)
             }
             if (cf.fontStrikeOut()) {
                 ctl += QStringLiteral("\\strike");
+            }
+            if (cf.verticalAlignment() == QTextCharFormat::AlignSuperScript) {
+                ctl += QStringLiteral("\\super");
+            } else if (cf.verticalAlignment() == QTextCharFormat::AlignSubScript) {
+                ctl += QStringLiteral("\\sub");
             }
             QString text = frag.text();
             text.remove(QChar::ObjectReplacementCharacter);
@@ -982,6 +1000,7 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
         bool bold = false;
         bool italic = false;
         bool underline = false;
+        int textPosition = 0;   // style:text-position: 1 super, -1 sub (1.13.0)
         QString align;          // HTML align value ("left" explicit), empty = inherit
         QString parent;         // style:parent-style-name
         bool breakBefore = false; // manual page break before the paragraph
@@ -1076,6 +1095,17 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                         attrs.value(QStringLiteral("style:text-underline-style")).toString().toLower();
                     if (!underline.isEmpty() && underline != QLatin1String("none")) {
                         info.underline = true;
+                    }
+                    // "super 58%", "sub 58%", or "33% 58%" / "-33% 58%" (1.13.0).
+                    const QString pos =
+                        attrs.value(QStringLiteral("style:text-position")).toString().trimmed().toLower();
+                    if (pos.startsWith(QLatin1String("super"))) {
+                        info.textPosition = 1;
+                    } else if (pos.startsWith(QLatin1String("sub"))) {
+                        info.textPosition = -1;
+                    } else if (!pos.isEmpty()) {
+                        const double v = pos.section(QLatin1Char(' '), 0, 0).remove(QLatin1Char('%')).toDouble();
+                        info.textPosition = v > 0 ? 1 : (v < 0 ? -1 : 0);
                     }
                     styles.insert(currentStyle, info);
                 } else if (name == QLatin1String("paragraph-properties") && !currentStyle.isEmpty()) {
@@ -1482,7 +1512,11 @@ QString odtXmlToHtml(const QByteArray &xml, const QByteArray &stylesXml = QByteA
                 flushSpace(); // the space belongs to the text before the span
                 const QString style = reader.attributes().value(QStringLiteral("text:style-name")).toString();
                 const StyleInfo info = styles.value(style);
-                const QString css = cssFromStyle(info);
+                QString css = cssFromStyle(info);
+                if (info.textPosition != 0) {
+                    css += info.textPosition > 0 ? QStringLiteral("vertical-align:super;")
+                                                 : QStringLiteral("vertical-align:sub;");
+                }
                 QString closer;
                 if (!css.isEmpty()) {
                     html += QStringLiteral("<span style=\"%1\">").arg(css);

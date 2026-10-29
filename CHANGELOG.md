@@ -3,6 +3,40 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.13.0] — unreleased
+
+Greek letters, EE and math symbols, subscript and superscript.
+
+- **Math symbols.** The Symbol grid has a **Math** section: ≥ ≤ ≠ ≈ ± × ÷ √ ∞ ∑ ∫ ∂ ∠ Δ → ⇒ ≡ ≜ ≔, with
+  autocomplete for `\geq \leq \neq \approx \pm \times \div \sqrt \infty \sum \int \partial
+  \angle \Delta \to \Rightarrow`.
+- **"Defined as" symbols** in the Math section: ≡ (`\equiv`), ≜ (`\triangleq`) and ≔ (`\coloneqq`).
+  They come through PDF export (Courier lacks ≜ and ≔, so a fallback mono font such as DejaVu Sans
+  Mono draws those) and EPUB export as plain UTF-8 in the XHTML.
+- **Math auto-replace.** Typing `>=` `<=` `!=` `->` `=>` gives ≥ ≤ ≠ → ⇒. One Ctrl+Z brings back the
+  typed pair. It does not fire in code blocks (`<pre>`), in text set in a monospace code font
+  (zwriter's Courier body font still counts as prose), or in Markdown documents.
+  **View → Math Auto-Replace** turns it off; on by default, saved (`symbols/autoReplace`).
+
+- **Format → Subscript (`Ctrl+=`) and Superscript (`Ctrl+Shift+=`)**, also as x₂ / x² toolbar
+  buttons. They are checkable, mutually exclusive and follow the caret, for H₂O and x². They are
+  saved in `.odt` (`style:text-position`, also read from LibreOffice files) and `.rtf`
+  (`\super` / `\sub` / `\nosupersub`), come through PDF export and print, and come out of EPUB
+  export as `<sub>` / `<sup>`. Like B/I/U they are off in Markdown documents; plain text drops them.
+
+- **Insert → Symbol…** (`Ctrl+Shift+Y`; `Ctrl+Shift+I` stays Insert Table) opens a grid of the
+  Greek alphabet, lower and upper case, and the EE symbols Ω µ ° ± √ π ∞ ≈ ≠ ≤ ≥ × ÷ ∠ Δ ∑ ∫ ·.
+  Each button's tooltip names the symbol and its `\name`. Clicking inserts at the caret as one undo
+  step; the dialog stays open for the next one. A **Recently used** row (last 12) is kept in
+  settings (`symbols/recent`).
+- **`\name` autocomplete.** Type `\alpha`, `\Omega`, `\mu`, `\deg`, `\pm`, `\ne`/`\neq`,
+  `\le`, `\ge`, `\approx`, `\times`, `\sqrt`, `\infty`, `\ohm`, `\micro` … then Space (symbol plus a
+  space) or Tab (symbol only). Names are case sensitive (`\omega` ω, `\Omega` Ω). Ctrl+Z brings the
+  typed name back. Unknown names and an escaped `\\alpha` are left alone. Not applied in Markdown
+  documents, where `\alpha` may be LaTeX math for pandoc.
+- **View → Symbol Autocomplete** turns it off; on by default, saved (`symbols/autocomplete`).
+- The new **Insert** menu also lists Insert Table, Image, Caption and Page Break (still in Format too).
+
 ## [1.12.0] — unreleased
 
 Ruler units and page sizes. The ruler counted unlabelled centimetres (0–21, an A4 sheet), which

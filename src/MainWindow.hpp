@@ -8,6 +8,7 @@
 #include "UpdateHost.hpp"
 
 #include <QMainWindow>
+#include <QTextCharFormat>
 #include <QPageLayout>
 #include <QPageSize>
 #include <QPointer>
@@ -118,6 +119,15 @@ public:
     // Folder the Open dialog starts in (1.11.3): the open book's folder, else
     // the open file's folder, else the last-used / Documents folder.
     QString openStartDir() const;
+    // Insert > Symbol… and \name autocomplete (1.13.0); public for tests.
+    QAction *symbolAction() const { return m_symbolAction; }
+    QAction *symbolAutocompleteAction() const { return m_symbolAutocompleteAction; }
+    QAction *mathReplaceAction() const { return m_mathReplaceAction; }
+    QMenu *insertMenu() const { return m_insertMenu; }
+    class SymbolDialog *symbolDialog() const;
+    void showSymbolDialog();
+    QAction *subscriptAction() const { return m_subscriptAction; }
+    QAction *superscriptAction() const { return m_superscriptAction; }
     bool saveToPathForTest(const QString &path) { return saveToPath(path, DocumentIo::Format::Odt); }
     // File → Export as PDF without the dialog (also used by tests).
     bool exportPdfTo(const QString &path);
@@ -143,6 +153,7 @@ private slots:
     void toggleBold();
     void toggleItalic();
     void toggleUnderline();
+    void setVerticalAlign(QTextCharFormat::VerticalAlignment align);
     void editPastePlain();
     void clearFormatting();
     void fileNew();
@@ -228,6 +239,7 @@ private:
     void buildEditMenu();
     void createFormatActions();
     void buildFormatMenu();
+    void buildInsertMenu();
     void buildViewMenu();
     void buildHelpMenu();
     void applyList(int style, bool on);
@@ -354,6 +366,8 @@ private:
     QAction *m_cutAction = nullptr;
     QAction *m_copyAction = nullptr;
     QAction *m_underlineAction = nullptr;
+    QAction *m_subscriptAction = nullptr;
+    QAction *m_superscriptAction = nullptr;
     Alignment::Actions *m_alignActions = nullptr;
     QAction *m_alignLeftAction = nullptr;
     QAction *m_alignCenterAction = nullptr;
@@ -378,6 +392,11 @@ private:
     QAction *m_indentAction = nullptr;
     QAction *m_outdentAction = nullptr;
     QAction *m_rulerAction = nullptr;
+    QMenu *m_insertMenu = nullptr;
+    QAction *m_symbolAction = nullptr;
+    QAction *m_symbolAutocompleteAction = nullptr;
+    QAction *m_mathReplaceAction = nullptr;
+    QPointer<class SymbolDialog> m_symbolDialog;
     class Ruler *m_ruler = nullptr;
     QPointer<class ParagraphDialog> m_paragraphDialog;
     void applyNamedStyle(const QString &name);
