@@ -122,6 +122,7 @@ public:
     // Insert > Symbol… and \name autocomplete (1.13.0); public for tests.
     QAction *symbolAction() const { return m_symbolAction; }
     QAction *symbolAutocompleteAction() const { return m_symbolAutocompleteAction; }
+    QAction *mathReplaceAction() const { return m_mathReplaceAction; }
     QMenu *insertMenu() const { return m_insertMenu; }
     class SymbolDialog *symbolDialog() const;
     void showSymbolDialog();
@@ -394,6 +395,7 @@ private:
     QMenu *m_insertMenu = nullptr;
     QAction *m_symbolAction = nullptr;
     QAction *m_symbolAutocompleteAction = nullptr;
+    QAction *m_mathReplaceAction = nullptr;
     QPointer<class SymbolDialog> m_symbolDialog;
     class Ruler *m_ruler = nullptr;
     QPointer<class ParagraphDialog> m_paragraphDialog;

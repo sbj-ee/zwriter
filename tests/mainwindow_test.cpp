@@ -2984,6 +2984,47 @@ void testSubSuperscript(const QString &root)
     ed->document()->setModified(false);
 }
 
+// 1.13.0: typed >= <= != -> => become ≥ ≤ ≠ → ⇒ in the real window.
+void testMathReplace()
+{
+    const QString shots = qEnvironmentVariable("ZW_SHOT_DIR");
+    MainWindow w;
+    w.resize(1000, 640);
+    w.show();
+    QApplication::processEvents();
+    QTextEdit *ed = editorOf(w);
+    check(w.mathReplaceAction() && w.mathReplaceAction()->isChecked(), "M math auto-replace on by default");
+    ed->setFocus();
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    ed->document()->clearUndoRedoStacks();
+    QTest::keyClicks(ed, QStringLiteral("Keep V_out >"));
+    QApplication::processEvents();
+    if (!shots.isEmpty()) {
+        w.grab().save(shots + QStringLiteral("/math-replace-before.png"));
+    }
+    QTest::keyClicks(ed, QStringLiteral("= 3.3 V"));
+    check(ed->toPlainText() == QStringLiteral("Keep V_out ≥ 3.3 V"), "M >= typed becomes ≥", ed->toPlainText());
+    QTest::keyClicks(ed, QStringLiteral(", I <= 2 A, R != 0, in -> out, a => b"));
+    check(ed->toPlainText() == QStringLiteral("Keep V_out ≥ 3.3 V, I ≤ 2 A, R ≠ 0, in → out, a ⇒ b"),
+          "M <= != -> => typed", ed->toPlainText());
+    if (!shots.isEmpty()) {
+        QTest::qWait(100);
+        w.grab().save(shots + QStringLiteral("/math-replace-after.png"));
+    }
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    ed->document()->clearUndoRedoStacks();
+    QTest::keyClicks(ed, QStringLiteral("x >="));
+    check(ed->toPlainText() == QStringLiteral("x ≥"), "M replaced");
+    QTest::keyClick(ed, Qt::Key_Z, Qt::ControlModifier);
+    check(ed->toPlainText() == QStringLiteral("x >="), "M one Ctrl+Z gives back >=", ed->toPlainText());
+    w.mathReplaceAction()->setChecked(false);
+    check(!QSettings().value(QStringLiteral("symbols/autoReplace"), true).toBool(), "M switch saved");
+    QTest::keyClicks(ed, QStringLiteral(" y <="));
+    check(ed->toPlainText() == QStringLiteral("x >= y <="), "M off: left alone", ed->toPlainText());
+    w.mathReplaceAction()->setChecked(true);
+    ed->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -3058,6 +3099,7 @@ int main(int argc, char **argv)
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_SYMBOLS")) { // quick local runs / screenshots
         testSymbols();
         testSubSuperscript(dataDir.path());
+        testMathReplace();
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }
@@ -3126,6 +3168,7 @@ int main(int argc, char **argv)
     testPageSizeAndUnits(dataDir.path());
     testSymbols();
     testSubSuperscript(dataDir.path());
+    testMathReplace();
     testParagraphFormatting();
     testReportFixes(dataDir.path());
     testBookToc(dataDir.path());

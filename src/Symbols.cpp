@@ -5,6 +5,9 @@
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextEdit>
+#include <QFontDatabase>
+#include <QFontInfo>
+#include <QTextDocument>
 
 namespace Symbols {
 namespace {
@@ -57,6 +60,28 @@ QList<Symbol> buildEngineering()
     };
 }
 
+QList<Symbol> buildMath()
+{
+    return {
+        {QStringLiteral("geq"), QStringLiteral("≥"), QStringLiteral("Greater-than or equal to")},
+        {QStringLiteral("leq"), QStringLiteral("≤"), QStringLiteral("Less-than or equal to")},
+        {QStringLiteral("neq"), QStringLiteral("≠"), QStringLiteral("Not equal to")},
+        {QStringLiteral("approx"), QStringLiteral("≈"), QStringLiteral("Almost equal to")},
+        {QStringLiteral("pm"), QStringLiteral("±"), QStringLiteral("Plus-minus sign")},
+        {QStringLiteral("times"), QStringLiteral("×"), QStringLiteral("Multiplication sign")},
+        {QStringLiteral("div"), QStringLiteral("÷"), QStringLiteral("Division sign")},
+        {QStringLiteral("sqrt"), QStringLiteral("√"), QStringLiteral("Square root")},
+        {QStringLiteral("infty"), QStringLiteral("∞"), QStringLiteral("Infinity")},
+        {QStringLiteral("sum"), QStringLiteral("∑"), QStringLiteral("N-ary summation")},
+        {QStringLiteral("int"), QStringLiteral("∫"), QStringLiteral("Integral")},
+        {QStringLiteral("partial"), QStringLiteral("∂"), QStringLiteral("Partial differential")},
+        {QStringLiteral("angle"), QStringLiteral("∠"), QStringLiteral("Angle (phasor)")},
+        {QStringLiteral("Delta"), QStringLiteral("Δ"), QStringLiteral("Delta (change in)")},
+        {QStringLiteral("to"), QStringLiteral("→"), QStringLiteral("Rightwards arrow")},
+        {QStringLiteral("Rightarrow"), QStringLiteral("⇒"), QStringLiteral("Rightwards double arrow (implies)")},
+    };
+}
+
 QList<Symbol> buildAll()
 {
     QList<Symbol> out = greek();
@@ -64,7 +89,9 @@ QList<Symbol> buildAll()
     for (const Symbol &s : out) {
         seen.insert(s.name, true);
     }
-    for (const Symbol &s : engineering()) {
+    QList<Symbol> rest = engineering();
+    rest.append(math());
+    for (const Symbol &s : rest) {
         if (!seen.contains(s.name)) {
             out.append(s);
             seen.insert(s.name, true);
@@ -73,10 +100,9 @@ QList<Symbol> buildAll()
     const QList<Symbol> aliases = {
         {QStringLiteral("degree"), QStringLiteral("°"), QStringLiteral("Degree sign")},
         {QStringLiteral("inf"), QStringLiteral("∞"), QStringLiteral("Infinity")},
-        {QStringLiteral("neq"), QStringLiteral("≠"), QStringLiteral("Not equal to")},
-        {QStringLiteral("leq"), QStringLiteral("≤"), QStringLiteral("Less-than or equal to")},
-        {QStringLiteral("geq"), QStringLiteral("≥"), QStringLiteral("Greater-than or equal to")},
         {QStringLiteral("Ohm"), QStringLiteral("Ω"), QStringLiteral("Ohm (capital omega)")},
+        {QStringLiteral("rightarrow"), QStringLiteral("→"), QStringLiteral("Rightwards arrow")},
+        {QStringLiteral("implies"), QStringLiteral("⇒"), QStringLiteral("Rightwards double arrow (implies)")},
         {QStringLiteral("varphi"), QStringLiteral("φ"), QStringLiteral("Greek small letter phi")},
     };
     out.append(aliases);
@@ -109,6 +135,12 @@ const QList<Symbol> &engineering()
     return e;
 }
 
+const QList<Symbol> &math()
+{
+    static const QList<Symbol> m = buildMath();
+    return m;
+}
+
 const QList<Symbol> &all()
 {
     static const QList<Symbol> a = buildAll();
@@ -122,7 +154,7 @@ QString symbolForName(const QString &name)
 
 QString describe(const QString &text)
 {
-    for (const QList<Symbol> *list : {&engineering(), &greek()}) {
+    for (const QList<Symbol> *list : {&engineering(), &math(), &greek()}) {
         for (const Symbol &s : *list) {
             if (s.text == text) {
                 return QStringLiteral("%1 (\\%2)").arg(s.label, s.name);
@@ -163,6 +195,93 @@ bool expandBeforeCursor(QTextEdit *editor, const QString &trailing)
     cur.endEditBlock();
     editor->setTextCursor(cur);
     return true;
+}
+
+QString operatorFor(QChar first, QChar second)
+{
+    if (second == QLatin1Char('=')) {
+        if (first == QLatin1Char('>')) return QStringLiteral("≥");
+        if (first == QLatin1Char('<')) return QStringLiteral("≤");
+        if (first == QLatin1Char('!')) return QStringLiteral("≠");
+    } else if (second == QLatin1Char('>')) {
+        if (first == QLatin1Char('-')) return QStringLiteral("→");
+        if (first == QLatin1Char('=')) return QStringLiteral("⇒");
+    }
+    return QString();
+}
+
+namespace {
+bool isMonospace(const QString &family)
+{
+    if (family.isEmpty()) {
+        return false;
+    }
+    const QString f = family.toLower();
+    if (f.contains(QLatin1String("mono")) || f.contains(QLatin1String("consol")) || f.contains(QLatin1String("menlo"))
+        || f.contains(QLatin1String("code"))) {
+        return true;
+    }
+    return QFontDatabase::isFixedPitch(family);
+}
+} // namespace
+
+bool isCodeContext(const QTextEdit *editor, const QTextCursor &cursor)
+{
+    if (cursor.blockFormat().nonBreakableLines()) {
+        return true; // <pre> / code block
+    }
+    const QTextCharFormat cf = cursor.charFormat();
+    const QStringList fams = cf.fontFamilies().toStringList();
+    const QString family = fams.isEmpty() ? QString() : fams.first();
+    if (family.isEmpty()) {
+        return cf.fontFixedPitch(); // the document default font, unless marked fixed pitch
+    }
+    // zwriter's body font is a Courier typewriter chain ("Courier New, Courier,
+    // … monospace"); that is prose, not code. Code is a run explicitly set in
+    // another monospace face (DejaVu Sans Mono, Consolas, Menlo …).
+    const QString base = editor ? editor->document()->defaultFont().family() : QString();
+    if (family.compare(base, Qt::CaseInsensitive) == 0 || family.startsWith(QLatin1String("Courier"), Qt::CaseInsensitive)) {
+        return false;
+    }
+    return isMonospace(family);
+}
+
+bool typeOperator(QTextEdit *editor, QChar typed)
+{
+    if (!editor) {
+        return false;
+    }
+    QTextCursor cur = editor->textCursor();
+    if (cur.hasSelection() || cur.positionInBlock() == 0) {
+        return false;
+    }
+    const QString line = cur.block().text();
+    const QChar prev = line.at(cur.positionInBlock() - 1);
+    const QString sym = operatorFor(prev, typed);
+    if (sym.isEmpty() || isCodeContext(editor, cur)) {
+        return false;
+    }
+    // Step 1: the typed character, as typing would.
+    cur.beginEditBlock();
+    cur.insertText(QString(typed));
+    cur.endEditBlock();
+    // Step 2: the pair becomes the symbol.
+    cur.beginEditBlock();
+    cur.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, 2);
+    cur.insertText(sym);
+    cur.endEditBlock();
+    editor->setTextCursor(cur);
+    return true;
+}
+
+bool autoReplaceEnabled()
+{
+    return QSettings().value(QStringLiteral("symbols/autoReplace"), true).toBool();
+}
+
+void setAutoReplaceEnabled(bool on)
+{
+    QSettings().setValue(QStringLiteral("symbols/autoReplace"), on);
 }
 
 void insertAtCursor(QTextEdit *editor, const QString &text)

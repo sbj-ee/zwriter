@@ -5,7 +5,15 @@ the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
 ## [1.13.0] — unreleased
 
-Greek letters and EE symbols, subscript and superscript.
+Greek letters, EE and math symbols, subscript and superscript.
+
+- **Math symbols.** The Symbol grid has a **Math** section: ≥ ≤ ≠ ≈ ± × ÷ √ ∞ ∑ ∫ ∂ ∠ Δ → ⇒, with
+  autocomplete for `\geq \leq \neq \approx \pm \times \div \sqrt \infty \sum \int \partial
+  \angle \Delta \to \Rightarrow`.
+- **Math auto-replace.** Typing `>=` `<=` `!=` `->` `=>` gives ≥ ≤ ≠ → ⇒. One Ctrl+Z brings back the
+  typed pair. It does not fire in code blocks (`<pre>`), in text set in a monospace code font
+  (zwriter's Courier body font still counts as prose), or in Markdown documents.
+  **View → Math Auto-Replace** turns it off; on by default, saved (`symbols/autoReplace`).
 
 - **Format → Subscript (`Ctrl+=`) and Superscript (`Ctrl+Shift+=`)**, also as x₂ / x² toolbar
   buttons. They are checkable, mutually exclusive and follow the caret, for H₂O and x². They are

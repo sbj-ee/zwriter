@@ -38,8 +38,9 @@ SymbolDialog::SymbolDialog(QWidget *parent)
     };
     addSection(QStringLiteral("Greek"), Symbols::greek(), QStringLiteral("greek"));
     addSection(QStringLiteral("Engineering"), Symbols::engineering(), QStringLiteral("ee"));
+    addSection(QStringLiteral("Math"), Symbols::math(), QStringLiteral("math"));
 
-    auto *hint = new QLabel(QStringLiteral("Tip: type \\alpha, \\Omega, \\mu, \\deg, \\pm … then Space or Tab."), this);
+    auto *hint = new QLabel(QStringLiteral("Tip: type \\alpha, \\Omega, \\mu, \\deg, \\pm … then Space or Tab. >= <= != -> => turn into ≥ ≤ ≠ → ⇒."), this);
     hint->setEnabled(false);
     outer->addWidget(hint);
 

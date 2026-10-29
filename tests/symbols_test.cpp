@@ -4,6 +4,8 @@
 #include "Symbols.hpp"
 
 #include <QApplication>
+#include <QTextBlockFormat>
+#include <QTextCharFormat>
 #include <QSet>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -33,6 +35,7 @@ void testTable()
 {
     using namespace Symbols;
     check(greek().size() == 48, "48 Greek letters", QString::number(greek().size()));
+    check(math().size() == 16, "16 Math symbols");
     check(engineering().size() == 18, "18 EE symbols", QString::number(engineering().size()));
     QString ee;
     for (const Symbol &s : engineering()) {
@@ -121,6 +124,89 @@ void testSettings()
     }
     check(Symbols::recent().size() == Symbols::kMaxRecent, "recent is capped");
 }
+
+void testMath()
+{
+    using namespace Symbols;
+    QString row;
+    for (const Symbol &s : math()) {
+        row += s.text;
+    }
+    check(row == QStringLiteral("≥≤≠≈±×÷√∞∑∫∂∠Δ→⇒"), "Math row in order", row);
+    const struct { const char *name; const char *sym; } names[] = {
+        {"geq", "≥"}, {"leq", "≤"}, {"neq", "≠"}, {"approx", "≈"}, {"pm", "±"}, {"times", "×"},
+        {"div", "÷"}, {"sqrt", "√"}, {"infty", "∞"}, {"sum", "∑"}, {"int", "∫"}, {"partial", "∂"},
+        {"angle", "∠"}, {"Delta", "Δ"}, {"to", "→"}, {"Rightarrow", "⇒"}};
+    for (const auto &n : names) {
+        check(symbolForName(QLatin1String(n.name)) == QString::fromUtf8(n.sym), "math \\name", QLatin1String(n.name));
+        QTextEdit ed;
+        type(ed, QStringLiteral("a \\") + QLatin1String(n.name));
+        check(expandBeforeCursor(&ed, QStringLiteral(" "))
+                  && ed.toPlainText() == QStringLiteral("a ") + QString::fromUtf8(n.sym) + QLatin1Char(' '),
+              "math autocomplete", ed.toPlainText());
+    }
+    check(operatorFor(QLatin1Char('>'), QLatin1Char('=')) == QStringLiteral("≥"), ">= -> ≥");
+    check(operatorFor(QLatin1Char('<'), QLatin1Char('=')) == QStringLiteral("≤"), "<= -> ≤");
+    check(operatorFor(QLatin1Char('!'), QLatin1Char('=')) == QStringLiteral("≠"), "!= -> ≠");
+    check(operatorFor(QLatin1Char('-'), QLatin1Char('>')) == QStringLiteral("→"), "-> -> →");
+    check(operatorFor(QLatin1Char('='), QLatin1Char('>')) == QStringLiteral("⇒"), "=> -> ⇒");
+    check(operatorFor(QLatin1Char('='), QLatin1Char('=')).isEmpty(), "== left alone");
+
+    // Typing: one Ctrl+Z (undo) brings back the typed pair.
+    const struct { const char *pre; char key; const char *out; const char *undone; } typed[] = {
+        {"V >", '=', "V ≥", "V >="}, {"V <", '=', "V ≤", "V <="}, {"a !", '=', "a ≠", "a !="},
+        {"in -", '>', "in →", "in ->"}, {"p =", '>', "p ⇒", "p =>"}};
+    for (const auto &t : typed) {
+        QTextEdit ed;
+        type(ed, QString::fromUtf8(t.pre));
+        ed.document()->clearUndoRedoStacks();
+        check(typeOperator(&ed, QLatin1Char(t.key)) && ed.toPlainText() == QString::fromUtf8(t.out),
+              "operator replaced", ed.toPlainText());
+        ed.undo();
+        check(ed.toPlainText() == QString::fromUtf8(t.undone), "one undo restores the pair", ed.toPlainText());
+    }
+    {
+        QTextEdit ed;
+        type(ed, QStringLiteral("x"));
+        check(!typeOperator(&ed, QLatin1Char('=')) && ed.toPlainText() == QStringLiteral("x"), "x= not handled");
+    }
+    // Not in code: a <pre> block, or an explicit monospace run.
+    {
+        QTextEdit ed;
+        ed.setHtml(QStringLiteral("<pre>if (a &gt;</pre>"));
+        QTextCursor c = ed.textCursor();
+        c.movePosition(QTextCursor::End);
+        ed.setTextCursor(c);
+        check(isCodeContext(&ed, c), "pre block is code");
+        check(!typeOperator(&ed, QLatin1Char('=')), "no replacement in a code block");
+    }
+    {
+        QTextEdit ed;
+        ed.document()->setDefaultFont(QFont(QStringLiteral("Sans Serif"), 12));
+        QTextCharFormat mono;
+        mono.setFontFamilies({QStringLiteral("DejaVu Sans Mono")});
+        QTextCursor c = ed.textCursor();
+        c.insertText(QStringLiteral("x -"), mono);
+        ed.setTextCursor(c);
+        check(!typeOperator(&ed, QLatin1Char('>')), "no replacement in monospace text");
+        QTextCharFormat fixed;
+        fixed.setFontFixedPitch(true);
+        c.insertText(QStringLiteral(" y >"), fixed);
+        ed.setTextCursor(c);
+        check(!typeOperator(&ed, QLatin1Char('=')), "no replacement in fixed-pitch text");
+    }
+    {
+        // zwriter's own default font (Courier) is not "code".
+        QTextEdit ed;
+        ed.document()->setDefaultFont(QFont(QStringLiteral("Courier"), 12));
+        type(ed, QStringLiteral("V >"));
+        check(typeOperator(&ed, QLatin1Char('=')), "document default monospace font still replaces");
+    }
+    check(autoReplaceEnabled(), "auto-replace on by default");
+    setAutoReplaceEnabled(false);
+    check(!autoReplaceEnabled(), "auto-replace off is saved");
+    setAutoReplaceEnabled(true);
+}
 } // namespace
 
 int main(int argc, char **argv)
@@ -134,6 +220,7 @@ int main(int argc, char **argv)
     testTable();
     testAutocomplete();
     testSettings();
+    testMath();
     std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
     return g_failures ? 1 : 0;
 }

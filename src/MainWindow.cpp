@@ -1045,6 +1045,13 @@ void MainWindow::buildInsertMenu()
     m_symbolAutocompleteAction->setToolTip(QStringLiteral(
         "Type \\alpha, \\Omega, \\mu, \\deg, \\pm … then Space or Tab to get the symbol; Ctrl+Z brings the text back"));
     connect(m_symbolAutocompleteAction, &QAction::toggled, this, [](bool on) { Symbols::setAutocompleteEnabled(on); });
+    m_mathReplaceAction = new QAction(QStringLiteral("&Math Auto-Replace (>= → ≥)"), this);
+    m_mathReplaceAction->setObjectName(QStringLiteral("mathAutoReplace"));
+    m_mathReplaceAction->setCheckable(true);
+    m_mathReplaceAction->setChecked(Symbols::autoReplaceEnabled());
+    m_mathReplaceAction->setToolTip(QStringLiteral(
+        "Typing >= <= != -> => gives ≥ ≤ ≠ → ⇒ (not in code or monospace text); Ctrl+Z brings the typed pair back"));
+    connect(m_mathReplaceAction, &QAction::toggled, this, [](bool on) { Symbols::setAutoReplaceEnabled(on); });
     m_insertMenu->addSeparator();
     for (QAction *a : {m_insertTableAction, m_insertImageAction, m_insertCaptionAction, m_pageBreakAction}) {
         if (a) {
@@ -1103,6 +1110,7 @@ void MainWindow::buildViewMenu()
         }
     });
     m_viewMenu->addAction(m_symbolAutocompleteAction);
+    m_viewMenu->addAction(m_mathReplaceAction);
     m_pageGuidesAction = m_viewMenu->addAction(QStringLiteral("Page &Guides"));
     m_pageGuidesAction->setCheckable(true);
     // Ctrl+G is Find Next on Linux; keep guides on their own chord.
@@ -5826,6 +5834,14 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         // actions); route them through the same caret-keeping undo.
         if (ke->matches(QKeySequence::Undo) || ke->matches(QKeySequence::Redo)) {
             Alignment::undoRedoKeepingCaret(m_editor, ke->matches(QKeySequence::Redo));
+            return true;
+        }
+        // Typed operators (1.13.0): >= -> ≥ etc. Not in Markdown (code-ish text).
+        if (!m_markdownMode && m_mathReplaceAction && m_mathReplaceAction->isChecked()
+            && !(ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+            && ke->text().size() == 1
+            && (ke->text().at(0) == QLatin1Char('=') || ke->text().at(0) == QLatin1Char('>'))
+            && Symbols::typeOperator(m_editor, ke->text().at(0))) {
             return true;
         }
         // \name autocomplete (1.13.0): \alpha + Space -> "α ", + Tab -> "α".
