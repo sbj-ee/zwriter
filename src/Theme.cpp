@@ -322,8 +322,9 @@ QDialog QHeaderView::section { background-color: @barBg; color: @fg; border: non
         // Markdown mode: the counter sits on the page colour with no rule above
         // it, in small muted type -- present when revealed, never loud.
         css += QStringLiteral(R"CSS(
-QStatusBar { background-color: @pageBg; border-top: none; font-size: 8pt; min-height: 16px; }
+QStatusBar { background-color: @pageBg; border-top: none; font-size: 8pt; min-height: 26px; }
 QStatusBar QLabel { color: @muted; padding: 0px 14px 2px 14px; }
+QStatusBar QComboBox#statusZoom { font-size: 8pt; padding: 0px 4px; margin: 0px 4px 0px 0px; min-height: 16px; }
 )CSS");
     }
     const QString families = options.editorFontFamilies.isEmpty()

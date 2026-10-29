@@ -3259,6 +3259,11 @@ void testViewZoomAllViews(const QString &root)
         check(combo->isVisible() && combo->isEnabled(), "ZA " + view + ": status-bar zoom box shown");
         // Not clipped: the box is at least as wide as its widest entry needs.
         const int need = combo->fontMetrics().horizontalAdvance(QStringLiteral("300%"));
+        const QRect inBar(combo->mapTo(w.statusBar(), QPoint(0, 0)), combo->size());
+        check(combo->height() >= combo->minimumSizeHint().height() && w.statusBar()->rect().contains(inBar),
+              "ZA " + view + ": status-bar zoom box full height",
+              QStringLiteral("box %1 high (needs %2), bar %3 high").arg(combo->height())
+                  .arg(combo->minimumSizeHint().height()).arg(w.statusBar()->height()));
         check(combo->width() >= need + 16 && combo->visibleRegion().boundingRect().width() == combo->width(),
               "ZA " + view + ": status-bar zoom box not clipped",
               QStringLiteral("%1 vs %2 visible %3").arg(combo->width()).arg(need)
