@@ -3022,6 +3022,30 @@ void testMathReplace()
     QTest::keyClicks(ed, QStringLiteral(" y <="));
     check(ed->toPlainText() == QStringLiteral("x >= y <="), "M off: left alone", ed->toPlainText());
     w.mathReplaceAction()->setChecked(true);
+
+    // "Defined as" (1.13.0): \equiv \triangleq \coloneqq in the window's own PDF export.
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    QTest::keyClicks(ed, QStringLiteral("a \\equiv"));
+    QTest::keyClick(ed, Qt::Key_Space);
+    QTest::keyClicks(ed, QStringLiteral("b, f \\triangleq"));
+    QTest::keyClick(ed, Qt::Key_Space);
+    QTest::keyClicks(ed, QStringLiteral("g, x \\coloneqq"));
+    QTest::keyClick(ed, Qt::Key_Space);
+    QTest::keyClicks(ed, QStringLiteral("1"));
+    check(ed->toPlainText() == QStringLiteral("a ≡ b, f ≜ g, x ≔ 1"), "M defined-as autocomplete", ed->toPlainText());
+    const QString pdf = QDir::tempPath() + QStringLiteral("/zw-defs-%1.pdf").arg(QCoreApplication::applicationPid());
+    check(w.exportPdfTo(pdf), "M defined-as PDF export");
+    QProcess pt;
+    pt.start(QStringLiteral("pdftotext"), {pdf, QStringLiteral("-")});
+    if (pt.waitForStarted(3000) && pt.waitForFinished(10000) && pt.exitCode() == 0) {
+        const QString txt = QString::fromUtf8(pt.readAllStandardOutput());
+        check(txt.contains(QStringLiteral("a ≡ b, f ≜ g, x ≔ 1")), "M PDF has ≡ ≜ ≔", txt.simplified());
+    }
+    if (!qEnvironmentVariableIsEmpty("ZW_DEFS_PDF")) {
+        QFile::remove(qEnvironmentVariable("ZW_DEFS_PDF"));
+        QFile::copy(pdf, qEnvironmentVariable("ZW_DEFS_PDF"));
+    }
+    QFile::remove(pdf);
     ed->document()->setModified(false);
 }
 

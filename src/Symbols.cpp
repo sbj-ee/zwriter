@@ -79,6 +79,9 @@ QList<Symbol> buildMath()
         {QStringLiteral("Delta"), QStringLiteral("Δ"), QStringLiteral("Delta (change in)")},
         {QStringLiteral("to"), QStringLiteral("→"), QStringLiteral("Rightwards arrow")},
         {QStringLiteral("Rightarrow"), QStringLiteral("⇒"), QStringLiteral("Rightwards double arrow (implies)")},
+        {QStringLiteral("equiv"), QStringLiteral("≡"), QStringLiteral("Identical to / defined as")},
+        {QStringLiteral("triangleq"), QStringLiteral("≜"), QStringLiteral("Delta equal to (defined as)")},
+        {QStringLiteral("coloneqq"), QStringLiteral("≔"), QStringLiteral("Colon equals (defined as)")},
     };
 }
 

@@ -35,7 +35,7 @@ void testTable()
 {
     using namespace Symbols;
     check(greek().size() == 48, "48 Greek letters", QString::number(greek().size()));
-    check(math().size() == 16, "16 Math symbols");
+    check(math().size() == 19, "19 Math symbols");
     check(engineering().size() == 18, "18 EE symbols", QString::number(engineering().size()));
     QString ee;
     for (const Symbol &s : engineering()) {
@@ -132,11 +132,12 @@ void testMath()
     for (const Symbol &s : math()) {
         row += s.text;
     }
-    check(row == QStringLiteral("≥≤≠≈±×÷√∞∑∫∂∠Δ→⇒"), "Math row in order", row);
+    check(row == QStringLiteral("≥≤≠≈±×÷√∞∑∫∂∠Δ→⇒≡≜≔"), "Math row in order", row);
     const struct { const char *name; const char *sym; } names[] = {
         {"geq", "≥"}, {"leq", "≤"}, {"neq", "≠"}, {"approx", "≈"}, {"pm", "±"}, {"times", "×"},
         {"div", "÷"}, {"sqrt", "√"}, {"infty", "∞"}, {"sum", "∑"}, {"int", "∫"}, {"partial", "∂"},
-        {"angle", "∠"}, {"Delta", "Δ"}, {"to", "→"}, {"Rightarrow", "⇒"}};
+        {"angle", "∠"}, {"Delta", "Δ"}, {"to", "→"}, {"Rightarrow", "⇒"},
+        {"equiv", "≡"}, {"triangleq", "≜"}, {"coloneqq", "≔"}};
     for (const auto &n : names) {
         check(symbolForName(QLatin1String(n.name)) == QString::fromUtf8(n.sym), "math \\name", QLatin1String(n.name));
         QTextEdit ed;

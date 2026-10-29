@@ -7,9 +7,12 @@ the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
 Greek letters, EE and math symbols, subscript and superscript.
 
-- **Math symbols.** The Symbol grid has a **Math** section: ≥ ≤ ≠ ≈ ± × ÷ √ ∞ ∑ ∫ ∂ ∠ Δ → ⇒, with
+- **Math symbols.** The Symbol grid has a **Math** section: ≥ ≤ ≠ ≈ ± × ÷ √ ∞ ∑ ∫ ∂ ∠ Δ → ⇒ ≡ ≜ ≔, with
   autocomplete for `\geq \leq \neq \approx \pm \times \div \sqrt \infty \sum \int \partial
   \angle \Delta \to \Rightarrow`.
+- **"Defined as" symbols** in the Math section: ≡ (`\equiv`), ≜ (`\triangleq`) and ≔ (`\coloneqq`).
+  They come through PDF export (Courier lacks ≜ and ≔, so a fallback mono font such as DejaVu Sans
+  Mono draws those) and EPUB export as plain UTF-8 in the XHTML.
 - **Math auto-replace.** Typing `>=` `<=` `!=` `->` `=>` gives ≥ ≤ ≠ → ⇒. One Ctrl+Z brings back the
   typed pair. It does not fire in code blocks (`<pre>`), in text set in a monospace code font
   (zwriter's Courier body font still counts as prose), or in Markdown documents.

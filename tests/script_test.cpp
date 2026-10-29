@@ -142,6 +142,37 @@ int main(int argc, char **argv)
     check(ch.contains(QLatin1String("H<sub>2</sub>O")), "EPUB has H<sub>2</sub>O", ch.right(400));
     check(ch.contains(QLatin1String("x<sup>2</sup>")), "EPUB has x<sup>2</sup>", ch.right(400));
 
+    // "Defined as" symbols (1.13.0) in a real PDF and EPUB.
+    {
+        const QString ddir = tmp.path() + QStringLiteral("/Defs");
+        QDir().mkpath(ddir);
+        QTextDocument d;
+        QTextCursor c(&d);
+        c.insertText(QStringLiteral("Defs: a ≡ b, f ≜ g, x ≔ 1."));
+        check(DocumentIo::save(&d, ddir + QStringLiteral("/01 Defs.odt"), DocumentIo::Format::Odt, &err), "defs chapter saved", err);
+        BookManifest defs = BookManifest::fromFolder(ddir);
+        defs.setTitle(QStringLiteral("Defs"));
+        const QString dpdf = tmp.path() + QStringLiteral("/defs.pdf");
+        check(BookExport::writePdf(defs, opt, layout, font, dpdf, nullptr, &err), "defs PDF written", err);
+        QProcess pt;
+        pt.start(QStringLiteral("pdftotext"), {dpdf, QStringLiteral("-")});
+        if (pt.waitForStarted(3000) && pt.waitForFinished(10000) && pt.exitCode() == 0) {
+            const QString txt = QString::fromUtf8(pt.readAllStandardOutput());
+            check(txt.contains(QStringLiteral("≡")) && txt.contains(QStringLiteral("≜")) && txt.contains(QStringLiteral("≔")),
+                  "PDF text has ≡ ≜ ≔ (pdftotext)", txt.simplified());
+        } else {
+            std::printf("skip  pdftotext not installed\n");
+        }
+        if (!qEnvironmentVariableIsEmpty("ZW_PDF_OUT")) {
+            QFile::remove(qEnvironmentVariable("ZW_PDF_OUT"));
+            QFile::copy(dpdf, qEnvironmentVariable("ZW_PDF_OUT"));
+        }
+        const QString depub = tmp.path() + QStringLiteral("/defs.epub");
+        check(BookExport::writeEpub(defs, opt, depub, &err), "defs EPUB written", err);
+        const QString x = member(depub, QStringLiteral("OEBPS/ch01.xhtml"));
+        check(x.contains(QStringLiteral("a ≡ b, f ≜ g, x ≔ 1.")), "EPUB XHTML has ≡ ≜ ≔", x.right(200));
+    }
+
     std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
     return g_failures ? 1 : 0;
 }
