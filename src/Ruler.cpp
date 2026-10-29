@@ -63,7 +63,7 @@ int Ruler::originX() const
 {
     const QTextDocument *doc = m_editor->document();
     const QTextFrameFormat ff = doc->rootFrame()->frameFormat();
-    const qreal x = (ff.leftMargin() + ff.border() + ff.padding()) * zoom() - m_editor->horizontalScrollBar()->value();
+    const qreal x = (ff.leftMargin() + ff.border() + ff.padding() - m_editor->horizontalScrollBar()->value()) * zoom();
     return m_editor->viewport()->mapTo(window(), QPoint(qRound(x), 0)).x() - mapTo(window(), QPoint(0, 0)).x();
 }
 

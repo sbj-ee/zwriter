@@ -133,6 +133,7 @@ public:
     QAction *zoomInAction() const { return m_zoomInAction; }
     QAction *zoomOutAction() const { return m_zoomOutAction; }
     QAction *zoomResetAction() const { return m_zoomResetAction; }
+    QAction *fullPageViewAction() const { return m_fullPageViewAction; }
     QComboBox *zoomCombo() const { return m_zoomCombo; }
     int viewZoomPercent() const { return m_viewZoomPercent; }
     void setViewZoomPercent(int percent);

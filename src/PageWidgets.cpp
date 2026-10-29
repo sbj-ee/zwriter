@@ -23,6 +23,8 @@
 #include <QTextDocumentFragment>
 #include <QPainter>
 #include <QScrollBar>
+#include <QScopedValueRollback>
+#include <QtMath>
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -38,6 +40,67 @@ void PageTextEdit::reapplyPageSize()
     // call it when Qt has actually overwritten our value.
     if (m_pageSize.isValid() && document() && document()->pageSize() != m_pageSize) {
         document()->setPageSize(m_pageSize);
+    }
+    reapplyContinuousWidth();
+}
+
+qreal PageTextEdit::continuousLayoutWidth() const
+{
+    // The continuous strip wraps at the viewport width; zoomed, the same
+    // screen width holds 1/zoom as many document pixels, so lines rewrap and
+    // the bigger text never runs off the side.
+    return viewport()->width() / m_zoom;
+}
+
+void PageTextEdit::reapplyContinuousWidth()
+{
+    // QTextEdit puts the layout width back to the (unzoomed) viewport width on
+    // every relayout, so re-apply ours after it.
+    if (m_pageSize.isValid() || !m_continuousInset || !document()) {
+        return;
+    }
+    const qreal want = continuousLayoutWidth();
+    if (!qFuzzyCompare(document()->pageSize().width(), want)) {
+        document()->setPageSize(QSizeF(want, -1));
+    }
+    adjustZoomedScrollBars();
+}
+
+void PageTextEdit::adjustZoomedScrollBars()
+{
+    // Scroll bar values stay in document pixels (QTextEdit adds them to
+    // pointer positions and subtracts them from cursorRect()), but only
+    // viewport/zoom document pixels fit on screen. QTextEdit sizes the ranges
+    // for zoom 1, so correct them whenever it recomputes.
+    if (!isZoomed() || !document() || m_adjustingBars) {
+        return;
+    }
+    const QScopedValueRollback guard(m_adjustingBars, true);
+    const QSizeF docSize = document()->documentLayout()->documentSize();
+    const int visH = qMax(1, qRound(viewport()->height() / m_zoom));
+    const int visW = qMax(1, qCeil(viewport()->width() / m_zoom));
+    QScrollBar *v = verticalScrollBar();
+    v->setRange(0, qMax(0, qCeil(docSize.height()) - visH));
+    v->setPageStep(visH);
+    QScrollBar *h = horizontalScrollBar();
+    h->setRange(0, qMax(0, qCeil(docSize.width()) - visW));
+    h->setPageStep(visW);
+}
+
+void PageTextEdit::ensureZoomedCaretVisible()
+{
+    // QTextEdit's own ensureCursorVisible() thinks the viewport is zoom 1.
+    if (!isZoomed() || m_pageSize.isValid()) {
+        return;
+    }
+    const QRect cr = cursorRect(); // document px, relative to the scroll position
+    const int visH = qRound(viewport()->height() / m_zoom);
+    const int pad = qRound(8 / m_zoom);
+    QScrollBar *v = verticalScrollBar();
+    if (cr.top() < 0) {
+        v->setValue(v->value() + cr.top() - pad);
+    } else if (cr.bottom() > visH) {
+        v->setValue(v->value() + cr.bottom() - visH + pad);
     }
 }
 
@@ -197,17 +260,19 @@ void PageTextEdit::updateInset()
         const int bar = style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, verticalScrollBar());
         const qreal avail = width() - 2.0 * frameWidth() - bar;
         const qreal minSide = qMax(24.0, width() * 0.05);
-        const qreal column = qMax(80.0, qMin(m_maxColumn, avail - 2.0 * minSide));
+        // Zoomed, the cap scales too, so the column keeps its ~66 characters.
+        const qreal column = qMax(80.0, qMin(m_maxColumn * m_zoom, avail - 2.0 * minSide));
         const qreal side = qMax(0.0, (avail - column) / 2.0);
-        left = qMax(0, qRound(side - m_documentMargins.left()));
-        right = qMax(0, qRound(avail - column - side - m_documentMargins.right()));
+        left = qMax(0, qRound(side - m_documentMargins.left() * m_zoom));
+        right = qMax(0, qRound(avail - column - side - m_documentMargins.right() * m_zoom));
     } else {
-        const qreal side = width() * 0.20 + 4.0;
-        left = qMax(0, qRound(side - m_documentMargins.left()));
-        right = qMax(0, qRound(side - m_documentMargins.right()));
+        // Zoomed in, the side gutters shrink so the bigger text gets the room.
+        const qreal side = width() * (m_zoom > 1.0 ? qMax(0.04, 0.20 / m_zoom) : 0.20) + 4.0;
+        left = qMax(0, qRound(side - m_documentMargins.left() * m_zoom));
+        right = qMax(0, qRound(side - m_documentMargins.right() * m_zoom));
     }
-    const int top = qMax(0, qRound(52.0 - m_documentMargins.top()));
-    const int bottom = qMax(0, qRound(52.0 - m_documentMargins.bottom()));
+    const int top = qMax(0, qRound(52.0 - m_documentMargins.top() * m_zoom));
+    const int bottom = qMax(0, qRound(52.0 - m_documentMargins.bottom() * m_zoom));
     const QMargins want(left, top, right, bottom);
     if (viewportMargins() != want) {
         setViewportMargins(want);
@@ -217,9 +282,10 @@ void PageTextEdit::updateInset()
     // (switching away from Full Page) or the inset changed, put it back here;
     // otherwise the text is laid out 0 px wide until the next window resize.
     if (!m_pageSize.isValid() && document()
-        && !qFuzzyCompare(document()->pageSize().width(), qreal(viewport()->width()))) {
-        document()->setPageSize(QSizeF(viewport()->width(), -1));
+        && !qFuzzyCompare(document()->pageSize().width(), continuousLayoutWidth())) {
+        document()->setPageSize(QSizeF(continuousLayoutWidth(), -1));
     }
+    adjustZoomedScrollBars();
 }
 
 void PageTextEdit::resizeEvent(QResizeEvent *event)
@@ -227,6 +293,18 @@ void PageTextEdit::resizeEvent(QResizeEvent *event)
     QTextEdit::resizeEvent(event);
     updateInset();
     reapplyPageSize();
+    adjustZoomedScrollBars();
+}
+
+void PageTextEdit::scrollContentsBy(int dx, int dy)
+{
+    if (!isZoomed()) {
+        QTextEdit::scrollContentsBy(dx, dy);
+        return;
+    }
+    // QTextEdit would scroll the viewport pixels by dx/dy document pixels;
+    // zoomed, the picture moves zoom times as far. Just repaint.
+    viewport()->update();
 }
 
 void PageTextEdit::changeEvent(QEvent *event)
@@ -259,13 +337,25 @@ void PageTextEdit::setZoom(qreal zoom)
         connect(document()->documentLayout(), &QAbstractTextDocumentLayout::update, this,
                 [this](const QRectF &r) {
                     if (isZoomed()) {
-                        viewport()->update(toView(r).adjusted(-2, -2, 2, 2));
+                        viewport()->update(toView(r.translated(-scrollOffset())).adjusted(-2, -2, 2, 2));
                     }
                 });
+        // QTextEdit re-sizes its scroll bars for zoom 1 from several private
+        // paths (document size changes, relayouts, show); correct them each time.
+        // It sets the page step right after the range, so fix that once the
+        // event loop is back.
+        const auto fix = [this]() {
+            adjustZoomedScrollBars();
+            QMetaObject::invokeMethod(this, [this]() { adjustZoomedScrollBars(); }, Qt::QueuedConnection);
+        };
+        connect(verticalScrollBar(), &QScrollBar::rangeChanged, this, fix);
+        connect(horizontalScrollBar(), &QScrollBar::rangeChanged, this, fix);
         connect(this, &QTextEdit::cursorPositionChanged, this, [this]() {
             if (isZoomed()) {
                 restartCaretBlink();
                 viewport()->update();
+                // After QTextEdit's own (unzoomed) ensureCursorVisible().
+                QTimer::singleShot(0, this, [this]() { ensureZoomedCaretVisible(); });
             }
         });
         connect(this, &QTextEdit::selectionChanged, this, [this]() {
@@ -274,9 +364,28 @@ void PageTextEdit::setZoom(qreal zoom)
             }
         });
     }
+    // Keep the same document line at the top of the view across the change.
+    const int topDoc = verticalScrollBar()->value();
     m_zoom = zoom;
+    if (m_continuousInset) {
+        updateInset(); // the column width and the layout width follow the zoom
+    }
+    if (!isZoomed()) {
+        // Let QTextEdit size its scroll bars for zoom 1 again.
+        QResizeEvent re(size(), size());
+        QTextEdit::resizeEvent(&re);
+        updateInset();
+        reapplyPageSize();
+    }
+    adjustZoomedScrollBars();
+    verticalScrollBar()->setValue(topDoc);
     restartCaretBlink();
     viewport()->update();
+}
+
+QPointF PageTextEdit::scrollOffset() const
+{
+    return QPointF(horizontalScrollBar()->value(), verticalScrollBar()->value());
 }
 
 QPoint PageTextEdit::toDocument(const QPoint &viewportPos) const
@@ -364,11 +473,15 @@ void PageTextEdit::paintEvent(QPaintEvent *event)
     }
     // Draw the true-size layout scaled, with the caret and selections QTextEdit
     // would draw (its own painter cannot take a transform).
+    // Scroll offsets are in document pixels (continuous view; Full Page
+    // never scrolls the editor itself, so they are 0 there).
     QPainter p(viewport());
     p.scale(m_zoom, m_zoom);
+    const QPointF offset = scrollOffset();
+    p.translate(-offset);
     const QRectF r = event->rect();
     QAbstractTextDocumentLayout::PaintContext ctx;
-    ctx.clip = QRectF(r.topLeft() / m_zoom, r.size() / m_zoom).adjusted(-1, -1, 1, 1);
+    ctx.clip = QRectF(r.topLeft() / m_zoom, r.size() / m_zoom).translated(offset).adjusted(-1, -1, 1, 1);
     ctx.palette = palette();
     if (m_caretOn && hasFocus() && (textInteractionFlags() & Qt::TextEditable)) {
         ctx.cursorPosition = textCursor().position();
