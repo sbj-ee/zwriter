@@ -88,6 +88,8 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
+#include "SymbolDialog.hpp"
+#include "Symbols.hpp"
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
@@ -403,6 +405,7 @@ MainWindow::MainWindow(QWidget *parent)
     buildFileMenu();
     buildEditMenu();
     buildFormatMenu();
+    buildInsertMenu();
     buildViewMenu();
     buildHelpMenu();
     buildFormatToolbar();
@@ -1002,6 +1005,52 @@ void MainWindow::buildFormatMenu()
     updateTableActions();
 }
 
+void MainWindow::buildInsertMenu()
+{
+    // Insert (1.13.0): symbols, plus the existing insert actions from Format.
+    m_insertMenu = menuBar()->addMenu(QStringLiteral("&Insert"));
+    m_symbolAction = m_insertMenu->addAction(QStringLiteral("&Symbol…"));
+    m_symbolAction->setObjectName(QStringLiteral("insertSymbol"));
+    // Ctrl+Shift+I is Insert Table, so Symbol takes Ctrl+Shift+Y.
+    m_symbolAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Y));
+    m_symbolAction->setToolTip(QStringLiteral("Insert a Greek letter or EE symbol (Ctrl+Shift+Y)"));
+    connect(m_symbolAction, &QAction::triggered, this, &MainWindow::showSymbolDialog);
+    addAction(m_symbolAction);
+    // The on/off switch lives in View (built next); created here so the key filter has it.
+    m_symbolAutocompleteAction = new QAction(QStringLiteral("Symbol &Autocomplete (\\alpha → α)"), this);
+    m_symbolAutocompleteAction->setObjectName(QStringLiteral("symbolAutocomplete"));
+    m_symbolAutocompleteAction->setCheckable(true);
+    m_symbolAutocompleteAction->setChecked(Symbols::autocompleteEnabled());
+    m_symbolAutocompleteAction->setToolTip(QStringLiteral(
+        "Type \\alpha, \\Omega, \\mu, \\deg, \\pm … then Space or Tab to get the symbol; Ctrl+Z brings the text back"));
+    connect(m_symbolAutocompleteAction, &QAction::toggled, this, [](bool on) { Symbols::setAutocompleteEnabled(on); });
+    m_insertMenu->addSeparator();
+    for (QAction *a : {m_insertTableAction, m_insertImageAction, m_insertCaptionAction, m_pageBreakAction}) {
+        if (a) {
+            m_insertMenu->addAction(a);
+        }
+    }
+}
+
+SymbolDialog *MainWindow::symbolDialog() const
+{
+    return m_symbolDialog.data();
+}
+
+void MainWindow::showSymbolDialog()
+{
+    if (!m_symbolDialog) {
+        m_symbolDialog = new SymbolDialog(this);
+        connect(m_symbolDialog, &SymbolDialog::symbolChosen, this, [this](const QString &text) {
+            Symbols::insertAtCursor(m_editor, text);
+        });
+    }
+    m_symbolDialog->refreshRecent();
+    m_symbolDialog->show();
+    m_symbolDialog->raise();
+    m_symbolDialog->activateWindow();
+}
+
 void MainWindow::buildViewMenu()
 {
     m_viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
@@ -1032,6 +1081,7 @@ void MainWindow::buildViewMenu()
             m_ruler->setVisible(on && !m_markdownMode);
         }
     });
+    m_viewMenu->addAction(m_symbolAutocompleteAction);
     m_pageGuidesAction = m_viewMenu->addAction(QStringLiteral("Page &Guides"));
     m_pageGuidesAction->setCheckable(true);
     // Ctrl+G is Find Next on Linux; keep guides on their own chord.
@@ -5725,6 +5775,14 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         // actions); route them through the same caret-keeping undo.
         if (ke->matches(QKeySequence::Undo) || ke->matches(QKeySequence::Redo)) {
             Alignment::undoRedoKeepingCaret(m_editor, ke->matches(QKeySequence::Redo));
+            return true;
+        }
+        // \name autocomplete (1.13.0): \alpha + Space -> "α ", + Tab -> "α".
+        // Not in Markdown, where \alpha may be LaTeX math meant for pandoc.
+        if (!m_markdownMode && (ke->key() == Qt::Key_Space || ke->key() == Qt::Key_Tab)
+            && !(ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+            && m_symbolAutocompleteAction && m_symbolAutocompleteAction->isChecked()
+            && Symbols::expandBeforeCursor(m_editor, ke->key() == Qt::Key_Space ? QStringLiteral(" ") : QString())) {
             return true;
         }
         const bool soundsOn = m_keySounds && m_keySounds->isEnabled();

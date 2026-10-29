@@ -34,6 +34,10 @@
 #include "PageSettingsDialog.hpp"
 #include "PageSetup.hpp"
 #include "Ruler.hpp"
+#include "SymbolDialog.hpp"
+#include "Symbols.hpp"
+#include <QToolButton>
+#include <QMenuBar>
 #include "DocumentMeta.hpp"
 #include "ParagraphDialog.hpp"
 #include <QDoubleSpinBox>
@@ -2777,6 +2781,123 @@ void testPageSizeAndUnits(const QString &root)
     s.sync();
 }
 
+// 1.13.0: Insert > Symbol… and \name autocomplete in the real window.
+void testSymbols()
+{
+    const QString shots = qEnvironmentVariable("ZW_SHOT_DIR");
+    if (!shots.isEmpty()) {
+        QDir().mkpath(shots);
+    }
+    QSettings().remove(QStringLiteral("symbols"));
+    MainWindow w;
+    w.resize(1000, 640);
+    w.show();
+    QApplication::processEvents();
+    QTextEdit *ed = editorOf(w);
+    check(w.insertMenu() && w.insertMenu()->title() == QLatin1String("&Insert"), "Y Insert menu exists");
+    check(w.symbolAction() && w.symbolAction()->shortcut() == QKeySequence(QStringLiteral("Ctrl+Shift+Y")),
+          "Y Symbol… is Ctrl+Shift+Y");
+    check(w.symbolAutocompleteAction() && w.symbolAutocompleteAction()->isChecked(), "Y autocomplete on by default");
+
+    // Autocomplete through real key presses (the editor's event filter).
+    ed->setFocus();
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    QTest::keyClicks(ed, QStringLiteral("The load is 47 k\\Omega"));
+    QApplication::processEvents();
+    if (!shots.isEmpty()) {
+        w.grab().save(shots + QStringLiteral("/autocomplete-before.png"));
+    }
+    QTest::keyClick(ed, Qt::Key_Space);
+    check(ed->toPlainText() == QStringLiteral("The load is 47 kΩ "), "Y \\Omega + Space -> Ω", ed->toPlainText());
+    QTest::keyClicks(ed, QStringLiteral("at 25\\deg"));
+    QTest::keyClick(ed, Qt::Key_Space);
+    QTest::keyClicks(ed, QStringLiteral("C, \\pm"));
+    QTest::keyClick(ed, Qt::Key_Space);
+    QTest::keyClicks(ed, QStringLiteral("5 %, \\mu"));
+    QTest::keyClick(ed, Qt::Key_Tab);
+    QTest::keyClicks(ed, QStringLiteral("= 0.6"));
+    check(ed->toPlainText() == QStringLiteral("The load is 47 kΩ at 25° C, ± 5 %, μ= 0.6"), "Y \\deg \\pm \\mu",
+          ed->toPlainText());
+    if (!shots.isEmpty()) {
+        w.grab().save(shots + QStringLiteral("/autocomplete-after.png"));
+    }
+    // Ctrl+Z after an expansion: back to the typed \name.
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    ed->document()->clearUndoRedoStacks();
+    QTest::keyClicks(ed, QStringLiteral("\\alpha"));
+    QTest::keyClick(ed, Qt::Key_Space);
+    check(ed->toPlainText() == QStringLiteral("α "), "Y \\alpha expands", ed->toPlainText());
+    QTest::keyClick(ed, Qt::Key_Z, Qt::ControlModifier);
+    check(ed->toPlainText() == QStringLiteral("\\alpha"), "Y Ctrl+Z restores \\alpha", ed->toPlainText());
+
+    // Switched off: \beta stays typed, and the switch is saved.
+    w.symbolAutocompleteAction()->setChecked(false);
+    check(!QSettings().value(QStringLiteral("symbols/autocomplete"), true).toBool(), "Y switch saved");
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    QTest::keyClicks(ed, QStringLiteral("\\beta"));
+    QTest::keyClick(ed, Qt::Key_Space);
+    check(ed->toPlainText() == QStringLiteral("\\beta "), "Y off: no expansion", ed->toPlainText());
+    w.symbolAutocompleteAction()->setChecked(true);
+
+    // The dialog: click inserts at the caret as one undo step and fills Recently used.
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    ed->document()->clearUndoRedoStacks();
+    QTest::keyClicks(ed, QStringLiteral("f = 1/(2"));
+    w.symbolAction()->trigger();
+    QApplication::processEvents();
+    SymbolDialog *dlg = w.symbolDialog();
+    check(dlg && dlg->isVisible(), "Y Symbol… opens the dialog");
+    if (dlg) {
+        QToolButton *pi = dlg->buttonFor(QStringLiteral("ee"), QStringLiteral("π"));
+        QToolButton *omega = dlg->buttonFor(QStringLiteral("greek"), QStringLiteral("ω"));
+        check(pi && omega, "Y dialog has π and ω");
+        check(omega && omega->toolTip().contains(QStringLiteral("omega")), "Y tooltip names the symbol",
+              omega ? omega->toolTip() : QString());
+        if (pi && omega) {
+            pi->click();
+            omega->click();
+        }
+        QApplication::processEvents();
+        check(ed->toPlainText() == QStringLiteral("f = 1/(2πω"), "Y clicks insert at the caret", ed->toPlainText());
+        ed->undo();
+        check(ed->toPlainText() == QStringLiteral("f = 1/(2π"), "Y one click is one undo step", ed->toPlainText());
+        check(Symbols::recent() == QStringList({QStringLiteral("ω"), QStringLiteral("π")}), "Y recent saved",
+              Symbols::recent().join(QLatin1Char(',')));
+        check(dlg->buttonFor(QStringLiteral("recent"), QStringLiteral("ω")) != nullptr, "Y recent row shows ω");
+        if (!shots.isEmpty()) {
+            for (const QString &t : {QStringLiteral("Ω"), QStringLiteral("µ"), QStringLiteral("°"), QStringLiteral("±")}) {
+                Symbols::addRecent(t);
+            }
+            dlg->refreshRecent();
+            dlg->adjustSize();
+            QTest::qWait(100);
+            dlg->grab().save(shots + QStringLiteral("/symbol-dialog.png"));
+        }
+        dlg->close();
+    }
+    if (!shots.isEmpty()) {
+        QMenu *m = w.insertMenu();
+        m->popup(w.mapToGlobal(QPoint(120, 30)));
+        QTest::qWait(200);
+        m->grab().save(shots + QStringLiteral("/insert-menu.png"));
+        m->close();
+        QMenu *v = nullptr;
+        for (QAction *a : w.menuBar()->actions()) {
+            if (a->menu() && a->text() == QLatin1String("&View")) {
+                v = a->menu();
+            }
+        }
+        if (v) {
+            v->popup(w.mapToGlobal(QPoint(200, 30)));
+            QTest::qWait(200);
+            v->grab().save(shots + QStringLiteral("/view-menu-autocomplete.png"));
+            v->close();
+        }
+    }
+    w.setCurrentPathForTest(QString());
+    ed->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -2848,6 +2969,11 @@ int main(int argc, char **argv)
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_SYMBOLS")) { // quick local runs / screenshots
+        testSymbols();
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_PAGESIZE")) { // quick local runs / screenshots
         testPageSizeAndUnits(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
@@ -2911,6 +3037,7 @@ int main(int argc, char **argv)
     testBookFeedback(dataDir.path(), prompts);
     testPageGuidesContainText();
     testPageSizeAndUnits(dataDir.path());
+    testSymbols();
     testParagraphFormatting();
     testReportFixes(dataDir.path());
     testBookToc(dataDir.path());

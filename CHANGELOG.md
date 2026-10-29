@@ -3,6 +3,23 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.13.0] — unreleased
+
+Greek letters and EE symbols.
+
+- **Insert → Symbol…** (`Ctrl+Shift+Y`; `Ctrl+Shift+I` stays Insert Table) opens a grid of the
+  Greek alphabet, lower and upper case, and the EE symbols Ω µ ° ± √ π ∞ ≈ ≠ ≤ ≥ × ÷ ∠ Δ ∑ ∫ ·.
+  Each button's tooltip names the symbol and its `\name`. Clicking inserts at the caret as one undo
+  step; the dialog stays open for the next one. A **Recently used** row (last 12) is kept in
+  settings (`symbols/recent`).
+- **`\name` autocomplete.** Type `\alpha`, `\Omega`, `\mu`, `\deg`, `\pm`, `\ne`/`\neq`,
+  `\le`, `\ge`, `\approx`, `\times`, `\sqrt`, `\infty`, `\ohm`, `\micro` … then Space (symbol plus a
+  space) or Tab (symbol only). Names are case sensitive (`\omega` ω, `\Omega` Ω). Ctrl+Z brings the
+  typed name back. Unknown names and an escaped `\\alpha` are left alone. Not applied in Markdown
+  documents, where `\alpha` may be LaTeX math for pandoc.
+- **View → Symbol Autocomplete** turns it off; on by default, saved (`symbols/autocomplete`).
+- The new **Insert** menu also lists Insert Table, Image, Caption and Page Break (still in Format too).
+
 ## [1.12.0] — unreleased
 
 Ruler units and page sizes. The ruler counted unlabelled centimetres (0–21, an A4 sheet), which

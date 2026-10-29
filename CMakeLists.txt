@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.12.0 LANGUAGES CXX)
+project(zwriter VERSION 1.13.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -109,6 +109,10 @@ add_executable(zwriter
   src/PageSetup.hpp
   src/PageSettingsDialog.cpp
   src/PageSettingsDialog.hpp
+  src/Symbols.cpp
+  src/Symbols.hpp
+  src/SymbolDialog.cpp
+  src/SymbolDialog.hpp
   src/Images.hpp
   src/DocumentIo.hpp
   src/DocumentMeta.cpp
@@ -418,6 +422,13 @@ if(ZWRITER_BUILD_TESTS)
 
   # Paragraph alignment: ODT/RTF round-trip, one-step undo, checked state, print.
   find_package(Qt6 REQUIRED COMPONENTS Widgets)
+  # Symbols (1.13.0): \name table, autocomplete and its undo, Recently used.
+  add_executable(symbols_test tests/symbols_test.cpp src/Symbols.cpp src/Symbols.hpp)
+  target_include_directories(symbols_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(symbols_test PRIVATE Qt6::Widgets)
+  add_test(NAME symbols COMMAND symbols_test)
+  set_tests_properties(symbols PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
   add_executable(alignment_test
     tests/alignment_test.cpp
     src/Alignment.cpp
