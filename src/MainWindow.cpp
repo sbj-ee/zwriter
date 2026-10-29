@@ -817,6 +817,24 @@ void MainWindow::createFormatActions()
     connect(m_boldAction, &QAction::triggered, this, &MainWindow::toggleBold);
     connect(m_italicAction, &QAction::triggered, this, &MainWindow::toggleItalic);
     connect(m_underlineAction, &QAction::triggered, this, &MainWindow::toggleUnderline);
+    // Subscript / superscript (1.13.0): QTextCharFormat vertical alignment;
+    // turning one on turns the other off.
+    m_subscriptAction = make(QStringLiteral("Su&bscript"), QKeySequence(Qt::CTRL | Qt::Key_Equal),
+                             QStringLiteral("Subscript, e.g. H₂O (Ctrl+=)"), true);
+    m_subscriptAction->setObjectName(QStringLiteral("formatSubscript"));
+    m_superscriptAction = make(QStringLiteral("Su&perscript"), QKeySequence(),
+                               QStringLiteral("Superscript, e.g. x² (Ctrl+Shift+=)"), true);
+    m_superscriptAction->setObjectName(QStringLiteral("formatSuperscript"));
+    // Ctrl+Shift+= arrives as Ctrl+Shift+= or Ctrl+Shift++ depending on the layout.
+    m_superscriptAction->setShortcuts({QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal),
+                                       QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Plus),
+                                       QKeySequence(Qt::CTRL | Qt::Key_Plus)});
+    connect(m_subscriptAction, &QAction::triggered, this, [this](bool on) {
+        setVerticalAlign(on ? QTextCharFormat::AlignSubScript : QTextCharFormat::AlignNormal);
+    });
+    connect(m_superscriptAction, &QAction::triggered, this, [this](bool on) {
+        setVerticalAlign(on ? QTextCharFormat::AlignSuperScript : QTextCharFormat::AlignNormal);
+    });
 
     // Paragraph styles (exclusive).
     auto *styleGroup = new QActionGroup(this);
@@ -930,6 +948,8 @@ void MainWindow::buildFormatMenu()
     m_formatMenu->addAction(m_boldAction);
     m_formatMenu->addAction(m_italicAction);
     m_formatMenu->addAction(m_underlineAction);
+    m_formatMenu->addAction(m_subscriptAction);
+    m_formatMenu->addAction(m_superscriptAction);
     m_formatMenu->addSeparator();
 
     auto *styleMenu = m_formatMenu->addMenu(QStringLiteral("Paragraph &Style"));
@@ -996,6 +1016,7 @@ void MainWindow::buildFormatMenu()
 
     // Shortcuts must work with the menu closed and while a toolbar widget has focus.
     for (QAction *a : {m_boldAction, m_italicAction, m_underlineAction,
+                       m_subscriptAction, m_superscriptAction,
                        m_paragraphAction, m_h1Action, m_h2Action, m_h3Action,
                        m_alignLeftAction, m_alignCenterAction, m_alignRightAction,
                        m_alignJustifyAction, m_bulletListAction, m_numberListAction,
@@ -1696,6 +1717,16 @@ void MainWindow::buildFormatToolbar()
             f.setItalic(g.italic);
             f.setUnderline(g.underline);
             w->setFont(f);
+        }
+    }
+    // x₂ / x² toggles (1.13.0).
+    m_subscriptAction->setIconText(QStringLiteral("x₂"));
+    m_superscriptAction->setIconText(QStringLiteral("x²"));
+    for (QAction *a : {m_subscriptAction, m_superscriptAction}) {
+        m_formatBar->addAction(a);
+        if (QWidget *w = m_formatBar->widgetForAction(a)) {
+            w->setObjectName(a == m_subscriptAction ? QStringLiteral("subscriptButton")
+                                                    : QStringLiteral("superscriptButton"));
         }
     }
 
@@ -3070,6 +3101,20 @@ void MainWindow::toggleUnderline()
     m_editor->setFocus();
 }
 
+void MainWindow::setVerticalAlign(QTextCharFormat::VerticalAlignment align)
+{
+    QTextCharFormat fmt;
+    fmt.setVerticalAlignment(align);
+    m_editor->mergeCurrentCharFormat(fmt);
+    {
+        const QSignalBlocker a(m_subscriptAction);
+        const QSignalBlocker b(m_superscriptAction);
+        m_subscriptAction->setChecked(align == QTextCharFormat::AlignSubScript);
+        m_superscriptAction->setChecked(align == QTextCharFormat::AlignSuperScript);
+    }
+    m_editor->setFocus();
+}
+
 void MainWindow::editPastePlain()
 {
     const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
@@ -3249,7 +3294,7 @@ void MainWindow::applyMarkdownBlockFormat()
 void MainWindow::syncRichActions()
 {
     const bool rich = !m_markdownMode;
-    for (QAction *a : {m_boldAction, m_italicAction, m_underlineAction, m_paragraphAction,
+    for (QAction *a : {m_boldAction, m_italicAction, m_underlineAction, m_subscriptAction, m_superscriptAction, m_paragraphAction,
                        m_h1Action, m_h2Action, m_h3Action, m_bulletListAction, m_numberListAction,
                        m_clearFormatAction, m_insertTableAction, m_insertCaptionAction, m_pageBreakAction,
                        m_pageNumbersAction, m_headerFooterAction}) {
@@ -3398,6 +3443,12 @@ void MainWindow::syncFormatActions()
     if (m_underlineAction) {
         const QSignalBlocker b(m_underlineAction);
         m_underlineAction->setChecked(fmt.fontUnderline());
+    }
+    if (m_subscriptAction && m_superscriptAction) {
+        const QSignalBlocker a(m_subscriptAction);
+        const QSignalBlocker b(m_superscriptAction);
+        m_subscriptAction->setChecked(fmt.verticalAlignment() == QTextCharFormat::AlignSubScript);
+        m_superscriptAction->setChecked(fmt.verticalAlignment() == QTextCharFormat::AlignSuperScript);
     }
 
     if (m_alignActions) {

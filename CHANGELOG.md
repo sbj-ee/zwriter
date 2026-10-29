@@ -5,7 +5,13 @@ the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
 ## [1.13.0] — unreleased
 
-Greek letters and EE symbols.
+Greek letters and EE symbols, subscript and superscript.
+
+- **Format → Subscript (`Ctrl+=`) and Superscript (`Ctrl+Shift+=`)**, also as x₂ / x² toolbar
+  buttons. They are checkable, mutually exclusive and follow the caret, for H₂O and x². They are
+  saved in `.odt` (`style:text-position`, also read from LibreOffice files) and `.rtf`
+  (`\super` / `\sub` / `\nosupersub`), come through PDF export and print, and come out of EPUB
+  export as `<sub>` / `<sup>`. Like B/I/U they are off in Markdown documents; plain text drops them.
 
 - **Insert → Symbol…** (`Ctrl+Shift+Y`; `Ctrl+Shift+I` stays Insert Table) opens a grid of the
   Greek alphabet, lower and upper case, and the EE symbols Ω µ ° ± √ π ∞ ≈ ≠ ≤ ≥ × ÷ ∠ Δ ∑ ∫ ·.

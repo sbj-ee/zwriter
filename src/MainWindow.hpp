@@ -8,6 +8,7 @@
 #include "UpdateHost.hpp"
 
 #include <QMainWindow>
+#include <QTextCharFormat>
 #include <QPageLayout>
 #include <QPageSize>
 #include <QPointer>
@@ -124,6 +125,8 @@ public:
     QMenu *insertMenu() const { return m_insertMenu; }
     class SymbolDialog *symbolDialog() const;
     void showSymbolDialog();
+    QAction *subscriptAction() const { return m_subscriptAction; }
+    QAction *superscriptAction() const { return m_superscriptAction; }
     bool saveToPathForTest(const QString &path) { return saveToPath(path, DocumentIo::Format::Odt); }
     // File → Export as PDF without the dialog (also used by tests).
     bool exportPdfTo(const QString &path);
@@ -149,6 +152,7 @@ private slots:
     void toggleBold();
     void toggleItalic();
     void toggleUnderline();
+    void setVerticalAlign(QTextCharFormat::VerticalAlignment align);
     void editPastePlain();
     void clearFormatting();
     void fileNew();
@@ -361,6 +365,8 @@ private:
     QAction *m_cutAction = nullptr;
     QAction *m_copyAction = nullptr;
     QAction *m_underlineAction = nullptr;
+    QAction *m_subscriptAction = nullptr;
+    QAction *m_superscriptAction = nullptr;
     Alignment::Actions *m_alignActions = nullptr;
     QAction *m_alignLeftAction = nullptr;
     QAction *m_alignCenterAction = nullptr;

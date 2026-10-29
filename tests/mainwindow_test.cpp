@@ -2898,6 +2898,92 @@ void testSymbols()
     ed->document()->setModified(false);
 }
 
+// 1.13.0: Format > Subscript / Superscript toggles (Ctrl+= / Ctrl+Shift+=).
+void testSubSuperscript(const QString &root)
+{
+    const QString shots = qEnvironmentVariable("ZW_SHOT_DIR");
+    MainWindow w;
+    w.resize(1000, 640);
+    w.show();
+    QApplication::processEvents();
+    QTextEdit *ed = editorOf(w);
+    QAction *sub = w.subscriptAction();
+    QAction *sup = w.superscriptAction();
+    check(sub && sup && sub->isCheckable() && sup->isCheckable(), "Z sub/super actions exist");
+    check(sub->shortcut() == QKeySequence(QStringLiteral("Ctrl+=")), "Z Subscript is Ctrl+=");
+    check(sup->shortcuts().contains(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal)), "Z Superscript is Ctrl+Shift+=");
+    ed->setFocus();
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    QTest::keyClicks(ed, QStringLiteral("Water is H"));
+    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier);
+    check(sub->isChecked() && !sup->isChecked(), "Z Ctrl+= turns subscript on");
+    QTest::keyClicks(ed, QStringLiteral("2"));
+    sub->trigger();
+    check(!sub->isChecked(), "Z subscript off again");
+    QTest::keyClicks(ed, QStringLiteral("O; the area is x"));
+    sub->trigger();
+    sup->trigger();
+    check(sup->isChecked() && !sub->isChecked(), "Z superscript turns subscript off (exclusive)");
+    QTest::keyClicks(ed, QStringLiteral("2"));
+    sup->trigger();
+    QTest::keyClicks(ed, QStringLiteral(" m, and E = mc"));
+    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier | Qt::ShiftModifier);
+    check(sup->isChecked(), "Z Ctrl+Shift+= turns superscript on");
+    QTest::keyClicks(ed, QStringLiteral("2"));
+    sup->trigger();
+    QTest::keyClicks(ed, QStringLiteral("."));
+    const QString text = ed->toPlainText();
+    check(text == QStringLiteral("Water is H2O; the area is x2 m, and E = mc2."), "Z typed text", text);
+    auto vaAt = [&](int pos) {
+        QTextCursor c(ed->document());
+        c.setPosition(pos + 1);
+        return c.charFormat().verticalAlignment();
+    };
+    check(vaAt(text.indexOf(QLatin1String("H2")) + 1) == QTextCharFormat::AlignSubScript, "Z H2O has a subscript 2");
+    check(vaAt(text.indexOf(QLatin1String("x2")) + 1) == QTextCharFormat::AlignSuperScript, "Z x2 has a superscript 2");
+    check(vaAt(text.indexOf(QLatin1String("O;"))) == QTextCharFormat::AlignNormal, "Z O back on the line");
+    // The toggles follow the caret.
+    QTextCursor c = ed->textCursor();
+    c.setPosition(text.indexOf(QLatin1String("H2")) + 2);
+    ed->setTextCursor(c);
+    QApplication::processEvents();
+    check(sub->isChecked() && !sup->isChecked(), "Z caret after the subscript 2 checks Subscript");
+    const QString odt = root + QStringLiteral("/script.odt");
+    check(w.saveToPathForTest(odt), "Z save odt");
+    {
+        MainWindow w2;
+        check(w2.openPathForTest(odt), "Z reopen odt");
+        QTextEdit *e2 = editorOf(w2);
+        QTextCursor c2(e2->document());
+        c2.setPosition(e2->toPlainText().indexOf(QLatin1String("x2")) + 2);
+        check(c2.charFormat().verticalAlignment() == QTextCharFormat::AlignSuperScript, "Z superscript survives reopen");
+        e2->document()->setModified(false);
+    }
+    const QString pdf = root + QStringLiteral("/script.pdf");
+    check(w.exportPdfTo(pdf), "Z PDF export");
+    if (!shots.isEmpty()) {
+        QDir().mkpath(shots);
+        QTextCursor end = ed->textCursor();
+        end.movePosition(QTextCursor::End);
+        ed->setTextCursor(end);
+        QApplication::processEvents();
+        QTest::qWait(150);
+        w.grab().save(shots + QStringLiteral("/subsuper-sample.png"));
+        if (QToolBar *bar = w.findChild<QToolBar *>()) {
+            bar->grab().save(shots + QStringLiteral("/subsuper-toolbar.png"));
+        }
+        for (QAction *a : w.menuBar()->actions()) {
+            if (a->menu() && a->text() == QLatin1String("F&ormat")) {
+                a->menu()->popup(w.mapToGlobal(QPoint(80, 30)));
+                QTest::qWait(200);
+                a->menu()->grab().save(shots + QStringLiteral("/subsuper-format-menu.png"));
+                a->menu()->close();
+            }
+        }
+    }
+    ed->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -2971,6 +3057,7 @@ int main(int argc, char **argv)
     }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_SYMBOLS")) { // quick local runs / screenshots
         testSymbols();
+        testSubSuperscript(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }
@@ -3038,6 +3125,7 @@ int main(int argc, char **argv)
     testPageGuidesContainText();
     testPageSizeAndUnits(dataDir.path());
     testSymbols();
+    testSubSuperscript(dataDir.path());
     testParagraphFormatting();
     testReportFixes(dataDir.path());
     testBookToc(dataDir.path());

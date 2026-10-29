@@ -387,6 +387,23 @@ if(ZWRITER_BUILD_TESTS)
   add_test(NAME book_export COMMAND book_export_test)
   set_tests_properties(book_export PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+  # Subscript / superscript (1.13.0): ODT/RTF round trips, PDF layout, EPUB <sub>/<sup>.
+  add_executable(script_test
+    tests/script_test.cpp
+    src/BookExport.cpp
+    src/BookManifest.cpp
+    src/Captions.cpp
+    src/DocumentIo.cpp
+    src/Images.cpp
+    src/ParagraphStyles.cpp
+    src/Alignment.cpp
+    src/PrintLayout.cpp
+  )
+  target_include_directories(script_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(script_test PRIVATE Qt6::Widgets Qt6::PrintSupport)
+  add_test(NAME script COMMAND script_test)
+  set_tests_properties(script PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
   add_executable(captions_test
     tests/captions_test.cpp
     src/Captions.cpp
