@@ -404,7 +404,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_zoomCombo->addItem(QStringLiteral("%1%").arg(p), p);
     }
     m_zoomCombo->setToolTip(QStringLiteral(
-        "View zoom (Ctrl+Alt+= / Ctrl+- / Ctrl+0, or Ctrl+scroll). Display only: "
+        "View zoom (Ctrl++ / Ctrl+- / Ctrl+0, or Ctrl+scroll). Display only: "
         "printing and exports are unchanged"));
     auto applyTyped = [this]() {
         QString t = m_zoomCombo->currentText().trimmed();
@@ -855,16 +855,15 @@ void MainWindow::createFormatActions()
     connect(m_underlineAction, &QAction::triggered, this, &MainWindow::toggleUnderline);
     // Subscript / superscript (1.13.0): QTextCharFormat vertical alignment;
     // turning one on turns the other off.
-    m_subscriptAction = make(QStringLiteral("Su&bscript"), QKeySequence(Qt::CTRL | Qt::Key_Equal),
-                             QStringLiteral("Subscript, e.g. H₂O (Ctrl+=)"), true);
+    // 1.14.1: Ctrl+= / Ctrl++ are View > Zoom In (the standard everywhere), so
+    // subscript and superscript live on Ctrl+, and Ctrl+. (the comma sits low,
+    // the period high, like the marks they make).
+    m_subscriptAction = make(QStringLiteral("Su&bscript"), QKeySequence(Qt::CTRL | Qt::Key_Comma),
+                             QStringLiteral("Subscript, e.g. H₂O (Ctrl+,)"), true);
     m_subscriptAction->setObjectName(QStringLiteral("formatSubscript"));
-    m_superscriptAction = make(QStringLiteral("Su&perscript"), QKeySequence(),
-                               QStringLiteral("Superscript, e.g. x² (Ctrl+Shift+=)"), true);
+    m_superscriptAction = make(QStringLiteral("Su&perscript"), QKeySequence(Qt::CTRL | Qt::Key_Period),
+                               QStringLiteral("Superscript, e.g. x² (Ctrl+.)"), true);
     m_superscriptAction->setObjectName(QStringLiteral("formatSuperscript"));
-    // Ctrl+Shift+= arrives as Ctrl+Shift+= or Ctrl+Shift++ depending on the layout.
-    m_superscriptAction->setShortcuts({QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal),
-                                       QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Plus),
-                                       QKeySequence(Qt::CTRL | Qt::Key_Plus)});
     connect(m_subscriptAction, &QAction::triggered, this, [this](bool on) {
         setVerticalAlign(on ? QTextCharFormat::AlignSubScript : QTextCharFormat::AlignNormal);
     });
@@ -1134,20 +1133,25 @@ void MainWindow::buildViewMenu()
         "Zoom the page to fill the window width (Ctrl+Shift+W); lines still break as they print"));
     connect(m_fitPageWidthAction, &QAction::triggered, this, &MainWindow::toggleFitPageWidth);
 
-    // View zoom (1.14.0). Ctrl+= is Subscript and Ctrl+Shift+= / Ctrl++ are
-    // Superscript, so Zoom In lives on Ctrl+Alt+= (Ctrl+Alt++ on layouts
-    // that report the shifted key).
+    // View zoom (1.14.0; 1.14.1 shortcuts). Zoom In answers Ctrl+= and Ctrl++
+    // however the layout reports the +/= key (with or without Shift), the
+    // numpad + (Qt drops the keypad modifier when matching), and the 1.14.0
+    // Ctrl+Alt+= kept as an extra.
     m_zoomInAction = m_viewMenu->addAction(QStringLiteral("Zoom &In"));
     m_zoomInAction->setObjectName(QStringLiteral("viewZoomIn"));
-    m_zoomInAction->setShortcuts({QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Equal),
+    m_zoomInAction->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_Plus),
+                                  QKeySequence(Qt::CTRL | Qt::Key_Equal),
+                                  QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal),
+                                  QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Plus),
+                                  QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Equal),
                                   QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Plus)});
-    m_zoomInAction->setToolTip(QStringLiteral("Make the page bigger on screen (Ctrl+Alt+=)"));
+    m_zoomInAction->setToolTip(QStringLiteral("Make the text bigger on screen (Ctrl++ or Ctrl+=)"));
     connect(m_zoomInAction, &QAction::triggered, this,
             [this]() { setViewZoomPercent(ViewZoom::stepUp(shownZoomPercent())); });
     m_zoomOutAction = m_viewMenu->addAction(QStringLiteral("Zoom &Out"));
     m_zoomOutAction->setObjectName(QStringLiteral("viewZoomOut"));
     m_zoomOutAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Minus));
-    m_zoomOutAction->setToolTip(QStringLiteral("Make the page smaller on screen (Ctrl+-)"));
+    m_zoomOutAction->setToolTip(QStringLiteral("Make the text smaller on screen (Ctrl+-)"));
     connect(m_zoomOutAction, &QAction::triggered, this,
             [this]() { setViewZoomPercent(ViewZoom::stepDown(shownZoomPercent())); });
     m_zoomResetAction = m_viewMenu->addAction(QStringLiteral("&Actual Size"));
