@@ -21,6 +21,7 @@ class QTextEdit;
 class PageTextEdit;
 class PageCanvas;
 class QLabel;
+class QComboBox;
 class QToolBar;
 class QAction;
 class QTimer;
@@ -128,6 +129,13 @@ public:
     void showSymbolDialog();
     QAction *subscriptAction() const { return m_subscriptAction; }
     QAction *superscriptAction() const { return m_superscriptAction; }
+    // View zoom (1.14.0), display only.
+    QAction *zoomInAction() const { return m_zoomInAction; }
+    QAction *zoomOutAction() const { return m_zoomOutAction; }
+    QAction *zoomResetAction() const { return m_zoomResetAction; }
+    QComboBox *zoomCombo() const { return m_zoomCombo; }
+    int viewZoomPercent() const { return m_viewZoomPercent; }
+    void setViewZoomPercent(int percent);
     bool saveToPathForTest(const QString &path) { return saveToPath(path, DocumentIo::Format::Odt); }
     // File → Export as PDF without the dialog (also used by tests).
     bool exportPdfTo(const QString &path);
@@ -405,6 +413,13 @@ private:
     QAction *m_pageGuidesAction = nullptr;
     QAction *m_fullPageViewAction = nullptr;
     QAction *m_fitPageWidthAction = nullptr;
+    QAction *m_zoomInAction = nullptr;
+    QAction *m_zoomOutAction = nullptr;
+    QAction *m_zoomResetAction = nullptr;
+    QComboBox *m_zoomCombo = nullptr;
+    int m_viewZoomPercent = 100;
+    void syncZoomControls();
+    int shownZoomPercent() const;
     QAction *m_typewriterScrollAction = nullptr;
     QAction *m_focusModeAction = nullptr;
     QAction *m_focusSentenceAction = nullptr;

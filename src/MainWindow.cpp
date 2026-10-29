@@ -33,6 +33,10 @@
 #include <QApplication>
 #include <QAbstractTextDocumentLayout>
 #include <QAction>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QWheelEvent>
+#include "ViewZoom.hpp"
 #include <QActionGroup>
 #include <QCloseEvent>
 #include <QContextMenuEvent>
@@ -390,6 +394,34 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(m_pageLabel);
     m_statsLabel = new QLabel(this);
     statusBar()->addPermanentWidget(m_statsLabel);
+    // View zoom % (1.14.0): pick a step or type a value from 50 to 300.
+    m_zoomCombo = new QComboBox(this);
+    m_zoomCombo->setObjectName(QStringLiteral("statusZoom"));
+    m_zoomCombo->setEditable(true);
+    m_zoomCombo->setInsertPolicy(QComboBox::NoInsert);
+    m_zoomCombo->setFocusPolicy(Qt::ClickFocus);
+    for (int p : ViewZoom::steps()) {
+        m_zoomCombo->addItem(QStringLiteral("%1%").arg(p), p);
+    }
+    m_zoomCombo->setToolTip(QStringLiteral(
+        "View zoom (Ctrl+Alt+= / Ctrl+- / Ctrl+0, or Ctrl+scroll). Display only: "
+        "printing and exports are unchanged"));
+    auto applyTyped = [this]() {
+        QString t = m_zoomCombo->currentText().trimmed();
+        t.remove(QLatin1Char('%'));
+        bool ok = false;
+        const int p = qRound(t.toDouble(&ok));
+        if (ok) {
+            setViewZoomPercent(p);
+        }
+        syncZoomControls();
+        if (m_editor) {
+            m_editor->setFocus();
+        }
+    };
+    connect(m_zoomCombo, &QComboBox::activated, this, [this, applyTyped](int) { applyTyped(); });
+    connect(m_zoomCombo->lineEdit(), &QLineEdit::editingFinished, this, applyTyped);
+    statusBar()->addPermanentWidget(m_zoomCombo);
     statusBar()->setSizeGripEnabled(false);
 
 #ifndef Q_OS_MACOS
@@ -472,6 +504,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_editor->installEventFilter(this);
     m_editor->viewport()->setMouseTracking(true);
     m_editor->viewport()->installEventFilter(this);
+    m_pageScroll->viewport()->installEventFilter(this); // Ctrl+scroll zoom on the desk
     setMouseTracking(true);
     if (m_formatBar) {
         m_formatBar->installEventFilter(this);
@@ -514,6 +547,8 @@ void MainWindow::loadSettings()
     m_spellCheck = s.value(QStringLiteral("view/spellCheck"), true).toBool();
     m_fullPageView = s.value(QStringLiteral("view/fullPageView"), true).toBool();
     m_fitPageWidth = s.value(QStringLiteral("view/fitPageWidth"), false).toBool();
+    m_viewZoomPercent = ViewZoom::clampPercent(
+        s.value(QLatin1String(ViewZoom::kSettingsKey), 100).toInt());
     m_odtFullPageView = m_fullPageView;
     m_odtChromePinned = m_hideAwayPinned;
     m_markdownChromePinned = s.value(QStringLiteral("markdown/chromePinned"), true).toBool();
@@ -544,6 +579,7 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("view/spellCheck"), m_spellCheck);
     s.setValue(QStringLiteral("view/fullPageView"), m_markdownMode ? m_odtFullPageView : m_fullPageView);
     s.setValue(QStringLiteral("view/fitPageWidth"), m_fitPageWidth);
+    s.setValue(QLatin1String(ViewZoom::kSettingsKey), m_viewZoomPercent);
     s.setValue(QStringLiteral("theme/id"), m_themeId);
     s.setValue(QStringLiteral("files/recent"), m_recentFiles);
     s.setValue(QStringLiteral("files/lastDir"), m_lastDocDir);
@@ -1098,6 +1134,28 @@ void MainWindow::buildViewMenu()
         "Zoom the page to fill the window width (Ctrl+Shift+W); lines still break as they print"));
     connect(m_fitPageWidthAction, &QAction::triggered, this, &MainWindow::toggleFitPageWidth);
 
+    // View zoom (1.14.0). Ctrl+= is Subscript and Ctrl+Shift+= / Ctrl++ are
+    // Superscript, so Zoom In lives on Ctrl+Alt+= (Ctrl+Alt++ on layouts
+    // that report the shifted key).
+    m_zoomInAction = m_viewMenu->addAction(QStringLiteral("Zoom &In"));
+    m_zoomInAction->setObjectName(QStringLiteral("viewZoomIn"));
+    m_zoomInAction->setShortcuts({QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Equal),
+                                  QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Plus)});
+    m_zoomInAction->setToolTip(QStringLiteral("Make the page bigger on screen (Ctrl+Alt+=)"));
+    connect(m_zoomInAction, &QAction::triggered, this,
+            [this]() { setViewZoomPercent(ViewZoom::stepUp(shownZoomPercent())); });
+    m_zoomOutAction = m_viewMenu->addAction(QStringLiteral("Zoom &Out"));
+    m_zoomOutAction->setObjectName(QStringLiteral("viewZoomOut"));
+    m_zoomOutAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Minus));
+    m_zoomOutAction->setToolTip(QStringLiteral("Make the page smaller on screen (Ctrl+-)"));
+    connect(m_zoomOutAction, &QAction::triggered, this,
+            [this]() { setViewZoomPercent(ViewZoom::stepDown(shownZoomPercent())); });
+    m_zoomResetAction = m_viewMenu->addAction(QStringLiteral("&Actual Size"));
+    m_zoomResetAction->setObjectName(QStringLiteral("viewZoomReset"));
+    m_zoomResetAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
+    m_zoomResetAction->setToolTip(QStringLiteral("Show the page at 100 % (Ctrl+0)"));
+    connect(m_zoomResetAction, &QAction::triggered, this, [this]() { setViewZoomPercent(100); });
+
     m_rulerAction = m_viewMenu->addAction(QStringLiteral("&Ruler"));
     m_rulerAction->setObjectName(QStringLiteral("viewRuler"));
     m_rulerAction->setCheckable(true);
@@ -1231,7 +1289,8 @@ void MainWindow::buildViewMenu()
     connect(fullscreenAct, &QAction::triggered, this, &MainWindow::toggleFullscreen);
 
     for (QAction *a : {m_typewriterScrollAction, m_focusModeAction, m_fullPageViewAction,
-                       m_fitPageWidthAction, m_pageGuidesAction, m_keySoundsAction, fullscreenAct,
+                       m_fitPageWidthAction, m_zoomInAction, m_zoomOutAction, m_zoomResetAction,
+                       m_pageGuidesAction, m_keySoundsAction, fullscreenAct,
                        m_previewAction, m_libraryAction, m_bookAction}) {
         addAction(a);
     }
@@ -1561,6 +1620,7 @@ void MainWindow::syncViewActions()
         m_fitPageWidthAction->setChecked(m_fitPageWidth);
         m_fitPageWidthAction->setEnabled(m_fullPageView); // the continuous view already fills
     }
+    syncZoomControls();
     if (m_focusParagraphAction && m_focusSentenceAction) {
         const QSignalBlocker b1(m_focusParagraphAction);
         const QSignalBlocker b2(m_focusSentenceAction);
@@ -4426,6 +4486,53 @@ void MainWindow::toggleFullPageView()
     }
 }
 
+void MainWindow::setViewZoomPercent(int percent)
+{
+    percent = ViewZoom::clampPercent(percent);
+    const bool changed = percent != m_viewZoomPercent || m_fitPageWidth;
+    m_viewZoomPercent = percent;
+    m_fitPageWidth = false; // a chosen zoom replaces Fit Page to Width
+    if (changed) {
+        if (m_fullPageView) {
+            updateFullPageGeometry();
+            centerCaret();
+        }
+        saveSettings();
+    }
+    syncViewActions();
+    if (!m_fullPageView) {
+        statusBar()->showMessage(
+            QStringLiteral("Zoom %1% applies in Full Page view (Ctrl+Shift+P)").arg(percent), 4000);
+    }
+}
+
+int MainWindow::shownZoomPercent() const
+{
+    return (m_fitPageWidth && m_fullPageView && m_editor) ? qRound(m_editor->zoom() * 100)
+                                                          : m_viewZoomPercent;
+}
+
+void MainWindow::syncZoomControls()
+{
+    const bool paged = m_fullPageView && !m_markdownMode;
+    const int shown = shownZoomPercent();
+    if (m_zoomInAction) {
+        m_zoomInAction->setEnabled(paged && (m_fitPageWidth || m_viewZoomPercent < ViewZoom::kMaxPercent));
+        m_zoomOutAction->setEnabled(paged && (m_fitPageWidth || m_viewZoomPercent > ViewZoom::kMinPercent));
+        m_zoomResetAction->setEnabled(paged);
+    }
+    if (m_zoomCombo) {
+        const QSignalBlocker b(m_zoomCombo);
+        m_zoomCombo->setEnabled(paged);
+        m_zoomCombo->setVisible(!m_markdownMode);
+        const int idx = m_zoomCombo->findData(shown);
+        if (idx >= 0) {
+            m_zoomCombo->setCurrentIndex(idx);
+        }
+        m_zoomCombo->setEditText(QStringLiteral("%1%").arg(shown));
+    }
+}
+
 void MainWindow::toggleFitPageWidth()
 {
     m_fitPageWidth = m_fitPageWidthAction && m_fitPageWidthAction->isChecked();
@@ -4437,8 +4544,11 @@ void MainWindow::toggleFitPageWidth()
 
 qreal MainWindow::fitPageZoom() const
 {
-    if (!m_fitPageWidth || !m_fullPageView || !m_pageScroll) {
+    if (!m_fullPageView || !m_pageScroll) {
         return 1.0;
+    }
+    if (!m_fitPageWidth) {
+        return m_viewZoomPercent / 100.0; // View > Zoom (display only)
     }
     // Leave room for the vertical scroll bar whether or not it is showing, so
     // the zoom does not flip when the page grows tall enough to need it, and
@@ -5791,6 +5901,21 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    // Ctrl+scroll is View zoom. Never let it reach QTextEdit, whose own
+    // Ctrl+wheel zoomIn() changes the document's default font (and so exports).
+    if (event->type() == QEvent::Wheel
+        && (watched == (m_editor ? m_editor->viewport() : nullptr)
+            || watched == (m_pageScroll ? m_pageScroll->viewport() : nullptr))) {
+        auto *we = static_cast<QWheelEvent *>(event);
+        if (we->modifiers() & Qt::ControlModifier) {
+            const int dy = we->angleDelta().y();
+            if (dy != 0 && m_fullPageView && !m_markdownMode) {
+                setViewZoomPercent(dy > 0 ? ViewZoom::stepUp(shownZoomPercent())
+                                          : ViewZoom::stepDown(shownZoomPercent()));
+            }
+            return true;
+        }
+    }
     if (watched == m_desk && event->type() == QEvent::Resize && m_fullPageView && !m_centering) {
         // Defer so we don't re-enter layout mid-resize.
         QTimer::singleShot(0, this, [this]() {

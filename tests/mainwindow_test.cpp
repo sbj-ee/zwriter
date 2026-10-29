@@ -52,6 +52,9 @@
 #include "BookSidebar.hpp"
 #include "LibrarySidebar.hpp"
 #include "version.hpp"
+#include <QAbstractItemView>
+#include <QStatusBar>
+#include <QWheelEvent>
 
 #include <QAction>
 #include <QApplication>
@@ -3049,6 +3052,145 @@ void testMathReplace()
     ed->document()->setModified(false);
 }
 
+// 1.14.0: View zoom is display only, persists, and its shortcuts are unique.
+static QByteArray stripPdfVolatile(QByteArray pdf)
+{
+    QList<QByteArray> keep;
+    for (const QByteArray &line : pdf.split('\n')) {
+        if (!line.contains("/CreationDate") && !line.contains("/ModDate") && !line.contains("/ID")
+            && !line.contains("<xmp:") && !line.contains("xmpMM:")) {
+            keep << line;
+        }
+    }
+    return keep.join('\n');
+}
+
+void testViewZoom(const QString &root)
+{
+    const QString shots = qEnvironmentVariable("ZW_SHOT_DIR");
+    QSettings().setValue(QStringLiteral("view/fullPageView"), true);
+    QSettings().setValue(QStringLiteral("view/fitPageWidth"), false);
+    QSettings().setValue(QStringLiteral("view/zoomPercent"), 100);
+    auto *w = new MainWindow;
+    w->resize(1100, 760);
+    w->show();
+    QApplication::processEvents();
+    QTextEdit *ed = editorOf(*w);
+    auto *pe = qobject_cast<PageTextEdit *>(ed);
+    check(pe != nullptr, "VZ editor is a PageTextEdit");
+    QAction *in = w->zoomInAction();
+    QAction *out = w->zoomOutAction();
+    QAction *reset = w->zoomResetAction();
+    check(in && out && reset && w->zoomCombo(), "VZ zoom actions and status-bar control exist");
+    check(in->shortcuts().contains(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Equal)), "VZ Zoom In is Ctrl+Alt+=");
+    check(out->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_Minus), "VZ Zoom Out is Ctrl+-");
+    check(reset->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_0), "VZ Actual Size is Ctrl+0");
+    // No other action anywhere in the window shares a zoom shortcut.
+    const QList<QAction *> all = w->findChildren<QAction *>();
+    for (QAction *z : {in, out, reset}) {
+        for (const QKeySequence &k : z->shortcuts()) {
+            for (QAction *a : all) {
+                if (a != z && a->shortcuts().contains(k)) {
+                    check(false, "VZ shortcut conflict", k.toString() + QStringLiteral(" also on ") + a->text());
+                }
+            }
+        }
+    }
+    check(w->subscriptAction()->shortcut() == QKeySequence(QStringLiteral("Ctrl+=")), "VZ Ctrl+= is still Subscript");
+
+    ed->setFocus();
+    { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
+    QTest::keyClicks(ed, QStringLiteral("Zoom test: the quick brown fox jumps over the lazy dog. V = IR, P = VI."));
+    QApplication::processEvents();
+    const QString odt100 = root + QStringLiteral("/zoom100.odt");
+    const QString pdf100 = root + QStringLiteral("/zoom100.pdf");
+    check(w->saveToPathForTest(odt100), "VZ save at 100%");
+    check(w->exportPdfTo(pdf100), "VZ PDF at 100%");
+    QTextDocument *doc = ed->document();
+    const QString html = doc->toHtml();
+    const QSizeF page = doc->pageSize();
+    const QFont font = doc->defaultFont();
+    const bool modified = doc->isModified();
+    const int undoSteps = doc->availableUndoSteps();
+
+    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier);
+    QApplication::processEvents();
+    check(w->viewZoomPercent() == 110, "VZ Ctrl+Alt+= zooms in one step", QString::number(w->viewZoomPercent()));
+    QTest::keyClick(ed, Qt::Key_0, Qt::ControlModifier);
+    check(w->viewZoomPercent() == 100, "VZ Ctrl+0 back to 100%");
+    QTest::keyClick(ed, Qt::Key_Minus, Qt::ControlModifier);
+    check(w->viewZoomPercent() == 90, "VZ Ctrl+- zooms out one step");
+    {
+        const QPoint at = ed->viewport()->rect().center();
+        QWheelEvent wheel(at, ed->viewport()->mapToGlobal(at), QPoint(), QPoint(0, 120), Qt::NoButton,
+                          Qt::ControlModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(ed->viewport(), &wheel);
+    }
+    check(w->viewZoomPercent() == 100, "VZ Ctrl+wheel up zooms in");
+    check(doc->defaultFont() == font, "VZ Ctrl+wheel leaves the document font alone");
+    w->setViewZoomPercent(1000);
+    check(w->viewZoomPercent() == 300, "VZ clamped at 300%");
+    w->setViewZoomPercent(10);
+    check(w->viewZoomPercent() == 50, "VZ clamped at 50%");
+    w->setViewZoomPercent(200);
+    QApplication::processEvents();
+    check(qFuzzyCompare(pe->zoom(), 2.0), "VZ editor painted at 200%");
+    check(doc->toHtml() == html, "VZ document content and formats unchanged");
+    check(doc->pageSize() == page, "VZ page geometry unchanged");
+    check(doc->defaultFont() == font, "VZ default font unchanged");
+    check(doc->isModified() == modified && doc->availableUndoSteps() == undoSteps, "VZ zoom is not an edit");
+    const QString odt200 = root + QStringLiteral("/zoom200.odt");
+    const QString pdf200 = root + QStringLiteral("/zoom200.pdf");
+    check(w->saveToPathForTest(odt200), "VZ save at 200%");
+    check(w->exportPdfTo(pdf200), "VZ PDF at 200%");
+    {
+        MainWindow a;
+        MainWindow b;
+        check(a.openPathForTest(odt100) && b.openPathForTest(odt200), "VZ reopen both saves");
+        check(editorOf(a)->document()->toHtml() == editorOf(b)->document()->toHtml(), "VZ saved files identical");
+        editorOf(a)->document()->setModified(false);
+        editorOf(b)->document()->setModified(false);
+    }
+    {
+        QFile f1(pdf100), f2(pdf200);
+        check(f1.open(QIODevice::ReadOnly) && f2.open(QIODevice::ReadOnly), "VZ read PDFs");
+        check(stripPdfVolatile(f1.readAll()) == stripPdfVolatile(f2.readAll()), "VZ PDF identical at 100% and 200%");
+    }
+    if (!shots.isEmpty()) {
+        QDir().mkpath(shots);
+        for (int p : {100, 150, 200}) {
+            w->setViewZoomPercent(p);
+            QApplication::processEvents();
+            QTest::qWait(150);
+            w->grab().save(shots + QStringLiteral("/zoom-%1.png").arg(p));
+        }
+        w->setViewZoomPercent(150);
+        QApplication::processEvents();
+        QStatusBar *sb = w->statusBar();
+        sb->grab().save(shots + QStringLiteral("/zoom-statusbar.png"));
+        w->zoomCombo()->showPopup();
+        QApplication::processEvents();
+        QTest::qWait(150);
+        if (QWidget *popup = w->zoomCombo()->view()->window()) {
+            popup->grab().save(shots + QStringLiteral("/zoom-statusbar-popup.png"));
+        }
+        w->zoomCombo()->hidePopup();
+    }
+    w->setViewZoomPercent(175);
+    doc->setModified(false);
+    w->setCurrentPathForTest(QString());
+    delete w;
+    {
+        MainWindow w2;
+        w2.show();
+        QApplication::processEvents();
+        check(w2.viewZoomPercent() == 175, "VZ zoom level restored on launch");
+        check(qFuzzyCompare(qobject_cast<PageTextEdit *>(editorOf(w2))->zoom(), 1.75), "VZ restored zoom applied");
+        w2.setViewZoomPercent(100);
+        editorOf(w2)->document()->setModified(false);
+    }
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -3117,6 +3259,11 @@ int main(int argc, char **argv)
     }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_TOC")) { // quick local runs
         testBookToc(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_ZOOM")) { // quick local runs / screenshots
+        testViewZoom(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }
@@ -3192,6 +3339,7 @@ int main(int argc, char **argv)
     testPageSizeAndUnits(dataDir.path());
     testSymbols();
     testSubSuperscript(dataDir.path());
+    testViewZoom(dataDir.path());
     testMathReplace();
     testParagraphFormatting();
     testReportFixes(dataDir.path());

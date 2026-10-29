@@ -3,7 +3,27 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [1.13.0] — unreleased
+## [1.14.0] — unreleased
+
+View zoom, for easier reading.
+
+- **View → Zoom In / Zoom Out / Actual Size** magnify the page on screen from 50 % to 300 %
+  (steps 50 67 75 90 100 110 125 150 175 200 250 300). Shortcuts: `Ctrl+Alt+=` (or `Ctrl+Alt++`),
+  `Ctrl+-`, `Ctrl+0`; `Ctrl`+scroll wheel also zooms. `Ctrl+=` stays Subscript and
+  `Ctrl+Shift+=` / `Ctrl++` stay Superscript, which is why Zoom In is on `Ctrl+Alt+=`.
+- **Status-bar zoom box** at the right: pick a step or type any value from 50 to 300 %.
+- **Display only.** The document's fonts, character formats, page size and margins are not touched,
+  so saved files, PDF, EPUB and print are byte-for-byte what they are at 100 % (tested). The ruler
+  and page guides scale with the page.
+- **Remembered** between sessions (`view/zoomPercent`). Picking a zoom turns off Fit Page to Width.
+- **Ctrl+scroll no longer resizes the document font.** Qt's built-in Ctrl+wheel on the editor
+  changes the editor font, which could carry into the document's default font; it is now View zoom.
+- Zoom applies in Full Page view (the default). In the Continuous view it shows a hint to switch to
+  Full Page; Markdown documents have no zoom yet. Follow-ups: zoom for the Continuous / Markdown
+  views, and an optional "Scale interface text" for menus and toolbars (Qt only scales widget
+  chrome cleanly at start-up, via `QT_SCALE_FACTOR`, so it would need a restart).
+
+## [1.13.0] — 2026-10-29
 
 Greek letters, EE and math symbols, subscript and superscript.
 
