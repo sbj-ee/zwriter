@@ -1,6 +1,6 @@
 #pragma once
-// View zoom (1.14.0): display-only magnification of the page in Full Page
-// view. It never touches the document (fonts, page size, margins), so saved
+// View zoom (1.14.0; every view since 1.14.1): display-only magnification of
+// the text in Full Page, Continuous and Markdown views. It never touches the document (fonts, page size, margins), so saved
 // files, PDF, EPUB and print come out exactly as at 100 %.
 #include <QList>
 #include <QtGlobal>

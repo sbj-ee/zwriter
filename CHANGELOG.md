@@ -3,7 +3,26 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
-## [1.14.0] — unreleased
+## [1.14.1] — 2026-10-29
+
+Zoom in every view, on the keys you expect.
+
+- **`Ctrl` and the `+`/`=` key zoom in.** In 1.14.0 `Ctrl+=` was Subscript (and `Ctrl+Shift+=` /
+  `Ctrl++` Superscript), so pressing `Ctrl` `+` the usual way toggled a toolbar format instead of
+  zooming. Zoom In is now `Ctrl+=`, `Ctrl+Shift+=` (`Ctrl++`) and numpad `Ctrl++`, with
+  `Ctrl+Alt+=` kept as an extra; Zoom Out is `Ctrl+-` (numpad too); Actual Size is `Ctrl+0`.
+- **Subscript moves to `Ctrl+,` and Superscript to `Ctrl+.`** (the toolbar x₂ / x² buttons and the
+  Format menu are unchanged). A test now fails on any shortcut shared by two actions.
+- **Zoom works in Full Page, Continuous and Markdown views.** 1.14.0 zoomed only in Full Page view:
+  elsewhere View → Zoom In / Zoom Out / Actual Size were greyed out and, in Markdown, the status-bar
+  % box was hidden. They are now always enabled and shown. In the Continuous and Markdown views the
+  text rewraps to the window at the larger size; scrolling, clicks, selection and the caret
+  (including Typewriter Scroll) follow the zoom, and `Ctrl`+scroll zooms there too.
+- **Markdown status bar:** the zoom % box was clipped by the slim status bar; it now fits.
+- Still display only: the document, its modified flag, undo history, saved files and PDF/EPUB
+  exports are unchanged at any zoom (tested in each view). The level is remembered.
+
+## [1.14.0] — 2026-10-29
 
 View zoom, for easier reading.
 
@@ -18,9 +37,8 @@ View zoom, for easier reading.
 - **Remembered** between sessions (`view/zoomPercent`). Picking a zoom turns off Fit Page to Width.
 - **Ctrl+scroll no longer resizes the document font.** Qt's built-in Ctrl+wheel on the editor
   changes the editor font, which could carry into the document's default font; it is now View zoom.
-- Zoom applies in Full Page view (the default). In the Continuous view it shows a hint to switch to
-  Full Page; Markdown documents have no zoom yet. Follow-ups: zoom for the Continuous / Markdown
-  views, and an optional "Scale interface text" for menus and toolbars (Qt only scales widget
+- Zoom applies in Full Page view (the default); 1.14.1 extends it to every view. Follow-up: an
+  optional "Scale interface text" for menus and toolbars (Qt only scales widget
   chrome cleanly at start-up, via `QT_SCALE_FACTOR`, so it would need a restart).
 
 ## [1.13.0] — 2026-10-29
