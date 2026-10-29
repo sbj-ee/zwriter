@@ -30,6 +30,10 @@
 #include <QLabel>
 #include <QProcess>
 #include <QComboBox>
+#include <QtMath>
+#include <QAbstractTextDocumentLayout>
+#include <QHash>
+#include <QScrollBar>
 #include "ParagraphStyles.hpp"
 #include "PageSettingsDialog.hpp"
 #include "PageSetup.hpp"
@@ -102,6 +106,12 @@ void check(bool ok, const char *what, const QString &detail = QString())
     if (!ok) {
         ++g_failures;
     }
+}
+
+// Test names built at run time (per view, per shortcut).
+void check(bool ok, const QString &what, const QString &detail = QString())
+{
+    check(ok, what.toUtf8().constData(), detail);
 }
 
 void wait(int ms)
@@ -2901,7 +2911,7 @@ void testSymbols()
     ed->document()->setModified(false);
 }
 
-// 1.13.0: Format > Subscript / Superscript toggles (Ctrl+= / Ctrl+Shift+=).
+// 1.13.0: Format > Subscript / Superscript toggles (1.14.1: Ctrl+, / Ctrl+.).
 void testSubSuperscript(const QString &root)
 {
     const QString shots = qEnvironmentVariable("ZW_SHOT_DIR");
@@ -2913,13 +2923,13 @@ void testSubSuperscript(const QString &root)
     QAction *sub = w.subscriptAction();
     QAction *sup = w.superscriptAction();
     check(sub && sup && sub->isCheckable() && sup->isCheckable(), "Z sub/super actions exist");
-    check(sub->shortcut() == QKeySequence(QStringLiteral("Ctrl+=")), "Z Subscript is Ctrl+=");
-    check(sup->shortcuts().contains(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal)), "Z Superscript is Ctrl+Shift+=");
+    check(sub->shortcuts() == QList<QKeySequence>{QKeySequence(Qt::CTRL | Qt::Key_Comma)}, "Z Subscript is Ctrl+,");
+    check(sup->shortcuts() == QList<QKeySequence>{QKeySequence(Qt::CTRL | Qt::Key_Period)}, "Z Superscript is Ctrl+.");
     ed->setFocus();
     { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
     QTest::keyClicks(ed, QStringLiteral("Water is H"));
-    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier);
-    check(sub->isChecked() && !sup->isChecked(), "Z Ctrl+= turns subscript on");
+    QTest::keyClick(ed, Qt::Key_Comma, Qt::ControlModifier);
+    check(sub->isChecked() && !sup->isChecked(), "Z Ctrl+, turns subscript on");
     QTest::keyClicks(ed, QStringLiteral("2"));
     sub->trigger();
     check(!sub->isChecked(), "Z subscript off again");
@@ -2930,8 +2940,8 @@ void testSubSuperscript(const QString &root)
     QTest::keyClicks(ed, QStringLiteral("2"));
     sup->trigger();
     QTest::keyClicks(ed, QStringLiteral(" m, and E = mc"));
-    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier | Qt::ShiftModifier);
-    check(sup->isChecked(), "Z Ctrl+Shift+= turns superscript on");
+    QTest::keyClick(ed, Qt::Key_Period, Qt::ControlModifier);
+    check(sup->isChecked(), "Z Ctrl+. turns superscript on");
     QTest::keyClicks(ed, QStringLiteral("2"));
     sup->trigger();
     QTest::keyClicks(ed, QStringLiteral("."));
@@ -3082,21 +3092,37 @@ void testViewZoom(const QString &root)
     QAction *out = w->zoomOutAction();
     QAction *reset = w->zoomResetAction();
     check(in && out && reset && w->zoomCombo(), "VZ zoom actions and status-bar control exist");
-    check(in->shortcuts().contains(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Equal)), "VZ Zoom In is Ctrl+Alt+=");
+    for (const QKeySequence &k : {QKeySequence(Qt::CTRL | Qt::Key_Equal), QKeySequence(Qt::CTRL | Qt::Key_Plus),
+                                  QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal),
+                                  QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Plus),
+                                  QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Equal)}) {
+        check(in->shortcuts().contains(k), "VZ Zoom In has " + k.toString());
+    }
     check(out->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_Minus), "VZ Zoom Out is Ctrl+-");
     check(reset->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_0), "VZ Actual Size is Ctrl+0");
-    // No other action anywhere in the window shares a zoom shortcut.
-    const QList<QAction *> all = w->findChildren<QAction *>();
-    for (QAction *z : {in, out, reset}) {
-        for (const QKeySequence &k : z->shortcuts()) {
-            for (QAction *a : all) {
-                if (a != z && a->shortcuts().contains(k)) {
-                    check(false, "VZ shortcut conflict", k.toString() + QStringLiteral(" also on ") + a->text());
+    // 1.14.1: no two actions anywhere in the window share any shortcut.
+    {
+        QHash<QString, QString> owner;
+        int conflicts = 0;
+        for (QAction *a : w->findChildren<QAction *>()) {
+            for (const QKeySequence &k : a->shortcuts()) {
+                const QString key = k.toString(QKeySequence::PortableText);
+                if (owner.contains(key) && owner.value(key) != a->text()) {
+                    ++conflicts;
+                    check(false, "VZ shortcut conflict", key + QStringLiteral(": ") + owner.value(key)
+                                                             + QStringLiteral(" / ") + a->text());
                 }
+                owner.insert(key, a->text());
             }
         }
+        check(conflicts == 0, "VZ no shortcut conflicts in the window");
     }
-    check(w->subscriptAction()->shortcut() == QKeySequence(QStringLiteral("Ctrl+=")), "VZ Ctrl+= is still Subscript");
+    for (QAction *a : {w->subscriptAction(), w->superscriptAction()}) {
+        for (const QKeySequence &k : a->shortcuts()) {
+            check(!k.toString().contains(QLatin1Char('=')) && !k.toString().contains(QLatin1String("++")),
+                  "VZ sub/superscript keep off the +/= key", k.toString());
+        }
+    }
 
     ed->setFocus();
     { QTextCursor c(ed->document()); c.select(QTextCursor::Document); c.removeSelectedText(); }
@@ -3113,9 +3139,26 @@ void testViewZoom(const QString &root)
     const bool modified = doc->isModified();
     const int undoSteps = doc->availableUndoSteps();
 
-    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier);
+    // Stephen's report: Ctrl and the +/= key toggled Subscript instead of zooming.
+    const QString before = doc->toHtml();
+    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier);
     QApplication::processEvents();
-    check(w->viewZoomPercent() == 110, "VZ Ctrl+Alt+= zooms in one step", QString::number(w->viewZoomPercent()));
+    check(w->viewZoomPercent() == 110, "VZ Ctrl+= zooms in one step", QString::number(w->viewZoomPercent()));
+    check(!w->subscriptAction()->isChecked() && !w->superscriptAction()->isChecked(),
+          "VZ Ctrl+= does not toggle subscript");
+    check(doc->toHtml() == before, "VZ Ctrl+= changes no format");
+    QTest::keyClick(ed, Qt::Key_Plus, Qt::ControlModifier | Qt::ShiftModifier);
+    check(w->viewZoomPercent() == 125, "VZ Ctrl+Shift++ zooms in", QString::number(w->viewZoomPercent()));
+    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier | Qt::ShiftModifier);
+    check(w->viewZoomPercent() == 150, "VZ Ctrl+Shift+= zooms in", QString::number(w->viewZoomPercent()));
+    QTest::keyClick(ed, Qt::Key_Plus, Qt::ControlModifier | Qt::KeypadModifier);
+    check(w->viewZoomPercent() == 175, "VZ numpad Ctrl++ zooms in", QString::number(w->viewZoomPercent()));
+    QTest::keyClick(ed, Qt::Key_Minus, Qt::ControlModifier | Qt::KeypadModifier);
+    check(w->viewZoomPercent() == 150, "VZ numpad Ctrl+- zooms out", QString::number(w->viewZoomPercent()));
+    QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier);
+    check(w->viewZoomPercent() == 175, "VZ Ctrl+Alt+= still zooms in", QString::number(w->viewZoomPercent()));
+    check(!w->subscriptAction()->isChecked() && !w->superscriptAction()->isChecked() && doc->toHtml() == before,
+          "VZ no zoom key touched the text");
     QTest::keyClick(ed, Qt::Key_0, Qt::ControlModifier);
     check(w->viewZoomPercent() == 100, "VZ Ctrl+0 back to 100%");
     QTest::keyClick(ed, Qt::Key_Minus, Qt::ControlModifier);
@@ -3191,6 +3234,211 @@ void testViewZoom(const QString &root)
     }
 }
 
+
+// 1.14.1: zoom works in Full Page, Continuous and Markdown views; the menu
+// items and the status-bar box are always enabled and shown; clicks, the caret
+// and scrolling follow the zoom; it stays display-only.
+void testViewZoomAllViews(const QString &root)
+{
+    const QString shots = qEnvironmentVariable("ZW_SHOT_DIR");
+    QSettings().setValue(QStringLiteral("view/fullPageView"), true);
+    QSettings().setValue(QStringLiteral("view/fitPageWidth"), false);
+    QSettings().setValue(QStringLiteral("view/zoomPercent"), 100);
+    QString para;
+    for (int i = 0; i < 6; ++i) {
+        para += QStringLiteral("Ohm's law: V = IR, so P = VI = I²R. The quick brown fox jumps over the lazy dog. ");
+    }
+    QString body;
+    for (int i = 1; i <= 30; ++i) {
+        body += QStringLiteral("Paragraph %1. ").arg(i) + para + QLatin1Char('\n');
+    }
+    auto checkControls = [](MainWindow &w, const QString &view) {
+        check(w.zoomInAction()->isEnabled() && w.zoomOutAction()->isEnabled() && w.zoomResetAction()->isEnabled(),
+              "ZA " + view + ": View > Zoom items enabled");
+        QComboBox *combo = w.zoomCombo();
+        check(combo->isVisible() && combo->isEnabled(), "ZA " + view + ": status-bar zoom box shown");
+        // Not clipped: the box is at least as wide as its widest entry needs.
+        const int need = combo->fontMetrics().horizontalAdvance(QStringLiteral("300%"));
+        check(combo->width() >= need + 16 && combo->visibleRegion().boundingRect().width() == combo->width(),
+              "ZA " + view + ": status-bar zoom box not clipped",
+              QStringLiteral("%1 vs %2 visible %3").arg(combo->width()).arg(need)
+                  .arg(combo->visibleRegion().boundingRect().width()));
+    };
+    auto runView = [&](MainWindow &w, const QString &view, const QString &shotName) {
+        QTextEdit *ed = editorOf(w);
+        auto *pe = qobject_cast<PageTextEdit *>(ed);
+        QTextDocument *doc = ed->document();
+        QApplication::processEvents();
+        QTest::qWait(50); // deferred page layout after a show / view switch
+        QApplication::processEvents();
+        checkControls(w, view);
+        const QString html = doc->toHtml();
+        const QFont font = doc->defaultFont();
+        const bool modified = doc->isModified();
+        const int undo = doc->availableUndoSteps();
+        // Keyboard: Ctrl+= in, Ctrl+- out, Ctrl+0 actual size.
+        ed->setFocus();
+        QTest::keyClick(ed, Qt::Key_Equal, Qt::ControlModifier);
+        check(w.viewZoomPercent() == 110 && qFuzzyCompare(pe->zoom(), 1.1), "ZA " + view + ": Ctrl+= zooms in",
+              QString::number(pe->zoom()));
+        check(!w.subscriptAction()->isChecked(), "ZA " + view + ": Ctrl+= is not subscript");
+        QTest::keyClick(ed, Qt::Key_Minus, Qt::ControlModifier);
+        check(w.viewZoomPercent() == 100 && qFuzzyCompare(pe->zoom(), 1.0), "ZA " + view + ": Ctrl+- zooms out");
+        // Ctrl+scroll.
+        {
+            const QPoint at = ed->viewport()->rect().center();
+            QWheelEvent wheel(at, ed->viewport()->mapToGlobal(at), QPoint(), QPoint(0, 120), Qt::NoButton,
+                              Qt::ControlModifier, Qt::NoScrollPhase, false);
+            QApplication::sendEvent(ed->viewport(), &wheel);
+        }
+        check(w.viewZoomPercent() == 110 && qFuzzyCompare(pe->zoom(), 1.1), "ZA " + view + ": Ctrl+wheel zooms");
+        w.zoomInAction()->trigger();
+        w.zoomInAction()->trigger();
+        QApplication::processEvents();
+        check(w.viewZoomPercent() == 150 && qFuzzyCompare(pe->zoom(), 1.5), "ZA " + view + ": View > Zoom In to 150%",
+              QString::number(w.viewZoomPercent()));
+        check(w.zoomCombo()->currentText() == QLatin1String("150%"), "ZA " + view + ": status box shows 150%",
+              w.zoomCombo()->currentText());
+        checkControls(w, view + " at 150%");
+        // Display only.
+        check(doc->toHtml() == html && doc->defaultFont() == font, "ZA " + view + ": document unchanged");
+        check(doc->isModified() == modified && doc->availableUndoSteps() == undo, "ZA " + view + ": zoom is not an edit");
+        if (!w.fullPageViewAction()->isChecked()) {
+            // Continuous strips rewrap to the zoomed column instead of running off the side.
+            check(qAbs(doc->pageSize().width() - ed->viewport()->width() / 1.5) < 1.5,
+                  "ZA " + view + ": text rewraps to the zoomed column",
+                  QStringLiteral("%1 vs %2").arg(doc->pageSize().width()).arg(ed->viewport()->width() / 1.5));
+            check(ed->horizontalScrollBar()->maximum() == 0, "ZA " + view + ": no sideways scrolling",
+                  QStringLiteral("hmax %1 docW %2 vpW %3").arg(ed->horizontalScrollBar()->maximum())
+                      .arg(doc->documentLayout()->documentSize().width()).arg(ed->viewport()->width()));
+            const int visH = qRound(ed->viewport()->height() / 1.5);
+            const int docH = qCeil(doc->documentLayout()->documentSize().height());
+            check(qAbs(ed->verticalScrollBar()->maximum() - (docH - visH)) <= 1,
+                  "ZA " + view + ": scroll range covers the zoomed document",
+                  QStringLiteral("%1 vs %2").arg(ed->verticalScrollBar()->maximum()).arg(docH - visH));
+            // The caret follows: jump to the end, it is on screen.
+            QTest::keyClick(ed, Qt::Key_End, Qt::ControlModifier);
+            QApplication::processEvents();
+            QTest::qWait(20);
+            QApplication::processEvents();
+            const QRect shown = pe->toView(ed->cursorRect());
+            check(ed->verticalScrollBar()->pageStep() == visH, "ZA " + view + ": page step is one zoomed screen",
+                  QStringLiteral("%1 vs %2").arg(ed->verticalScrollBar()->pageStep()).arg(visH));
+            check(ed->viewport()->rect().contains(shown.center()), "ZA " + view + ": caret on screen at the end",
+                  QStringLiteral("%1,%2 in %3x%4").arg(shown.center().x()).arg(shown.center().y())
+                      .arg(ed->viewport()->width()).arg(ed->viewport()->height()));
+            // Scrolled away from the top: a click lands on the word drawn under it.
+            check(ed->verticalScrollBar()->value() > 0, "ZA " + view + ": scrolled down");
+        }
+        // Click mapping: clicking where a word is drawn puts the caret in it.
+        {
+            QTextCursor probe(doc);
+            const int target = doc->toPlainText().lastIndexOf(QStringLiteral("lazy"));
+            probe.setPosition(target + 2);
+            ed->setTextCursor(probe);
+            QApplication::processEvents();
+            QTest::qWait(20);
+            QApplication::processEvents();
+            const QRect drawn = pe->toView(ed->cursorRect());
+            QTextCursor away(doc);
+            ed->setTextCursor(away);
+            QApplication::processEvents();
+            QTextCursor back(doc);
+            back.setPosition(target + 2);
+            ed->setTextCursor(back);
+            QApplication::processEvents();
+            const QRect drawn2 = pe->toView(ed->cursorRect());
+            QTest::mouseClick(ed->viewport(), Qt::LeftButton, Qt::NoModifier, drawn2.center());
+            const int pos = ed->textCursor().position();
+            check(qAbs(pos - (target + 2)) <= 1, "ZA " + view + ": click lands where the text is drawn",
+                  QStringLiteral("%1 vs %2 (%3,%4)").arg(pos).arg(target + 2).arg(drawn.x()).arg(drawn2.y()));
+        }
+        if (!shots.isEmpty()) {
+            QDir().mkpath(shots);
+            QTextCursor c(doc);
+            c.setPosition(doc->toPlainText().indexOf(QStringLiteral("Paragraph 2.")));
+            ed->setTextCursor(c);
+            QApplication::processEvents();
+            QTest::qWait(150);
+            w.grab().save(shots + QStringLiteral("/") + shotName);
+            w.statusBar()->grab().save(shots + QStringLiteral("/statusbar-") + shotName);
+        }
+        w.zoomResetAction()->trigger();
+        check(w.viewZoomPercent() == 100 && qFuzzyCompare(pe->zoom(), 1.0), "ZA " + view + ": Ctrl+0 actual size");
+        check(doc->toHtml() == html && doc->isModified() == modified, "ZA " + view + ": still unchanged");
+    };
+
+    // Full Page and Continuous (rich text).
+    {
+        MainWindow w;
+        w.resize(1100, 760);
+        w.show();
+        QApplication::processEvents();
+        QTextEdit *ed = editorOf(w);
+        ed->setPlainText(body);
+        // Let the page layout settle (setPlainText resets the root frame).
+        w.fullPageViewAction()->trigger();
+        w.fullPageViewAction()->trigger();
+        QApplication::processEvents();
+        ed->document()->clearUndoRedoStacks();
+        ed->document()->setModified(false);
+        QApplication::processEvents();
+        check(w.fullPageViewAction()->isChecked(), "ZA starts in Full Page");
+        runView(w, QStringLiteral("Full Page"), QStringLiteral("zoom150-fullpage.png"));
+        w.fullPageViewAction()->trigger();
+        QApplication::processEvents();
+        check(!w.fullPageViewAction()->isChecked(), "ZA switched to Continuous");
+        runView(w, QStringLiteral("Continuous"), QStringLiteral("zoom150-continuous.png"));
+        // The level carries across a view switch.
+        w.setViewZoomPercent(150);
+        w.fullPageViewAction()->trigger();
+        QApplication::processEvents();
+        check(qFuzzyCompare(qobject_cast<PageTextEdit *>(ed)->zoom(), 1.5), "ZA Continuous->Full Page keeps 150%");
+        w.fullPageViewAction()->trigger();
+        QApplication::processEvents();
+        check(qFuzzyCompare(qobject_cast<PageTextEdit *>(ed)->zoom(), 1.5), "ZA Full Page->Continuous keeps 150%");
+        // PDF export is the same whatever the zoom in the continuous view.
+        const QString a = root + QStringLiteral("/za150.pdf");
+        const QString b = root + QStringLiteral("/za100.pdf");
+        check(w.exportPdfTo(a), "ZA PDF at 150% Continuous");
+        w.setViewZoomPercent(100);
+        check(w.exportPdfTo(b), "ZA PDF at 100% Continuous");
+        QFile f1(a), f2(b);
+        check(f1.open(QIODevice::ReadOnly) && f2.open(QIODevice::ReadOnly)
+                  && stripPdfVolatile(f1.readAll()) == stripPdfVolatile(f2.readAll()),
+              "ZA Continuous PDF identical at 100% and 150%");
+        w.fullPageViewAction()->trigger(); // leave Full Page on for later tests
+        ed->document()->setModified(false);
+    }
+    // Markdown.
+    {
+        const QString md = root + QStringLiteral("/zoom.md");
+        QFile f(md);
+        check(f.open(QIODevice::WriteOnly | QIODevice::Truncate), "ZA write md");
+        QString text = QStringLiteral("# Zoom\n\n");
+        for (int i = 1; i <= 30; ++i) {
+            text += QStringLiteral("Paragraph %1. ").arg(i) + para + QStringLiteral("\n\n");
+        }
+        f.write(text.toUtf8());
+        f.close();
+        MainWindow w;
+        w.resize(1100, 760);
+        w.show();
+        QApplication::processEvents();
+        check(w.openPathForTest(md), "ZA open Markdown");
+        QApplication::processEvents();
+        runView(w, QStringLiteral("Markdown"), QStringLiteral("zoom150-markdown.png"));
+        w.setViewZoomPercent(150);
+        const QString saved = root + QStringLiteral("/zoom-saved.md");
+        editorOf(w)->document()->setModified(false);
+        w.setViewZoomPercent(100);
+        editorOf(w)->document()->setModified(false);
+        w.setCurrentPathForTest(QString());
+        Q_UNUSED(saved);
+    }
+    QSettings().setValue(QStringLiteral("view/zoomPercent"), 100);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -3264,6 +3512,8 @@ int main(int argc, char **argv)
     }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_ZOOM")) { // quick local runs / screenshots
         testViewZoom(dataDir.path());
+        testViewZoomAllViews(dataDir.path());
+    testViewZoomAllViews(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }

@@ -78,7 +78,7 @@ void PageTextEdit::adjustZoomedScrollBars()
     const QScopedValueRollback guard(m_adjustingBars, true);
     const QSizeF docSize = document()->documentLayout()->documentSize();
     const int visH = qMax(1, qRound(viewport()->height() / m_zoom));
-    const int visW = qMax(1, qRound(viewport()->width() / m_zoom));
+    const int visW = qMax(1, qCeil(viewport()->width() / m_zoom));
     QScrollBar *v = verticalScrollBar();
     v->setRange(0, qMax(0, qCeil(docSize.height()) - visH));
     v->setPageStep(visH);
@@ -340,9 +340,16 @@ void PageTextEdit::setZoom(qreal zoom)
                         viewport()->update(toView(r.translated(-scrollOffset())).adjusted(-2, -2, 2, 2));
                     }
                 });
-        // Runs after QTextEdit's own handler (connected in its constructor).
-        connect(document()->documentLayout(), &QAbstractTextDocumentLayout::documentSizeChanged, this,
-                [this]() { adjustZoomedScrollBars(); });
+        // QTextEdit re-sizes its scroll bars for zoom 1 from several private
+        // paths (document size changes, relayouts, show); correct them each time.
+        // It sets the page step right after the range, so fix that once the
+        // event loop is back.
+        const auto fix = [this]() {
+            adjustZoomedScrollBars();
+            QMetaObject::invokeMethod(this, [this]() { adjustZoomedScrollBars(); }, Qt::QueuedConnection);
+        };
+        connect(verticalScrollBar(), &QScrollBar::rangeChanged, this, fix);
+        connect(horizontalScrollBar(), &QScrollBar::rangeChanged, this, fix);
         connect(this, &QTextEdit::cursorPositionChanged, this, [this]() {
             if (isZoomed()) {
                 restartCaretBlink();
