@@ -2869,7 +2869,9 @@ void MainWindow::centerCaret()
     }
     m_centering = true;
     QScrollBar *vs = m_editor->verticalScrollBar();
-    const int mid = m_editor->viewport()->height() / 2;
+    // Scroll values and cursorRect() are document pixels; zoomed, the viewport
+    // shows height/zoom of them.
+    const int mid = qRound(m_editor->viewport()->height() / (2.0 * qMax(0.01, m_editor->zoom())));
     const int delta = cr.center().y() - mid;
     vs->setValue(vs->value() + delta);
     m_centering = false;
@@ -4499,15 +4501,18 @@ void MainWindow::setViewZoomPercent(int percent)
     if (changed) {
         if (m_fullPageView) {
             updateFullPageGeometry();
-            centerCaret();
+        } else if (m_editor) {
+            // Continuous and Markdown views (1.14.1): the text rewraps to the
+            // zoomed column; the document itself is untouched.
+            m_editor->setZoom(percent / 100.0);
+            if (m_ruler) {
+                m_ruler->update();
+            }
         }
+        centerCaret();
         saveSettings();
     }
     syncViewActions();
-    if (!m_fullPageView) {
-        statusBar()->showMessage(
-            QStringLiteral("Zoom %1% applies in Full Page view (Ctrl+Shift+P)").arg(percent), 4000);
-    }
 }
 
 int MainWindow::shownZoomPercent() const
@@ -4518,17 +4523,19 @@ int MainWindow::shownZoomPercent() const
 
 void MainWindow::syncZoomControls()
 {
-    const bool paged = m_fullPageView && !m_markdownMode;
+    // 1.14.1: zoom works in every view (Full Page, Continuous, Markdown), so
+    // the menu items and the status-bar box are always there and enabled.
+    // At the 50 % / 300 % limits a further step is simply a no-op.
     const int shown = shownZoomPercent();
     if (m_zoomInAction) {
-        m_zoomInAction->setEnabled(paged && (m_fitPageWidth || m_viewZoomPercent < ViewZoom::kMaxPercent));
-        m_zoomOutAction->setEnabled(paged && (m_fitPageWidth || m_viewZoomPercent > ViewZoom::kMinPercent));
-        m_zoomResetAction->setEnabled(paged);
+        m_zoomInAction->setEnabled(true);
+        m_zoomOutAction->setEnabled(true);
+        m_zoomResetAction->setEnabled(true);
     }
     if (m_zoomCombo) {
         const QSignalBlocker b(m_zoomCombo);
-        m_zoomCombo->setEnabled(paged);
-        m_zoomCombo->setVisible(!m_markdownMode);
+        m_zoomCombo->setEnabled(true);
+        m_zoomCombo->setVisible(true);
         const int idx = m_zoomCombo->findData(shown);
         if (idx >= 0) {
             m_zoomCombo->setCurrentIndex(idx);
@@ -4737,8 +4744,8 @@ void MainWindow::applyFullPageView()
         m_pageFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         m_editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
         m_editor->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-        m_editor->setZoom(1.0);
         clearDocumentPageMetrics();
+        m_editor->setZoom(m_viewZoomPercent / 100.0); // View zoom applies here too (1.14.1)
         m_editor->viewport()->update();
     }
     updatePageLabel();
@@ -5913,7 +5920,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         auto *we = static_cast<QWheelEvent *>(event);
         if (we->modifiers() & Qt::ControlModifier) {
             const int dy = we->angleDelta().y();
-            if (dy != 0 && m_fullPageView && !m_markdownMode) {
+            if (dy != 0) {
                 setViewZoomPercent(dy > 0 ? ViewZoom::stepUp(shownZoomPercent())
                                           : ViewZoom::stepDown(shownZoomPercent()));
             }

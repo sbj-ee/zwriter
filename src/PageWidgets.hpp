@@ -37,11 +37,14 @@ public:
     void setMaxColumnWidth(qreal px);
     qreal maxColumnWidth() const { return m_maxColumn; }
 
-    // View zoom (View > Fit Page to Width). The document keeps its true-size
-    // layout, so lines and pages break exactly as they print; only painting
-    // and pointer positions are scaled. The widget must be sized to the zoomed
-    // page by the caller. cursorRect() and cursorForPosition() stay in
-    // unzoomed document coordinates: convert with toView() / toDocument().
+    // View zoom (View > Zoom, Fit Page to Width). The document keeps its
+    // true-size layout, so pages break exactly as they print; only painting
+    // and pointer positions are scaled. In Full Page view the widget must be
+    // sized to the zoomed page by the caller; in the continuous views (and
+    // Markdown) the text rewraps to the zoomed column and the editor scrolls
+    // itself, with scroll bar values in document pixels. cursorRect() and
+    // cursorForPosition() stay in unzoomed document coordinates: convert with
+    // toView() / toDocument().
     void setZoom(qreal zoom);
     qreal zoom() const { return m_zoom; }
     // Dot leaders across the tab of table-of-contents lines (painted only).
@@ -72,6 +75,7 @@ protected:
     // background colours, which would clash with the theme (text follows it).
     void insertFromMimeData(const QMimeData *source) override;
     void resizeEvent(QResizeEvent *event) override;
+    void scrollContentsBy(int dx, int dy) override;
     void changeEvent(QEvent *event) override;
     void showEvent(QShowEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
@@ -88,12 +92,18 @@ private:
     void reapplyPageSize();
     void updateInset();
     void restartCaretBlink();
+    qreal continuousLayoutWidth() const;
+    void reapplyContinuousWidth();
+    void adjustZoomedScrollBars();
+    void ensureZoomedCaretVisible();
+    QPointF scrollOffset() const;
 
     QSizeF m_pageSize; // invalid until set
     bool m_continuousInset = false;
     QMarginsF m_documentMargins;
     qreal m_maxColumn = 0.0;
     qreal m_zoom = 1.0;
+    bool m_adjustingBars = false;
     std::function<bool(const QByteArray &)> m_plainImageHandler;
     // QTextEdit's own caret blink state is private, so zoomed painting runs
     // its own blink.
