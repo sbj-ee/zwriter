@@ -35,6 +35,12 @@
 #include <QHash>
 #include <QScrollBar>
 #include "ParagraphStyles.hpp"
+#include "StyleFonts.hpp"
+#include "StylesDialog.hpp"
+#include "BookExport.hpp"
+#include <QFontComboBox>
+#include <QFontDatabase>
+#include <QCheckBox>
 #include "PageSettingsDialog.hpp"
 #include "PageSetup.hpp"
 #include "Ruler.hpp"
@@ -3444,6 +3450,215 @@ void testViewZoomAllViews(const QString &root)
     QSettings().setValue(QStringLiteral("view/zoomPercent"), 100);
 }
 
+// Style fonts (1.15.0): Format > Styles… sets a face and size per paragraph
+// style; text follows, the map saves in the ODT, new documents use the app
+// defaults, PDF and EPUB use the configured faces.
+QString pickFamily(const QStringList &wanted, const QString &avoid = QString())
+{
+    const QStringList installed = QFontDatabase::families();
+    for (const QString &f : wanted) {
+        if (f != avoid && installed.contains(f)) {
+            return f;
+        }
+    }
+    for (const QString &f : installed) { // anything else that is not the avoided face
+        if (f != avoid && !QFontDatabase::isFixedPitch(f) && !f.startsWith(QLatin1Char('.'))) {
+            return f;
+        }
+    }
+    return QString();
+}
+
+void testStyleFonts(const QString &root)
+{
+    const QString shots = qEnvironmentVariable("ZW_SHOT_DIR");
+    const QString serif = pickFamily({QStringLiteral("DejaVu Serif"), QStringLiteral("Liberation Serif"),
+                                      QStringLiteral("Noto Serif"), QStringLiteral("Georgia"),
+                                      QStringLiteral("Times New Roman"), QStringLiteral("Times")});
+    const QString sans = pickFamily({QStringLiteral("Liberation Sans"), QStringLiteral("DejaVu Sans"),
+                                     QStringLiteral("Helvetica"), QStringLiteral("Arial"), QStringLiteral("Verdana")},
+                                    serif);
+    check(!serif.isEmpty() && !sans.isEmpty() && serif != sans, "SF two distinct faces installed", serif + QLatin1String(" / ") + sans);
+    {
+        QSettings s;
+        s.remove(QStringLiteral("styleFonts"));
+    }
+    MainWindow w;
+    w.resize(1000, 760);
+    w.show();
+    QApplication::processEvents();
+    QTextEdit *ed = editorOf(w);
+    check(w.styleFonts() == StyleFonts::builtinDefaults(), "SF a new document starts on the built-in fonts");
+    QAction *styles = w.findChild<QAction *>(QStringLiteral("formatStyles"));
+    check(styles && styles->isEnabled(), "SF Format > Styles… exists");
+    QAction *h1 = nullptr;
+    QAction *h2 = nullptr;
+    for (QAction *a : w.findChildren<QAction *>()) {
+        if (a->text() == QLatin1String("Heading &1")) {
+            h1 = a;
+        } else if (a->text() == QLatin1String("Heading &2")) {
+            h2 = a;
+        }
+    }
+    QTest::keyClicks(ed, QStringLiteral("The Lighthouse"));
+    h1->trigger();
+    QTest::keyClick(ed, Qt::Key_Return);
+    QTest::keyClicks(ed, QStringLiteral("A Quiet Harbour"));
+    h2->trigger();
+    QTest::keyClick(ed, Qt::Key_Return);
+    for (QAction *a : w.findChildren<QAction *>()) {
+        if (a->text() == QLatin1String("&Body Text")) {
+            a->trigger();
+        }
+    }
+    QTest::keyClicks(ed, QStringLiteral("The keeper climbed the stair each evening and lit the lamp."));
+    QApplication::processEvents();
+    auto fmtAt = [&](const QString &needle) {
+        QTextCursor c(ed->document());
+        c.setPosition(ed->toPlainText().indexOf(needle) + 2);
+        return c.charFormat();
+    };
+    const qreal h1Before = fmtAt(QStringLiteral("Lighthouse")).fontPointSize();
+    check(h1Before == 22, "SF built-in Heading 1 is 22 pt", QString::number(h1Before));
+
+    StyleFonts::Map map = StyleFonts::builtinDefaults();
+    map[QStringLiteral("Body")] = {serif, 13};
+    map[QStringLiteral("Heading1")] = {sans, 28};
+    map[QStringLiteral("Heading2")] = {serif, 19};
+    ed->document()->setModified(false);
+    w.setStyleFonts(map);
+    QApplication::processEvents();
+    const QTextCharFormat hf = fmtAt(QStringLiteral("Lighthouse"));
+    const QTextCharFormat h2f = fmtAt(QStringLiteral("Harbour"));
+    const QTextCharFormat bf = fmtAt(QStringLiteral("keeper"));
+    check(hf.fontFamilies().toStringList().value(0) == sans && hf.fontPointSize() == 28 && hf.fontWeight() >= QFont::Bold,
+          "SF Heading 1 text takes its face and size (still bold)",
+          hf.fontFamilies().toStringList().value(0) + QLatin1Char(' ') + QString::number(hf.fontPointSize()));
+    check(h2f.fontFamilies().toStringList().value(0) == serif && h2f.fontPointSize() == 19, "SF Heading 2 text");
+    check(bf.fontFamilies().toStringList().value(0) == serif && bf.fontPointSize() == 13, "SF Body Text",
+          bf.fontFamilies().toStringList().value(0) + QLatin1Char(' ') + QString::number(bf.fontPointSize()));
+    check(ed->document()->isModified() && w.windowTitle().contains(QLatin1Char('*')), "SF changing styles marks the document modified",
+          w.windowTitle());
+    check(ed->document()->defaultFont().family() == serif, "SF document font follows Body Text");
+    ed->undo();
+    check(fmtAt(QStringLiteral("Lighthouse")).fontPointSize() == 22, "SF Undo puts the old heading size back");
+    ed->redo();
+    check(fmtAt(QStringLiteral("Lighthouse")).fontPointSize() == 28, "SF Redo");
+    // A new heading uses the configured size and face.
+    QTextCursor end = ed->textCursor();
+    end.movePosition(QTextCursor::End);
+    ed->setTextCursor(end);
+    QTest::keyClick(ed, Qt::Key_Return);
+    QTest::keyClicks(ed, QStringLiteral("Night Watch"));
+    h1->trigger();
+    QApplication::processEvents();
+    const QTextCharFormat nh = fmtAt(QStringLiteral("Night"));
+    check(nh.fontFamilies().toStringList().value(0) == sans && nh.fontPointSize() == 28, "SF Heading 1 applied afterwards uses it too");
+    QTest::keyClick(ed, Qt::Key_Return);
+    for (QAction *a : w.findChildren<QAction *>()) {
+        if (a->text() == QLatin1String("&Body Text")) {
+            a->trigger();
+        }
+    }
+    QTest::keyClicks(ed, QStringLiteral("Fog rolled in from the sea."));
+    QApplication::processEvents();
+
+    // Saved in the document; reopened with it.
+    const QString odt = root + QStringLiteral("/stylefonts.odt");
+    check(w.saveToPathForTest(odt), "SF save odt");
+    {
+        MainWindow w2;
+        check(w2.openPathForTest(odt), "SF reopen odt");
+        check(w2.styleFonts() == map, "SF the document's style fonts come back");
+        QTextEdit *e2 = editorOf(w2);
+        QTextCursor c2(e2->document());
+        c2.setPosition(e2->toPlainText().indexOf(QLatin1String("Lighthouse")) + 2);
+        check(c2.charFormat().fontPointSize() == 28, "SF heading size survives reopen");
+        e2->document()->setModified(false);
+    }
+    // A file without style fonts (pre-1.15) opens on the built-in ones.
+    {
+        MainWindow w3;
+        check(w3.openPathForTest(QStringLiteral(ZW_SOURCE_DIR "/tests/data/nested-spans.odt")), "SF open a legacy odt");
+        check(w3.styleFonts() == StyleFonts::builtinDefaults(), "SF legacy file uses the built-in style fonts");
+        editorOf(w3)->document()->setModified(false);
+    }
+    // PDF export uses the configured faces.
+    const QString pdf = root + QStringLiteral("/stylefonts.pdf");
+    check(w.exportPdfTo(pdf), "SF PDF export");
+    {
+        QFile f(pdf);
+        f.open(QIODevice::ReadOnly);
+        const QByteArray bytes = f.readAll();
+        const QByteArray s1 = QString(serif).remove(QLatin1Char(' ')).toLatin1();
+        const QByteArray s2 = QString(sans).remove(QLatin1Char(' ')).toLatin1();
+        check(bytes.contains(s1) && bytes.contains(s2), "SF PDF embeds the heading and body faces",
+              QString::fromLatin1(s1 + " " + s2));
+    }
+    // EPUB CSS per style.
+    const QString css = BookExport::epubStyleFontCss(map);
+    check(css.contains(QStringLiteral("body { font-family:'%1', serif;font-size:13pt; }").arg(serif))
+              && css.contains(QStringLiteral("h1, h2 { font-family:'%1', sans-serif;font-size:28pt; }").arg(sans))
+              && css.contains(QStringLiteral("h3 {")),
+          "SF EPUB CSS has body and heading rules", css);
+    check(BookExport::epubStyleFontCss(StyleFonts::builtinDefaults()).isEmpty(), "SF built-in fonts: EPUB CSS unchanged");
+
+    // The dialog: shows the map, Reset to Defaults, Save as default.
+    StylesDialog dlg(map, DocumentIo::defaultFontFamilies(), DocumentIo::headingFontFamilies(), &w);
+    check(dlg.map() == map, "SF dialog shows and returns the map");
+    check(dlg.previewHtml().contains(serif) && dlg.previewHtml().contains(QStringLiteral("28pt")), "SF dialog preview");
+    if (!shots.isEmpty()) {
+        QDir().mkpath(shots);
+        dlg.show();
+        dlg.adjustSize();
+        QApplication::processEvents();
+        QTest::qWait(150);
+        dlg.grab().save(shots + QStringLiteral("/styles-dialog.png"));
+        dlg.hide();
+        ed->moveCursor(QTextCursor::Start);
+        QApplication::processEvents();
+        QTest::qWait(200);
+        w.grab().save(shots + QStringLiteral("/styles-document.png"));
+    }
+    StylesDialog reset(map, DocumentIo::defaultFontFamilies(), DocumentIo::headingFontFamilies(), &w);
+    for (QAbstractButton *b : reset.findChildren<QAbstractButton *>()) {
+        if (b->text() == QLatin1String("Reset to Defaults")) {
+            b->click();
+        }
+    }
+    check(reset.map() == StyleFonts::builtinDefaults(), "SF Reset to Defaults");
+    bool got = false;
+    QObject::connect(&reset, &StylesDialog::applied, [&](const StyleFonts::Map &m, bool asDefault) {
+        got = m == StyleFonts::builtinDefaults() && asDefault;
+    });
+    reset.saveAsDefaultBox()->setChecked(true);
+    for (QAbstractButton *b : reset.findChildren<QAbstractButton *>()) {
+        if (b->text().remove(QLatin1Char('&')) == QLatin1String("Apply")) {
+            b->click();
+        }
+    }
+    check(got, "SF Apply emits the map with Save as default");
+
+    // Save as default: the next new document starts with it.
+    w.setStyleFonts(map, true);
+    {
+        MainWindow w4;
+        check(w4.styleFonts() == map, "SF app default applies to a new document");
+        QTest::keyClicks(editorOf(w4), QStringLiteral("x"));
+        QTextCursor c4(editorOf(w4)->document());
+        c4.setPosition(1);
+        check(c4.charFormat().fontFamilies().toStringList().value(0) == serif
+                  || editorOf(w4)->document()->defaultFont().family() == serif,
+              "SF new document types in the default Body Text face");
+        editorOf(w4)->document()->setModified(false);
+    }
+    {
+        QSettings s;
+        s.remove(QStringLiteral("styleFonts"));
+    }
+    ed->document()->setModified(false);
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -3512,6 +3727,11 @@ int main(int argc, char **argv)
     }
     if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_TOC")) { // quick local runs
         testBookToc(dataDir.path());
+        std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
+        return g_failures ? 1 : 0;
+    }
+    if (qEnvironmentVariableIsSet("ZW_TEST_ONLY_STYLEFONTS")) { // quick local runs / screenshots
+        testStyleFonts(dataDir.path());
         std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
         return g_failures ? 1 : 0;
     }
@@ -3608,6 +3828,7 @@ int main(int argc, char **argv)
     testHeadingsRetest(dataDir.path());
     testTocPagesRetest(dataDir.path());
     testBigBookTimings(dataDir.path());
+    testStyleFonts(dataDir.path());
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

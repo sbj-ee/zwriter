@@ -486,6 +486,7 @@ QString page(const QString &title, const QString &body, bool epubNs = false)
 
 // Paragraph CSS -> class name, shared by all chapters (one stylesheet).
 struct Css {
+    StyleFonts::Map fonts = StyleFonts::builtinDefaults();
     QHash<QString, QString> classOf;
     QStringList rules;
     QString classFor(const QTextBlock &b)
@@ -499,7 +500,10 @@ struct Css {
             if (s->weight >= 600) {
                 css += QStringLiteral("font-weight:bold;");
             }
-            if (s->pointSize > 0 && s->pointSize != 12) {
+            const QString styleCss = StyleFonts::css(fonts, s->name);
+            if (!styleCss.isEmpty()) {
+                css += styleCss; // Format > Styles… (1.15.0)
+            } else if (s->pointSize > 0 && s->pointSize != 12) {
                 css += QStringLiteral("font-size:%1em;").arg(QString::number(s->pointSize / 12.0, 'f', 2));
             }
         }
@@ -659,6 +663,22 @@ bool runZip(const QString &dir, const QStringList &args)
 
 } // namespace
 
+QString epubStyleFontCss(const StyleFonts::Map &fonts)
+{
+    // Body Text -> body; Heading 1 -> the chapter title (h1) and h2, Heading 2
+    // -> h3, Heading 3 -> h4 (chapter headings sit one level below the title).
+    QString out;
+    const struct { const char *key; const char *sel; } rules[] = {
+        {"Body", "body"}, {"Heading1", "h1, h2"}, {"Heading2", "h3"}, {"Heading3", "h4, h5, h6"}};
+    for (const auto &r : rules) {
+        const QString c = StyleFonts::css(fonts, QString::fromLatin1(r.key));
+        if (!c.isEmpty()) {
+            out += QStringLiteral("%1 { %2 }\n").arg(QString::fromLatin1(r.sel), c);
+        }
+    }
+    return out.isEmpty() ? out : QStringLiteral("/* Style fonts (Format > Styles…) */\n") + out;
+}
+
 bool writeEpub(const BookManifest &book, const Options &options, const QString &path, QString *error,
                QStringList *skipped)
 {
@@ -675,6 +695,7 @@ bool writeEpub(const BookManifest &book, const Options &options, const QString &
     const QString root = tmp.path();
     const QString title = bookTitle(book);
     Css css;
+    css.fonts = options.styleFonts;
     QStringList manifest, spine, nav;
     QList<EpubImage> images;
 
@@ -752,7 +773,8 @@ bool writeEpub(const BookManifest &book, const Options &options, const QString &
         ".title { font-size: 2.2em; }\n"
         "nav ol { list-style: none; padding-left: 1em; }\n"
         "/* Paragraph styles and indents from the chapters */\n");
-    writeFile(root, QStringLiteral("OEBPS/style.css"), (baseCss + css.rules.join(QLatin1Char('\n')) + QLatin1Char('\n')).toUtf8());
+    writeFile(root, QStringLiteral("OEBPS/style.css"),
+              (baseCss + epubStyleFontCss(options.styleFonts) + css.rules.join(QLatin1Char('\n')) + QLatin1Char('\n')).toUtf8());
 
     const QString uuid = QUuid::createUuidV5(QUuid(QStringLiteral("{6ba7b811-9dad-11d1-80b4-00c04fd430c8}")),
                                              QDir(book.bookDir()).absolutePath())

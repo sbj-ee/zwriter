@@ -19,6 +19,10 @@ struct DocumentMeta {
     QString footerCenter; // empty by default; Format -> Page Numbers sets "{page}"
     QString footerRight;
 
+    // Style fonts (1.15.0): StyleFonts::serialize() JSON, stored in meta.xml as
+    // meta:user-defined "zwriter:style-fonts". Empty = not stored (pre-1.15 file).
+    QString styleFonts;
+
     static QString defaultAuthor();
     void ensureDefaults();
     void touchEdited();

@@ -125,6 +125,9 @@ QString buildMetaXml(const DocumentMeta &meta)
     writeUser(QStringLiteral("zwriter:footer-left"), meta.footerLeft);
     writeUser(QStringLiteral("zwriter:footer-center"), meta.footerCenter);
     writeUser(QStringLiteral("zwriter:footer-right"), meta.footerRight);
+    if (!meta.styleFonts.isEmpty()) {
+        writeUser(QStringLiteral("zwriter:style-fonts"), meta.styleFonts);
+    }
 
     w.writeEndElement(); // office:meta
     w.writeEndElement(); // office:document-meta
@@ -153,7 +156,9 @@ void parseMetaXml(const QByteArray &xml, DocumentMeta *meta)
         } else if (name == QLatin1String("user-defined")) {
             const QString key = reader.attributes().value(QStringLiteral("meta:name")).toString();
             const QString v = reader.readElementText();
-            if (key == QLatin1String("zwriter:header-left")) {
+            if (key == QLatin1String("zwriter:style-fonts")) {
+                meta->styleFonts = v;
+            } else if (key == QLatin1String("zwriter:header-left")) {
                 meta->headerLeft = v;
                 sawHeaderFooter = true;
             } else if (key == QLatin1String("zwriter:header-center")) {
