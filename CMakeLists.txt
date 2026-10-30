@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.14.1 LANGUAGES CXX)
+project(zwriter VERSION 1.15.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -103,6 +103,9 @@ add_executable(zwriter
   src/DocumentIo.cpp
   src/Images.cpp
   src/ParagraphStyles.cpp
+  src/StyleFonts.cpp
+  src/StylesDialog.cpp
+  src/StylesDialog.hpp
   src/ParagraphDialog.cpp
   src/Ruler.cpp
   src/PageSetup.cpp
@@ -304,6 +307,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
@@ -321,6 +325,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.hpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Images.hpp
     src/Alignment.cpp
     src/Alignment.hpp
@@ -335,6 +340,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/ParagraphDialog.cpp
     src/Alignment.cpp
   )
@@ -348,6 +354,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Alignment.cpp
   )
   target_include_directories(toc_preserve_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -363,6 +370,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Alignment.cpp
   )
   target_include_directories(book_toc_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -379,6 +387,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Alignment.cpp
     src/PrintLayout.cpp
   )
@@ -396,6 +405,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Alignment.cpp
     src/PrintLayout.cpp
   )
@@ -410,6 +420,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Alignment.cpp
   )
   target_include_directories(captions_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -423,6 +434,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
@@ -436,6 +448,21 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(regression_test PRIVATE Qt6::Gui)
   add_test(NAME regression COMMAND regression_test)
   set_tests_properties(regression PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+  # Style fonts (1.15.0): per-style font family and size, settings, ODT meta, restyle, CSS.
+  add_executable(stylefonts_test
+    tests/stylefonts_test.cpp
+    src/DocumentIo.cpp
+    src/Images.cpp
+    src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
+    src/Alignment.cpp
+    src/DocumentMeta.cpp
+  )
+  target_include_directories(stylefonts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ZWRITER_GENERATED_DIR})
+  target_link_libraries(stylefonts_test PRIVATE Qt6::Gui)
+  add_test(NAME stylefonts COMMAND stylefonts_test)
+  set_tests_properties(stylefonts PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
   # Paragraph alignment: ODT/RTF round-trip, one-step undo, checked state, print.
   find_package(Qt6 REQUIRED COMPONENTS Widgets)
@@ -455,6 +482,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Images.hpp
     src/DocumentIo.hpp
     src/PrintLayout.cpp
@@ -472,6 +500,7 @@ if(ZWRITER_BUILD_TESTS)
     src/DocumentIo.cpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Images.hpp
     src/DocumentIo.hpp
     src/Alignment.cpp
@@ -556,6 +585,7 @@ if(TARGET Qt6::Widgets)
     src/DocumentIo.hpp
     src/Images.cpp
     src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
     src/Images.hpp
     src/Alignment.cpp
     src/Alignment.hpp

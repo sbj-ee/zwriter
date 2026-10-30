@@ -1,5 +1,7 @@
 #pragma once
 
+#include "StyleFonts.hpp"
+
 // Whole-book export (1.10.0): every chapter of book.json, in book order, as
 // one PDF (also used by Print Book) or one EPUB 3.3.
 //
@@ -45,6 +47,10 @@ struct Options {
     // Without the ToC: still find each chapter's and heading's page (Result::toc),
     // for the editor's own generated table of contents.
     bool pagesOnly = false;
+    // Style fonts (1.15.0) for the EPUB's CSS: a style whose face or size
+    // differs from the built-in default gets a font-family / font-size rule.
+    // PDF and print need nothing here: the chapters' text carries its fonts.
+    StyleFonts::Map styleFonts = StyleFonts::builtinDefaults();
 };
 
 struct TocLine {
@@ -74,6 +80,9 @@ bool writePdf(const BookManifest &book, const Options &options, const QPageLayou
               const QFont &defaultFont, const QString &path, int *pages = nullptr,
               QString *error = nullptr);
 
+// The EPUB's style-font rules (body, h1-h6) for `fonts`; empty when every
+// style uses its built-in face and size (exposed for the tests).
+QString epubStyleFontCss(const StyleFonts::Map &fonts);
 bool writeEpub(const BookManifest &book, const Options &options, const QString &path,
                QString *error = nullptr, QStringList *skipped = nullptr);
 

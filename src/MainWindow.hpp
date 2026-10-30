@@ -1,5 +1,7 @@
 #pragma once
 
+#include "StyleFonts.hpp"
+
 #include "BookExport.hpp"
 #include "BookToc.hpp"
 #include "DocumentIo.hpp"
@@ -66,6 +68,11 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
 
     // Paragraph formatting (1.7.0); public for tests.
+    void showStylesDialog();                    // Format → Styles… (1.15.0)
+    // Style fonts (1.15.0): replaces the document's map, re-formats its text
+    // (one undo step), optionally saves it as the app default.
+    void setStyleFonts(const StyleFonts::Map &map, bool saveAsDefault = false);
+    const StyleFonts::Map &styleFonts() const { return m_styleFonts; }
     void showParagraphDialog();                 // Format → Paragraph… (non-blocking)
     class ParagraphDialog *paragraphDialog() const { return m_paragraphDialog.data(); }
     class Ruler *ruler() const { return m_ruler; }
@@ -464,6 +471,9 @@ private:
     QString m_currentPath;
     DocumentIo::Format m_currentFormat = DocumentIo::Format::Odt;
     DocumentMeta m_meta;
+    StyleFonts::Map m_styleFonts = StyleFonts::builtinDefaults();
+    QAction *m_stylesDialogAction = nullptr;
+    void adoptStyleFonts(const StyleFonts::Map &map); // no restyle, no dirty
     QStringList m_recentFiles;
     QString m_lastDocDir;
     bool m_dirty = false;

@@ -3,6 +3,31 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.15.0] — 2026-10-30
+
+A font and size for every paragraph style.
+
+- **Format → Styles…** sets the font family and point size of Body Text, Heading 1–3, Title,
+  Subtitle, Block Quote, Caption and Bibliography, with a live preview, **Reset to Defaults**,
+  **Save as default for new documents**, and OK / Cancel / Apply. Text already in a style follows
+  it at once (one Undo step); text you gave another font or size by hand keeps it. Applying a
+  heading or named style afterwards uses the configured face and size. Bold / italic per style are
+  unchanged.
+- **Where the settings live.** App-wide defaults in the settings file (`styleFonts/…`); each
+  document keeps its own copy in its ODT `meta.xml` (`meta:user-defined` `zwriter:style-fonts`,
+  JSON), so it looks the same on another machine. New documents start from the app defaults.
+  Files without the entry (older zwriter, LibreOffice, RTF, text) open on the built-in fonts, which
+  is what their text was formatted with; unknown keys are ignored. Changing styles marks the
+  document modified.
+- **Everywhere it shows.** The editor in Full Page and Continuous views, Print and PDF export (the
+  text carries its faces, so the PDF embeds them), the generated table of contents (it follows Body
+  Text's document font), and EPUB export: a style changed from its built-in face or size gets a
+  CSS `font-family` / `font-size` rule (`body`, `h1`–`h6`, named-style classes). EPUBs do not embed
+  fonts (they never have), so a reader without the face falls back to serif / sans-serif. With the
+  built-in fonts the EPUB CSS is unchanged.
+- View zoom stays display-only scaling over these sizes.
+- Markdown documents are plain text in a fixed editor face, so style fonts do not apply to them.
+
 ## [1.14.1] — 2026-10-29
 
 Zoom in every view, on the keys you expect.

@@ -1,5 +1,5 @@
 # Publish a release when a v* tag is pushed (e.g. `git push origin v1.3.1`):
-# build + test on Ubuntu 24.04 and macOS 14, package .deb + .dmg, write
+# build + test on Ubuntu 24.04 and macOS 15, package .deb + .dmg, write
 # SHA256SUMS (lists both packages), sign it with minisign (SHA256SUMS.minisig)
 # and create the GitHub Release. See docs/RELEASING.md.
 #
@@ -119,7 +119,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.publish == 'true'
     name: Build macOS ${{ github.ref_name }}
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read
       id-token: write

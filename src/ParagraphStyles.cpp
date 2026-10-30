@@ -1,4 +1,5 @@
 #include "ParagraphStyles.hpp"
+#include "StyleFonts.hpp"
 
 #include <QTextBlock>
 #include <QTextCursor>
@@ -105,7 +106,12 @@ void apply(QTextCursor cursor, const QString &name)
             bf.setTextIndent(s->indent);
             bf.setTopMargin(s->top);
             bf.setBottomMargin(s->bottom);
-            cf.setFontPointSize(s->pointSize);
+            // Family and size from the style fonts (1.15.0, Format > Styles…).
+            const StyleFonts::Entry fe = StyleFonts::entry(StyleFonts::active(), s->name);
+            cf.setFontPointSize(fe.pointSize);
+            if (!fe.family.isEmpty()) {
+                cf.setFontFamilies(QStringList{fe.family});
+            }
             cf.setFontWeight(s->weight);
             cf.setFontItalic(s->italic);
         } else {

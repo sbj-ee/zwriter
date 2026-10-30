@@ -22,6 +22,14 @@ if(NOT "@ZWRITER_SODIUM_LIBDIR@" STREQUAL "")
 endif()
 _run("@ZWRITER_MACDEPLOYQT@" "${_app}" -always-overwrite -verbose=1 ${_libpath})
 
+# Newer macdeployqt (Qt 6.12 on Homebrew) no longer always writes qt.conf.
+# Write the standard one so plugin lookup stays pinned inside the bundle.
+if(NOT EXISTS "${_app}/Contents/Resources/qt.conf")
+  message(STATUS "zwriter deploy: writing Contents/Resources/qt.conf")
+  file(WRITE "${_app}/Contents/Resources/qt.conf"
+    "[Paths]\nPlugins = PlugIns\nImports = Resources/qml\nQml2Imports = Resources/qml\n")
+endif()
+
 # Remove any LC_RPATH that points outside the bundle (Homebrew / build tree),
 # so dyld can only resolve @rpath libraries from Contents/Frameworks.
 file(GLOB_RECURSE _machos LIST_DIRECTORIES false "${_app}/Contents/*")

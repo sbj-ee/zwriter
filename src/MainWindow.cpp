@@ -1,6 +1,7 @@
 #include "MainWindow.hpp"
 #include "ParagraphDialog.hpp"
 #include "ParagraphStyles.hpp"
+#include "StylesDialog.hpp"
 #include "BookToc.hpp"
 #include "BookExportDialog.hpp"
 #include "Captions.hpp"
@@ -163,6 +164,10 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     m_meta.ensureDefaults();
+    {
+        QSettings s;
+        adoptStyleFonts(StyleFonts::appDefaults(s)); // new documents start from the app defaults
+    }
 
     m_printer = new QPrinter(QPrinter::HighResolution);
     m_printer->setPageMargins(QMarginsF(25.4, 25.4, 25.4, 25.4), QPageLayout::Millimeter);
@@ -912,6 +917,12 @@ void MainWindow::createFormatActions()
         }
     });
 
+    // Styles… (1.15.0): font family and size per paragraph style.
+    m_stylesDialogAction = new QAction(QStringLiteral("St&yles…"), this);
+    m_stylesDialogAction->setObjectName(QStringLiteral("formatStyles"));
+    m_stylesDialogAction->setToolTip(QStringLiteral("Font and size for Body Text, headings and the other styles"));
+    connect(m_stylesDialogAction, &QAction::triggered, this, &MainWindow::showStylesDialog);
+
     // Paragraph… dialog and indent steps.
     m_paragraphDialogAction = new QAction(QStringLiteral("&Paragraph…"), this);
     m_paragraphDialogAction->setObjectName(QStringLiteral("formatParagraph"));
@@ -995,6 +1006,7 @@ void MainWindow::buildFormatMenu()
     for (QAction *a : m_namedStyleActions) {
         styleMenu->addAction(a);
     }
+    m_formatMenu->addAction(m_stylesDialogAction);
     m_formatMenu->addAction(m_paragraphDialogAction);
     m_formatMenu->addAction(m_indentAction);
     m_formatMenu->addAction(m_outdentAction);
@@ -1883,11 +1895,16 @@ QFont MainWindow::richDocumentFont() const
 {
     // Shipping default: Courier, 12 pt (falls back through Courier-class monospace
     // faces; user can switch via toolbar).
+    // 1.15.0: Body Text's face and size from Format > Styles….
+    const StyleFonts::Entry body = StyleFonts::entry(m_styleFonts, QStringLiteral("Body"));
     QFont font;
-    font.setFamilies(DocumentIo::defaultFontFamilies());
-    font.setPointSize(kDefaultBodyPointSize);
-    font.setStyleHint(QFont::TypeWriter);
-    font.setFixedPitch(true);
+    font.setFamilies(StyleFonts::families(m_styleFonts, QStringLiteral("Body"), DocumentIo::defaultFontFamilies(),
+                                          DocumentIo::headingFontFamilies()));
+    font.setPointSizeF(body.pointSize);
+    if (body.family.isEmpty()) {
+        font.setStyleHint(QFont::TypeWriter);
+        font.setFixedPitch(true);
+    }
     return font;
 }
 
@@ -3286,6 +3303,10 @@ void MainWindow::startNewDocument(bool markdown)
     DocumentIo::resetMarkdownFileFormat(m_editor->document()); // LF, no BOM
     m_meta = DocumentMeta{};
     m_meta.ensureDefaults();
+    {
+        QSettings s;
+        adoptStyleFonts(StyleFonts::appDefaults(s));
+    }
     forgetPageNumberState();
     setDocumentPageSize(QPageSize(PageSetup::newDocumentSizeId()), false);
     setMarkdownMode(markdown);
@@ -3438,26 +3459,28 @@ void MainWindow::applyHeading()
     // Body Text / Heading replaces a named style (Title, Bibliography, ...).
     ParagraphStyles::apply(m_editor->textCursor(), QString());
 
+    // Size and face per style from Format > Styles… (1.15.0; built in:
+    // Body 12, Heading 1 22, Heading 2 17, Heading 3 13 pt).
+    const QString styleKey = StyleFonts::keyFor(level, QString());
+    const StyleFonts::Entry styleFont = StyleFonts::entry(m_styleFonts, styleKey);
     QTextCharFormat charFmt;
+    charFmt.setFontPointSize(styleFont.pointSize);
     if (level == 0) {
-        charFmt.setFontPointSize(kDefaultBodyPointSize);
         charFmt.setFontWeight(QFont::Normal);
-    } else if (level == 1) {
-        charFmt.setFontPointSize(22);
-        charFmt.setFontWeight(QFont::Bold);
-    } else if (level == 2) {
-        charFmt.setFontPointSize(17);
-        charFmt.setFontWeight(QFont::Bold);
+        if (!styleFont.family.isEmpty()) {
+            charFmt.setFontFamilies(StyleFonts::families(m_styleFonts, styleKey, DocumentIo::defaultFontFamilies(),
+                                                         DocumentIo::headingFontFamilies()));
+        }
     } else {
-        // Heading 3: smaller and italic, so it reads apart from Heading 2.
-        charFmt.setFontPointSize(13);
         charFmt.setFontWeight(QFont::Bold);
-        charFmt.setFontItalic(true);
-    }
-    if (level > 0) {
+        // Heading 3: smaller and italic, so it reads apart from Heading 2.
+        if (level >= 3) {
+            charFmt.setFontItalic(true);
+        }
         // A heading uses the heading face (as a new chapter's title does),
         // whatever face the text had: typed after a Courier run, it used to stay Courier.
-        charFmt.setFontFamilies(DocumentIo::headingFontFamilies());
+        charFmt.setFontFamilies(StyleFonts::families(m_styleFonts, styleKey, DocumentIo::defaultFontFamilies(),
+                                                     DocumentIo::headingFontFamilies()));
     }
 
     // Apply to every block the selection touches. The style has to reach the
@@ -3751,6 +3774,7 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
         }
         const qreal bodyPt = body.pointSizeF() > 0 ? body.pointSizeF() : qreal(kDefaultBodyPointSize);
         page.fontPointSize = qMax(8.0, bodyPt - 2.0); // as paintHeaderFooter()
+        m_meta.styleFonts = StyleFonts::serialize(m_styleFonts);
         if (!OdtMeta::writeToOdt(path, m_meta, &metaErr, page)) {
             statusBar()->showMessage(
                 metaErr.isEmpty() ? QStringLiteral("Saved (metadata patch skipped)")
@@ -3848,6 +3872,13 @@ bool MainWindow::openPath(const QString &path)
     if (fmt == DocumentIo::Format::Odt) {
         OdtMeta::readFromOdt(path, &m_meta);
         m_meta.ensureDefaults();
+    }
+    {
+        // The file's style fonts (1.15.0). A file without them (older zwriter,
+        // LibreOffice, RTF, text) was formatted with the built-in faces.
+        StyleFonts::Map map = StyleFonts::builtinDefaults();
+        StyleFonts::parse(m_meta.styleFonts, &map);
+        adoptStyleFonts(map);
     }
     forgetPageNumberState();
     {
@@ -4353,7 +4384,9 @@ bool MainWindow::exportBookEpubTo(const QString &path, const BookExport::Options
     }
     QString err;
     QStringList skipped;
-    const bool ok = BookExport::writeEpub(m_book->book(), options, path, &err, &skipped);
+    BookExport::Options withFonts = options;
+    withFonts.styleFonts = m_styleFonts; // EPUB CSS per style (1.15.0)
+    const bool ok = BookExport::writeEpub(m_book->book(), withFonts, path, &err, &skipped);
     if (ok) {
         rememberBookExportDir(path);
     }
@@ -6181,6 +6214,63 @@ void MainWindow::syncStyleControls()
     if (m_styleLabel) {
         m_styleLabel->setText(m_markdownMode || !m_styleCombo ? QString() : m_styleCombo->itemText(index));
     }
+}
+
+void MainWindow::adoptStyleFonts(const StyleFonts::Map &map)
+{
+    m_styleFonts = map;
+    StyleFonts::setActive(map); // Format > Paragraph Style's named styles
+}
+
+void MainWindow::setStyleFonts(const StyleFonts::Map &map, bool saveAsDefault)
+{
+    if (saveAsDefault) {
+        QSettings s;
+        StyleFonts::saveAppDefaults(s, map);
+    }
+    const StyleFonts::Map old = m_styleFonts;
+    bool changed = false;
+    for (const QString &k : StyleFonts::keys()) {
+        changed = changed || StyleFonts::entry(old, k) != StyleFonts::entry(map, k);
+    }
+    if (!changed) {
+        return;
+    }
+    adoptStyleFonts(map);
+    if (!m_markdownMode && m_editor) {
+        // Text already in each style follows it (one undo step); the
+        // document's default font is Body Text's, for new typing.
+        StyleFonts::restyle(m_editor->document(), old, map, DocumentIo::defaultFontFamilies(),
+                            DocumentIo::headingFontFamilies());
+        const QFont body = richDocumentFont();
+        m_editor->document()->setDefaultFont(body);
+        if (m_editor->textCursor().blockFormat().headingLevel() == 0
+            && ParagraphStyles::styleOf(m_editor->textCursor().blockFormat()).isEmpty()) {
+            QTextCharFormat cf = m_editor->currentCharFormat();
+            cf.setFontFamilies(body.families());
+            cf.setFontPointSize(body.pointSizeF());
+            m_editor->setCurrentCharFormat(cf);
+        }
+    }
+    // The map is saved in the file, so a change is an edit even when no text
+    // was in a changed style.
+    m_metaDirty = true;
+    markDirty();
+    syncFormatActions();
+    if (m_editor) {
+        m_editor->viewport()->update();
+    }
+}
+
+void MainWindow::showStylesDialog()
+{
+    auto *dlg = new StylesDialog(m_styleFonts, DocumentIo::defaultFontFamilies(), DocumentIo::headingFontFamilies(),
+                                 this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+    dlg->setWindowModality(Qt::WindowModal);
+    connect(dlg, &StylesDialog::applied, this,
+            [this](const StyleFonts::Map &map, bool asDefault) { setStyleFonts(map, asDefault); });
+    dlg->show();
 }
 
 void MainWindow::showParagraphDialog()
