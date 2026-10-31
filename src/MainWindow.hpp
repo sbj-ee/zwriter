@@ -160,6 +160,7 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private slots:
     void updateStats();
@@ -486,6 +487,8 @@ private:
     bool m_chromeVisible = false;
     bool m_hideAwayPinned = true;      // default: toolbar/menus/status stay visible
     bool m_pageGuides = false;
+    // Full screen at last exit (1.17.0): re-entered once, after the first show.
+    bool m_restoreFullScreen = false;
     bool m_fullPageView = true;        // default ON — paper page frame
     bool m_fitPageWidth = false;       // default OFF — page shown at true size
     bool m_typewriterScroll = true;   // default ON — distraction-free
