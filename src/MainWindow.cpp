@@ -41,6 +41,7 @@
 #include "ViewZoom.hpp"
 #include <QActionGroup>
 #include <QCloseEvent>
+#include <QShowEvent>
 #include <QContextMenuEvent>
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -452,6 +453,13 @@ MainWindow::MainWindow(QWidget *parent)
     buildViewMenu();
     buildHelpMenu();
     buildFormatToolbar();
+    // 1.17.0: restore the toolbar/dock layout once every bar exists (each has
+    // an objectName, which QMainWindow::restoreState keys on).
+    restoreState(QSettings().value(QStringLiteral("window/state")).toByteArray());
+    if (m_pageGuidesAction) {
+        const QSignalBlocker b(m_pageGuidesAction);
+        m_pageGuidesAction->setChecked(m_pageGuides);
+    }
 
     m_hideTimer = new QTimer(this);
     m_hideTimer->setSingleShot(true);
@@ -569,6 +577,9 @@ void MainWindow::loadSettings()
     }
     m_recentFiles = s.value(QStringLiteral("files/recent")).toStringList();
     m_lastDocDir = s.value(QStringLiteral("files/lastDir")).toString();
+    // 1.17.0: page guides and full screen carry over to the next session.
+    m_pageGuides = s.value(QStringLiteral("view/pageGuides"), false).toBool();
+    m_restoreFullScreen = s.value(QStringLiteral("window/fullScreen"), false).toBool();
 }
 
 void MainWindow::saveSettings() const
@@ -584,6 +595,12 @@ void MainWindow::saveSettings() const
     s.setValue(QStringLiteral("markdown/chromePinned"),
                m_markdownMode ? m_hideAwayPinned : m_markdownChromePinned);
     s.setValue(QStringLiteral("window/geometry"), saveGeometry());
+    // 1.17.0: toolbar/dock layout, full screen and page guides persist.
+    s.setValue(QStringLiteral("window/state"), saveState());
+    if (isVisible()) { // a window that was never shown says nothing about full screen
+        s.setValue(QStringLiteral("window/fullScreen"), isFullScreen());
+    }
+    s.setValue(QStringLiteral("view/pageGuides"), m_pageGuides);
     if (m_keySounds) {
         s.setValue(QStringLiteral("view/keySounds"), m_keySounds->isEnabled());
     }
@@ -1210,6 +1227,7 @@ void MainWindow::buildViewMenu()
     m_viewMenu->addAction(m_symbolAutocompleteAction);
     m_viewMenu->addAction(m_mathReplaceAction);
     m_pageGuidesAction = m_viewMenu->addAction(QStringLiteral("Page &Guides"));
+    m_pageGuidesAction->setObjectName(QStringLiteral("viewPageGuides"));
     m_pageGuidesAction->setCheckable(true);
     // Ctrl+G is Find Next on Linux; keep guides on their own chord.
     m_pageGuidesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G));
@@ -1325,6 +1343,7 @@ void MainWindow::buildViewMenu()
     connect(m_bookAction, &QAction::triggered, this, &MainWindow::toggleBook);
 
     auto *fullscreenAct = m_viewMenu->addAction(QStringLiteral("Full Sc&reen"));
+    fullscreenAct->setObjectName(QStringLiteral("viewFullScreen"));
     fullscreenAct->setShortcut(QKeySequence(Qt::Key_F11));
     connect(fullscreenAct, &QAction::triggered, this, &MainWindow::toggleFullscreen);
 
@@ -2393,6 +2412,23 @@ void MainWindow::toggleFullscreen()
         showNormal();
     } else {
         showFullScreen();
+    }
+    QSettings().setValue(QStringLiteral("window/fullScreen"), isFullScreen());
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+    if (m_restoreFullScreen) {
+        // Full screen from the last session (1.17.0), applied after the first
+        // show so the window manager sees a mapped window and the normal
+        // geometry restored above stays the one to return to.
+        m_restoreFullScreen = false;
+        QTimer::singleShot(0, this, [this]() {
+            if (!isFullScreen()) {
+                showFullScreen();
+            }
+        });
     }
 }
 
@@ -4924,6 +4960,7 @@ void MainWindow::applyFullPageView()
 void MainWindow::togglePageGuides()
 {
     m_pageGuides = m_pageGuidesAction && m_pageGuidesAction->isChecked();
+    QSettings().setValue(QStringLiteral("view/pageGuides"), m_pageGuides);
     m_editor->viewport()->update();
 }
 

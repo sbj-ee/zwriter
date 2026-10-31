@@ -89,6 +89,10 @@
 #include <QTextDocument>
 #include <QTextEdit>
 #include <QToolBar>
+#include <functional>
+#include <QDockWidget>
+#include <QStandardPaths>
+#include <QElapsedTimer>
 #include <QContextMenuEvent>
 #include <QGraphicsEffect>
 #include <QTimer>
@@ -3659,6 +3663,93 @@ void testStyleFonts(const QString &root)
     ed->document()->setModified(false);
 }
 
+// 1.17.0: page guides, full screen and the toolbar layout carry over to the
+// next session (set, close the window, make a new one, compare).
+static void spWait(const std::function<bool()> &done)
+{
+    QElapsedTimer t;
+    t.start();
+    while (!done() && t.elapsed() < 4000) {
+        QApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+    QApplication::processEvents();
+}
+
+void testSettingsPersist()
+{
+    {
+        QSettings s;
+        s.remove(QStringLiteral("view/pageGuides"));
+        s.remove(QStringLiteral("window/fullScreen"));
+        s.remove(QStringLiteral("window/state"));
+    }
+    {
+        auto *w = new MainWindow;
+        w->show();
+        QApplication::processEvents();
+        auto *guides = w->findChild<QAction *>(QStringLiteral("viewPageGuides"));
+        check(guides && !guides->isChecked(), "SP page guides off by default");
+        check(!w->isFullScreen(), "SP not full screen by default");
+        auto *fs = w->findChild<QAction *>(QStringLiteral("viewFullScreen"));
+        check(fs != nullptr, "SP Full Screen action exists");
+        auto *bar = w->findChild<QToolBar *>(QStringLiteral("formatBar"));
+        check(bar != nullptr, "SP format toolbar has an objectName");
+        for (QToolBar *t : w->findChildren<QToolBar *>()) {
+            check(!t->objectName().isEmpty(), "SP every toolbar has an objectName");
+        }
+        for (QDockWidget *d : w->findChildren<QDockWidget *>()) {
+            check(!d->objectName().isEmpty(), "SP every dock has an objectName");
+        }
+        if (guides) guides->trigger();
+        if (fs) fs->trigger();
+        spWait([w]() { return w->isFullScreen(); });
+        if (bar) w->addToolBar(Qt::BottomToolBarArea, bar);
+        QApplication::processEvents();
+        w->close();
+        delete w;
+    }
+    {
+        QSettings s;
+        check(s.value(QStringLiteral("view/pageGuides")).toBool(), "SP pageGuides saved");
+        check(s.value(QStringLiteral("window/fullScreen")).toBool(), "SP fullScreen saved");
+        check(!s.value(QStringLiteral("window/state")).toByteArray().isEmpty(), "SP window state saved");
+    }
+    {
+        auto *w = new MainWindow;
+        w->show();
+        spWait([w]() { return w->windowState().testFlag(Qt::WindowFullScreen); });
+        auto *guides = w->findChild<QAction *>(QStringLiteral("viewPageGuides"));
+        check(guides && guides->isChecked(), "SP page guides restored after restart");
+        check(w->windowState().testFlag(Qt::WindowFullScreen), "SP full screen restored after restart");
+        auto *bar = w->findChild<QToolBar *>(QStringLiteral("formatBar"));
+        check(bar && w->toolBarArea(bar) == Qt::BottomToolBarArea, "SP toolbar area restored after restart");
+        // Undo it all and confirm the next session is back to defaults.
+        if (guides) guides->trigger();
+        if (auto *fs = w->findChild<QAction *>(QStringLiteral("viewFullScreen"))) fs->trigger();
+        spWait([w]() { return !w->isFullScreen(); });
+        if (bar) w->addToolBar(Qt::TopToolBarArea, bar);
+        w->close();
+        delete w;
+    }
+    {
+        auto *w = new MainWindow;
+        w->show();
+        QApplication::processEvents();
+        QApplication::processEvents();
+        auto *guides = w->findChild<QAction *>(QStringLiteral("viewPageGuides"));
+        check(guides && !guides->isChecked(), "SP page guides off persists");
+        check(!w->windowState().testFlag(Qt::WindowFullScreen), "SP windowed persists");
+        auto *bar = w->findChild<QToolBar *>(QStringLiteral("formatBar"));
+        check(bar && w->toolBarArea(bar) == Qt::TopToolBarArea, "SP toolbar back on top");
+        w->close();
+        delete w;
+    }
+    QSettings s;
+    s.remove(QStringLiteral("view/pageGuides"));
+    s.remove(QStringLiteral("window/fullScreen"));
+    s.remove(QStringLiteral("window/state"));
+}
+
 int main(int argc, char **argv)
 {
     QTemporaryDir settingsDir;
@@ -3669,6 +3760,7 @@ int main(int argc, char **argv)
     }
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+    QStandardPaths::setTestModeEnabled(true);
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("sbj-ee-test"));
     QApplication::setApplicationName(QStringLiteral("zwriter-mainwindow-test"));
@@ -3829,6 +3921,7 @@ int main(int argc, char **argv)
     testTocPagesRetest(dataDir.path());
     testBigBookTimings(dataDir.path());
     testStyleFonts(dataDir.path());
+    testSettingsPersist();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
 }

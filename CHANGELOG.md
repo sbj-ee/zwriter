@@ -3,6 +3,17 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.17.0] — 2026-10-31
+
+Settings carry over to the next session.
+
+- **Page Guides** (View → Page Guides) are remembered (`view/pageGuides`).
+- **Full Screen** is remembered (`window/fullScreen`) and re-entered after the window first shows.
+- **Toolbar and dock layout** is saved with `QMainWindow::saveState` (`window/state`) and restored
+  once the bars are built; every toolbar/dock has an objectName.
+- Margins are unchanged: they stay a global setting.
+- Tests: `mainwindow_test` sets each one, closes the window, makes a new one and checks it came back.
+
 ## [1.16.0] — 2026-10-31
 
 Tables: column widths, merged cells and repeating header rows.
