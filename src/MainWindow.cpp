@@ -3922,18 +3922,11 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
         }
     }
 
-    QString error;
-    if (!DocumentIo::save(doc, path, format, &error)) {
-        QMessageBox::warning(this, QStringLiteral("Save failed"), error);
-        return false;
-    }
-
-    if (format == DocumentIo::Format::Markdown && m_markdownMode) {
-        offerAssetCleanup(path, DocumentIo::markdownText(doc));
-    }
-
+    // ODT: meta.xml and styles.xml (page layout, header/footer) are written
+    // into the temp file before it replaces the target, so a failed patch
+    // fails the save and the file on disk is left as it was.
+    DocumentIo::SavePatch patch;
     if (format == DocumentIo::Format::Odt) {
-        QString metaErr;
         OdtPageStyle page;
         if (m_printer) {
             const QPageLayout layout = m_printer->pageLayout();
@@ -3948,12 +3941,29 @@ bool MainWindow::saveToPath(const QString &path, DocumentIo::Format format)
         const qreal bodyPt = body.pointSizeF() > 0 ? body.pointSizeF() : qreal(kDefaultBodyPointSize);
         page.fontPointSize = qMax(8.0, bodyPt - 2.0); // as paintHeaderFooter()
         m_meta.styleFonts = StyleFonts::serialize(m_styleFonts);
-        if (!OdtMeta::writeToOdt(path, m_meta, &metaErr, page)) {
-            statusBar()->showMessage(
-                metaErr.isEmpty() ? QStringLiteral("Saved (metadata patch skipped)")
-                                  : metaErr,
-                4000);
-        }
+        const DocumentMeta meta = m_meta;
+        patch = [meta, page](const QString &tempPath, QString *err) {
+            QString metaErr;
+            if (!OdtMeta::writeToOdt(tempPath, meta, &metaErr, page)) {
+                if (err) {
+                    *err = QStringLiteral("Could not write the document's metadata and page layout (%1)")
+                               .arg(metaErr.isEmpty() ? QStringLiteral("unknown error") : metaErr);
+                }
+                return false;
+            }
+            return true;
+        };
+    }
+
+    QString error;
+    if (!DocumentIo::save(doc, path, format, &error, patch)) {
+        QMessageBox::warning(this, QStringLiteral("Save failed"),
+                             error + QStringLiteral("\n\nThe file on disk was not changed."));
+        return false;
+    }
+
+    if (format == DocumentIo::Format::Markdown && m_markdownMode) {
+        offerAssetCleanup(path, DocumentIo::markdownText(doc));
     }
 
     if (changesMode) {

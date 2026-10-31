@@ -451,7 +451,12 @@ bool writeToOdt(const QString &odtPath, const DocumentMeta &meta, QString *error
         return false;
     }
     const QByteArray xml = buildMetaXml(meta).toUtf8();
-    metaFile.write(xml);
+    if (metaFile.write(xml) != xml.size()) {
+        if (error) {
+            *error = QStringLiteral("Could not write meta.xml.");
+        }
+        return false;
+    }
     metaFile.close();
 
     QFile stylesFile(dir.filePath(QStringLiteral("styles.xml")));
@@ -515,6 +520,8 @@ bool writeToOdt(const QString &odtPath, const DocumentMeta &meta, QString *error
         }
     }
 
+    // DocumentIo::save() calls this on its temp file (see MainWindow), so the
+    // user's file is never touched here; a failure fails that save.
     QFile::remove(odtPath);
     if (!QFile::copy(rebuilt, odtPath)) {
         if (error) {

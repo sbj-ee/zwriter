@@ -3,6 +3,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 class QColor;
 class QTextDocument;
 class QTextTable;
@@ -66,6 +68,19 @@ constexpr int TocProperty = 0x100000 + 0x5B01; // QTextFormat::UserProperty + 0x
 constexpr int GeneratedTocProperty = 0x100000 + 0x5C01;
 constexpr int GeneratedTocTitleProperty = 0x100000 + 0x5C02;
 bool load(QTextDocument *doc, const QString &path, QString *error = nullptr);
+// Saving is atomic: the file is built in a hidden temp file next to the
+// target (".<name>.XXXXXX.tmp"), patched and checked there, and only then
+// renamed over the target. The previous file is kept as "<path>.bak". If any
+// step fails (write, ODT heading/picture patch, the caller's patch, the check,
+// the backup or the rename) save() returns false with *error set, the temp
+// file is removed and the target is left exactly as it was.
+// `patch`, when set, runs on the temp file after zwriter's own ODT patches
+// (MainWindow uses it to write meta.xml / styles.xml); returning false fails
+// the save.
+using SavePatch = std::function<bool(const QString &tempPath, QString *error)>;
 bool save(QTextDocument *doc, const QString &path, Format format, QString *error = nullptr);
+bool save(QTextDocument *doc, const QString &path, Format format, QString *error, const SavePatch &patch);
+// The backup save() keeps of the file it replaced: path + ".bak".
+QString backupPath(const QString &path);
 
 } // namespace DocumentIo
