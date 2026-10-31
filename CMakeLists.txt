@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.17.1 LANGUAGES CXX)
+project(zwriter VERSION 1.18.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -95,6 +95,17 @@ target_include_directories(zwriter_update PUBLIC
   ${ZWRITER_GENERATED_DIR}
 )
 target_link_libraries(zwriter_update PUBLIC Qt6::Widgets Qt6::Network PkgConfig::SODIUM)
+
+# In-process zip (vendored miniz) and the XML tree used to patch ODF parts:
+# no `zip` / `unzip` child processes. Linked into the app and every test.
+enable_language(C)
+add_library(miniz STATIC third_party/miniz/miniz.c)
+target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz)
+set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
+add_library(zwriter_odf STATIC src/ZipPackage.cpp src/ZipPackage.hpp src/OdfXml.cpp src/OdfXml.hpp)
+target_include_directories(zwriter_odf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(zwriter_odf PUBLIC Qt6::Core PRIVATE miniz)
+link_libraries(zwriter_odf)
 
 add_executable(zwriter
   src/main.cpp
@@ -486,6 +497,21 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(atomic_save_test PRIVATE Qt6::Gui)
   add_test(NAME atomic_save COMMAND atomic_save_test)
   set_tests_properties(atomic_save PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+  add_executable(odt_package_test
+    tests/odt_package_test.cpp
+    src/DocumentIo.cpp
+    src/Images.cpp
+    src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
+    src/Alignment.cpp
+    src/DocumentMeta.cpp
+    src/PrintLayout.cpp
+  )
+  target_include_directories(odt_package_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${ZWRITER_GENERATED_DIR})
+  target_link_libraries(odt_package_test PRIVATE Qt6::Gui)
+  add_test(NAME odt_package COMMAND odt_package_test)
+  set_tests_properties(odt_package PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
   # Style fonts (1.15.0): per-style font family and size, settings, ODT meta, restyle, CSS.
   add_executable(stylefonts_test

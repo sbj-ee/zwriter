@@ -1,3 +1,4 @@
+#include "ZipPackage.hpp"
 #include "BookExport.hpp"
 
 #include "BookManifest.hpp"
@@ -16,7 +17,6 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QPrinter>
-#include <QProcess>
 #include <QTemporaryDir>
 #include <QTextBlock>
 #include <QTextCursor>
@@ -744,14 +744,6 @@ bool writeFile(const QString &root, const QString &rel, const QByteArray &bytes)
     return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size();
 }
 
-bool runZip(const QString &dir, const QStringList &args)
-{
-    QProcess zip;
-    zip.setWorkingDirectory(dir);
-    zip.start(QStringLiteral("zip"), args);
-    return zip.waitForFinished(60000) && zip.exitStatus() == QProcess::NormalExit && zip.exitCode() == 0;
-}
-
 } // namespace
 
 QString epubStyleFontCss(const StyleFonts::Map &fonts)
@@ -896,9 +888,9 @@ bool writeEpub(const BookManifest &book, const Options &options, const QString &
     const QString out = QFileInfo(path).absoluteFilePath();
     QFile::remove(out);
     // mimetype first and stored (not compressed), as EPUB requires.
-    if (!runZip(root, {QStringLiteral("-X0q"), out, QStringLiteral("mimetype")})
-        || !runZip(root, {QStringLiteral("-Xr9Dq"), out, QStringLiteral("META-INF"), QStringLiteral("OEBPS")})) {
-        return fail(QStringLiteral("Could not write the EPUB (is zip available?)."));
+    QString zipError;
+    if (!ZipPackage::writeDirectory(root, out, QStringLiteral("mimetype"), &zipError)) {
+        return fail(QStringLiteral("Could not write the EPUB (%1).").arg(zipError));
     }
     return true;
 }

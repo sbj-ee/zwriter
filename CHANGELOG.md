@@ -3,6 +3,28 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.18.0] — 2026-10-31
+
+ODT and EPUB packages are read and written in-process: no more `zip` / `unzip` child processes.
+
+- **In-process zip:** vendored [miniz](https://github.com/richgel999/miniz) 3.0.2 (MIT,
+  `third_party/miniz/`) behind a small `ZipPackage` layer. Loading ODT, the heading/table/style
+  patch, the JPEG restore, the `meta.xml` / page-size patch and EPUB export no longer run
+  `zip` or `unzip`. `mimetype` is always the first, stored member.
+- **Single-pass ODT save:** Qt's writer goes to memory, every patch runs on the in-memory package,
+  and the package is written once to the save's temp file; the atomic save and `.bak` are unchanged.
+- **XML patching uses a tree** (`OdfXml`, built on `QXmlStreamReader` / `QXmlStreamWriter`)
+  instead of regular expressions: headings, automatic styles, table columns and header rows,
+  frames/wrap, generated and restored ToCs, fonts, named-style parents, line heights and the
+  manifest. Malformed XML now fails the save instead of being patched blindly.
+- New files are created with the usual mode (0666 less the umask) instead of the temp file's 0600.
+- Packaging: no new dependency. (`zip`/`unzip` were runtime needs that the `.deb` never declared;
+  they are no longer needed. Tests still use them to inspect output.)
+- Tests: `atomic_save` injects the zip-write failure in-process instead of a broken `zip` on
+  `PATH`, and adds a corrupt-package case and a new-file-mode check. New `odt_package` test: zip
+  and XML layer checks, and a save → reopen → save round trip that keeps headings and levels,
+  table cells, header row and column widths, and JPEG pictures byte-for-byte.
+
 ## [1.17.1] — 2026-10-31
 
 Saving is atomic, keeps a backup, and never reports success for a half-finished file.
