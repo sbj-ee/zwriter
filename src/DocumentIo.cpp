@@ -2,6 +2,9 @@
 #include "Images.hpp"
 #include "ParagraphStyles.hpp"
 #include "Alignment.hpp"
+#include "OdfXml.hpp"
+#include "ZipPackage.hpp"
+#include <algorithm>
 
 #include <QStringView>
 
@@ -13,7 +16,6 @@
 #include <QHash>
 #include <QIODevice>
 #include <QFileInfo>
-#include <QProcess>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextDocumentWriter>
@@ -36,6 +38,7 @@
 #include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <cstdio>
+#include <sys/stat.h>
 #include <QSet>
 #include <QTextList>
 #include <QTextFragment>
@@ -1979,18 +1982,15 @@ void applyOdtTableLayouts(QTextDocument *doc, const QList<OdtTableLayout> &layou
 
 bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
 {
-    QProcess proc;
-    proc.start(QStringLiteral("unzip"),
-               {QStringLiteral("-p"), path, QStringLiteral("content.xml")});
-    if (!proc.waitForFinished(15000) || proc.exitStatus() != QProcess::NormalExit
-        || proc.exitCode() != 0) {
+    ZipPackage::Package pkg;
+    QString zipError;
+    if (!pkg.read(path, &zipError)) {
         if (error) {
-            *error = QStringLiteral("Could not read ODT (is unzip available?): %1")
-                         .arg(QString::fromUtf8(proc.readAllStandardError()));
+            *error = QStringLiteral("Could not read ODT: %1").arg(zipError);
         }
         return false;
     }
-    const QByteArray xml = proc.readAllStandardOutput();
+    const QByteArray xml = pkg.member(QStringLiteral("content.xml"));
     if (xml.isEmpty()) {
         if (error) {
             *error = QStringLiteral("ODT content.xml was empty.");
@@ -1998,46 +1998,21 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
         return false;
     }
     // styles.xml is optional: it only adds the alignment of named styles.
-    QByteArray stylesXml;
-    {
-        QProcess styles;
-        styles.start(QStringLiteral("unzip"),
-                     {QStringLiteral("-p"), path, QStringLiteral("styles.xml")});
-        if (styles.waitForFinished(15000) && styles.exitStatus() == QProcess::NormalExit
-            && styles.exitCode() == 0) {
-            stylesXml = styles.readAllStandardOutput();
-        }
-    }
+    const QByteArray stylesXml = pkg.member(QStringLiteral("styles.xml"));
     // Pictures: every package member that decodes as an image becomes a
     // document resource named by its path, which the draw:image hrefs use.
     QSet<QString> imageMembers;
     QHash<QString, QByteArray> imageData;
-    {
-        QProcess list;
-        list.start(QStringLiteral("unzip"), {QStringLiteral("-Z1"), path});
-        if (list.waitForFinished(15000) && list.exitStatus() == QProcess::NormalExit
-            && list.exitCode() == 0) {
-            const QStringList members =
-                QString::fromUtf8(list.readAllStandardOutput()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-            for (QString m : members) {
-                m = m.trimmed();
-                if (m.isEmpty() || m.endsWith(QLatin1Char('/')) || m.endsWith(QLatin1String(".xml"))
-                    || m == QLatin1String("mimetype") || m.startsWith(QLatin1String("META-INF/"))
-                    || !xml.contains(m.toUtf8())) {
-                    continue;
-                }
-                QProcess one;
-                one.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, m});
-                if (!one.waitForFinished(15000) || one.exitCode() != 0) {
-                    continue;
-                }
-                const QByteArray data = one.readAllStandardOutput();
-                if (Images::isDecodable(data)) {
-                    doc->addResource(QTextDocument::ImageResource, QUrl(m), data);
-                    imageMembers.insert(m);
-                    imageData.insert(m, data);
-                }
-            }
+    for (const QString &m : pkg.names()) {
+        if (m.isEmpty() || m.endsWith(QLatin1String(".xml")) || m == QLatin1String("mimetype")
+            || m.startsWith(QLatin1String("META-INF/")) || !xml.contains(m.toUtf8())) {
+            continue;
+        }
+        const QByteArray data = pkg.member(m);
+        if (Images::isDecodable(data)) {
+            doc->addResource(QTextDocument::ImageResource, QUrl(m), data);
+            imageMembers.insert(m);
+            imageData.insert(m, data);
         }
     }
     const OdtTocs tocs = extractOdtTocs(QString::fromUtf8(xml), QString::fromUtf8(stylesXml));
@@ -2109,63 +2084,84 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
 }
 
 // Qt's ODF writer has no notion of headings: every block becomes text:p with
-// an automatic paragraph style named "p<blockFormatIndex>". Rewrite the
-// paragraphs of heading blocks as text:h with text:outline-level so headings
+// an automatic paragraph style named "p<blockFormatIndex>". Rename the
+// paragraphs of heading blocks to text:h with text:outline-level so headings
 // survive a reopen (and LibreOffice sees real headings / outline).
-QString headingPatchedContent(const QString &src, const QHash<QString, int> &headingStyles)
+void patchHeadings(OdfXml::Node &root, const QHash<QString, int> &headingStyles)
 {
-    struct Edit {
-        qint64 pos;
-        qint64 len;
-        QString text;
-    };
-    QList<Edit> edits;
-    QList<QString> openHeadings; // per open text:p: replacement end tag or empty
-    QXmlStreamReader r(src);
-    while (!r.atEnd()) {
-        const auto tok = r.readNext();
-        const bool isTextP = (tok == QXmlStreamReader::StartElement || tok == QXmlStreamReader::EndElement)
-            && r.name() == QLatin1String("p") && r.namespaceUri() == kTextNs;
-        if (!isTextP) {
+    OdfXml::forEachElement(root, [&](OdfXml::Node &n) {
+        if (!n.isElement(QStringLiteral("text:p"))) {
+            return;
+        }
+        const int level = headingStyles.value(n.attribute(QStringLiteral("text:style-name")));
+        if (level > 0) {
+            n.name = QStringLiteral("text:h");
+            n.removeAttribute(QStringLiteral("text:outline-level"));
+            n.attributes.prepend({QStringLiteral("text:outline-level"), QString::number(level)});
+        }
+    });
+}
+
+// Appends style definitions (markup) to office:automatic-styles, creating it
+// before office:body when `create` and it is missing.
+bool appendAutomaticStyles(OdfXml::Node &root, const QString &markup, bool create)
+{
+    std::vector<OdfXml::Node> nodes;
+    if (!OdfXml::parseFragment(markup, &nodes)) {
+        return false;
+    }
+    OdfXml::Node *styles = root.child(QStringLiteral("office:automatic-styles"));
+    if (!styles) {
+        if (!create) {
+            return true;
+        }
+        auto body = std::find_if(root.children.begin(), root.children.end(),
+                                 [](const OdfXml::Node &c) { return c.isElement(QStringLiteral("office:body")); });
+        if (body == root.children.end()) {
+            return true;
+        }
+        styles = &*root.children.insert(body, OdfXml::Node::element(QStringLiteral("office:automatic-styles")));
+    }
+    for (OdfXml::Node &n : nodes) {
+        styles->children.push_back(std::move(n));
+    }
+    return true;
+}
+
+// Paragraphs (text:p / text:h) with an automatic "p<n>" style, in document order.
+struct ParaRef {
+    std::vector<OdfXml::Node> *parent;
+    size_t index;
+    QString style;
+};
+
+void collectStyledParagraphs(std::vector<OdfXml::Node> &list, std::vector<ParaRef> *out)
+{
+    static const QRegularExpression autoStyle(QStringLiteral("^p\\d+$"));
+    for (size_t i = 0; i < list.size(); ++i) {
+        OdfXml::Node &n = list[i];
+        if (n.kind != OdfXml::Node::Element) {
             continue;
         }
-        // characterOffset() is just past the tag; '<' cannot occur inside a
-        // tag, so the tag starts at the last '<' before that.
-        const qint64 end = r.characterOffset();
-        const qint64 start = src.lastIndexOf(QLatin1Char('<'), end - 1);
-        if (start < 0) {
-            return QString();
-        }
-        const QString qname = r.qualifiedName().toString(); // e.g. "text:p"
-        const QString prefix = qname.left(qname.size() - 1);
-        if (tok == QXmlStreamReader::StartElement) {
-            const QString style = r.attributes().value(kTextNs, QStringLiteral("style-name")).toString();
-            const int level = headingStyles.value(style);
-            if (level > 0 && QStringView(src).mid(start).startsWith(QLatin1Char('<') + qname)) {
-                edits.append({start, qname.size() + 1,
-                              QStringLiteral("<%1h %1outline-level=\"%2\"").arg(prefix).arg(level)});
-                openHeadings.append(QStringLiteral("</%1h>").arg(prefix));
-            } else {
-                openHeadings.append(QString());
-            }
-        } else {
-            const QString closer = openHeadings.isEmpty() ? QString() : openHeadings.takeLast();
-            // A self-closing <text:p/> has no end tag of its own: the start-tag
-            // edit already renamed it.
-            if (!closer.isEmpty() && QStringView(src).mid(start).startsWith(QLatin1String("</"))) {
-                edits.append({start, end - start, closer});
+        if (n.isElement(QStringLiteral("text:p")) || n.isElement(QStringLiteral("text:h"))) {
+            const QString style = n.attribute(QStringLiteral("text:style-name"));
+            if (autoStyle.match(style).hasMatch()) {
+                out->push_back({&list, i, style});
+                continue;
             }
         }
+        collectStyledParagraphs(n.children, out);
     }
-    if (r.hasError()) {
-        return QString();
-    }
-    QString out = src;
-    for (auto it = edits.crbegin(); it != edits.crend(); ++it) {
-        out.replace(it->pos, it->len, it->text);
-    }
-    return out;
 }
+
+// Replaces the sibling range [first, last] of `parent` with `nodes`.
+void replaceRange(std::vector<OdfXml::Node> *parent, size_t first, size_t last, std::vector<OdfXml::Node> nodes)
+{
+    parent->erase(parent->begin() + qsizetype(first), parent->begin() + qsizetype(last) + 1);
+    parent->insert(parent->begin() + qsizetype(first), std::make_move_iterator(nodes.begin()),
+                   std::make_move_iterator(nodes.end()));
+}
+
 
 // Column widths and header rows of every table (1.16.0), in document order
 // (pre-order, the order of both table:table elements and collectTables()).
@@ -2202,214 +2198,164 @@ QList<TableSaveInfo> tableSaveInfo(const QList<QTextTable *> &tables)
 // header rows go into table:table-header-rows, which LibreOffice repeats on
 // every page. Qt's own "TableN.k" column styles (width in "%", not valid ODF)
 // are dropped.
-QString tableColumnsPatchedContent(const QString &xml, const QList<TableSaveInfo> &info)
+void patchTableColumnsIn(OdfXml::Node &node, const QList<TableSaveInfo> &info, int *counter, QString *styles)
+{
+    constexpr double kTextWidthCm = 16.51; // 6.5 in
+    for (OdfXml::Node &t : node.children) {
+        if (t.kind != OdfXml::Node::Element) {
+            continue;
+        }
+        if (!t.isElement(QStringLiteral("table:table"))) {
+            patchTableColumnsIn(t, info, counter, styles);
+            continue;
+        }
+        const int index = (*counter)++; // pre-order, as collectTables()
+        const TableSaveInfo *ti = index < info.size() ? &info.at(index) : nullptr;
+        if (ti && !ti->percents.isEmpty()) {
+            auto isColumn = [](const OdfXml::Node &c) { return c.isElement(QStringLiteral("table:table-column")); };
+            t.children.erase(std::remove_if(t.children.begin(), t.children.end(), isColumn), t.children.end());
+            for (OdfXml::Node &group : t.children) {
+                if (group.isElement(QStringLiteral("table:table-columns"))
+                    || group.isElement(QStringLiteral("table:table-header-columns"))) {
+                    group.children.erase(std::remove_if(group.children.begin(), group.children.end(), isColumn),
+                                         group.children.end());
+                }
+            }
+            const QList<double> &p = ti->percents;
+            double sum = 0;
+            for (double v : p) {
+                sum += v;
+            }
+            std::vector<OdfXml::Node> columns;
+            for (int c = 0; c < p.size(); ++c) {
+                const QString name = QStringLiteral("zwTable%1.C%2").arg(index + 1).arg(c + 1);
+                const int rel = qMax(1, qRound(p.at(c) / sum * 65535.0));
+                *styles += QStringLiteral("<style:style style:name=\"%1\" style:family=\"table-column\">"
+                                          "<style:table-column-properties style:column-width=\"%2cm\" "
+                                          "style:rel-column-width=\"%3*\"/></style:style>")
+                               .arg(name, QString::number(kTextWidthCm * p.at(c) / sum, 'f', 3))
+                               .arg(rel);
+                columns.push_back(OdfXml::Node::element(QStringLiteral("table:table-column"),
+                                                        {{QStringLiteral("table:style-name"), name}}));
+            }
+            t.children.insert(t.children.begin(), std::make_move_iterator(columns.begin()),
+                              std::make_move_iterator(columns.end()));
+        }
+        if (ti && ti->headerRows > 0) {
+            std::vector<size_t> rows;
+            for (size_t i = 0; i < t.children.size(); ++i) {
+                if (t.children[i].isElement(QStringLiteral("table:table-row"))) {
+                    rows.push_back(i);
+                }
+            }
+            if (!rows.empty()) {
+                const size_t first = rows.front();
+                const size_t last = rows.at(qMin(size_t(ti->headerRows), rows.size()) - 1);
+                OdfXml::Node header = OdfXml::Node::element(QStringLiteral("table:table-header-rows"));
+                for (size_t i = first; i <= last; ++i) {
+                    header.children.push_back(std::move(t.children[i]));
+                }
+                std::vector<OdfXml::Node> one;
+                one.push_back(std::move(header));
+                replaceRange(&t.children, first, last, std::move(one));
+            }
+        }
+        patchTableColumnsIn(t, info, counter, styles); // nested tables (in cells)
+    }
+}
+
+bool patchTableColumns(OdfXml::Node &root, const QList<TableSaveInfo> &info)
 {
     bool any = false;
     for (const TableSaveInfo &t : info) {
         any = any || !t.percents.isEmpty() || t.headerRows > 0;
     }
     if (!any) {
-        return xml;
+        return true;
     }
-    static const QRegularExpression tag(
-        QStringLiteral(R"(<(/?)table:(table-row|table-column|table)(?=[\s/>])[^>]*?(/?)>)"));
-    struct Open {
-        int index;
-        int rows = 0;
-        bool headerOpen = false;
-        bool dropColumns = false;
-    };
-    QList<Open> stack;
-    QString out;
-    out.reserve(xml.size() + 4096);
-    QString styles;
-    qsizetype last = 0;
     int counter = 0;
-    constexpr double kTextWidthCm = 16.51; // 6.5 in
-    auto it = tag.globalMatch(xml);
-    while (it.hasNext()) {
-        const QRegularExpressionMatch m = it.next();
-        const bool closing = !m.captured(1).isEmpty();
-        const bool selfClosing = !m.captured(3).isEmpty();
-        const QString kind = m.captured(2);
-        out += QStringView(xml).mid(last, m.capturedStart() - last);
-        last = m.capturedEnd();
-        const TableSaveInfo *ti = stack.isEmpty() || stack.last().index >= info.size()
-            ? nullptr : &info.at(stack.last().index);
-        if (kind == QLatin1String("table")) {
-            if (!closing) {
-                Open o{counter++};
-                out += m.captured();
-                if (o.index < info.size() && !info.at(o.index).percents.isEmpty()) {
-                    o.dropColumns = true;
-                    const QList<double> &p = info.at(o.index).percents;
-                    double sum = 0;
-                    for (double v : p) {
-                        sum += v;
-                    }
-                    for (int c = 0; c < p.size(); ++c) {
-                        const QString name = QStringLiteral("zwTable%1.C%2").arg(o.index + 1).arg(c + 1);
-                        const int rel = qMax(1, qRound(p.at(c) / sum * 65535.0));
-                        styles += QStringLiteral("<style:style style:name=\"%1\" style:family=\"table-column\">"
-                                                 "<style:table-column-properties style:column-width=\"%2cm\" "
-                                                 "style:rel-column-width=\"%3*\"/></style:style>")
-                                      .arg(name, QString::number(kTextWidthCm * p.at(c) / sum, 'f', 3))
-                                      .arg(rel);
-                        out += QStringLiteral("<table:table-column table:style-name=\"%1\"/>").arg(name);
-                    }
-                }
-                if (!selfClosing) {
-                    stack << o;
-                }
-            } else {
-                if (!stack.isEmpty()) {
-                    if (stack.last().headerOpen) {
-                        out += QStringLiteral("</table:table-header-rows>");
-                    }
-                    stack.removeLast();
-                }
-                out += m.captured();
-            }
-        } else if (kind == QLatin1String("table-column")) {
-            if (!(stack.isEmpty() || !stack.last().dropColumns)) {
-                if (!selfClosing && !closing) {
-                    // <table:table-column ...></table:table-column>: drop through its end tag
-                    const qsizetype end = xml.indexOf(QLatin1String("</table:table-column>"), last);
-                    if (end >= 0) {
-                        last = end + 21;
-                        // keep the iterator in step
-                        while (it.hasNext() && it.peekNext().capturedStart() < last) {
-                            it.next();
-                        }
-                    }
-                }
-                continue; // ours were written after the table start tag
-            }
-            out += m.captured();
-        } else { // table-row
-            if (!closing && !stack.isEmpty() && ti && ti->headerRows > 0 && stack.last().rows == 0) {
-                out += QStringLiteral("<table:table-header-rows>");
-                stack.last().headerOpen = true;
-            }
-            out += m.captured();
-            if (!stack.isEmpty() && (closing || selfClosing)) {
-                Open &o = stack.last();
-                ++o.rows;
-                if (o.headerOpen && ti && o.rows == ti->headerRows) {
-                    out += QStringLiteral("</table:table-header-rows>");
-                    o.headerOpen = false;
-                }
-            }
-        }
-    }
-    out += QStringView(xml).mid(last);
+    QString styles;
+    patchTableColumnsIn(root, info, &counter, &styles);
     // Qt's own percentage column styles are no longer referenced.
-    static const QRegularExpression qtColumnStyle(
-        QStringLiteral(R"(<style:style style:name="[^"]*" style:family="table-column">\s*<style:table-column-properties[^>]*/>\s*</style:style>)"));
-    QString cleaned;
-    {
-        qsizetype from = 0;
-        auto ci = qtColumnStyle.globalMatch(out);
-        while (ci.hasNext()) {
-            const QRegularExpressionMatch m = ci.next();
-            const QString name = QRegularExpression(QStringLiteral(R"re(style:name="([^"]*)")re")).match(m.captured()).captured(1);
-            if (out.contains(QStringLiteral("table:style-name=\"%1\"").arg(name))) {
-                continue; // still used (a table without stored widths)
-            }
-            cleaned += QStringView(out).mid(from, m.capturedStart() - from);
-            from = m.capturedEnd();
+    QSet<QString> used;
+    OdfXml::forEachElement(root, [&](OdfXml::Node &n) {
+        if (n.hasAttribute(QStringLiteral("table:style-name"))) {
+            used.insert(n.attribute(QStringLiteral("table:style-name")));
         }
-        cleaned += QStringView(out).mid(from);
-    }
-    if (!styles.isEmpty()) {
-        const qsizetype close = cleaned.indexOf(QLatin1String("</office:automatic-styles>"));
-        if (close >= 0) {
-            cleaned.insert(close, styles);
-        } else {
-            const qsizetype body = cleaned.indexOf(QLatin1String("<office:body"));
-            if (body >= 0) {
-                cleaned.insert(body, QStringLiteral("<office:automatic-styles>%1</office:automatic-styles>").arg(styles));
+    });
+    OdfXml::forEachElement(root, [&](OdfXml::Node &n) {
+        auto unusedColumnStyle = [&](const OdfXml::Node &s) {
+            if (!s.isElement(QStringLiteral("style:style"))
+                || s.attribute(QStringLiteral("style:family")) != QLatin1String("table-column")
+                || used.contains(s.attribute(QStringLiteral("style:name")))) {
+                return false;
             }
-        }
-    }
-    return cleaned;
+            int elements = 0;
+            bool onlyProps = true;
+            for (const OdfXml::Node &c : s.children) {
+                if (c.kind == OdfXml::Node::Element) {
+                    ++elements;
+                    onlyProps = onlyProps && c.isElement(QStringLiteral("style:table-column-properties"))
+                        && c.children.empty();
+                }
+            }
+            return elements == 1 && onlyProps;
+        };
+        n.children.erase(std::remove_if(n.children.begin(), n.children.end(), unusedColumnStyle), n.children.end());
+    });
+    return styles.isEmpty() || appendAutomaticStyles(root, styles, true);
 }
 
 // Qt's ODF writer gets tables wrong for zwriter: a 100 % wide table is written
 // as style:width="100pt", and the borders come out as the table border width
 // on every cell. Write the table as full width (rel-width 100 %, aligned to the
 // margins) and the grid as one 0.5 pt light-grey line.
-QString tablePatchedContent(QString xml)
+void patchTableStyles(OdfXml::Node &root)
 {
-    static const QRegularExpression tableProps(
-        QStringLiteral(R"(<style:table-properties\b[^>]*>)"));
-    static const QRegularExpression width(QStringLiteral(R"(\s(?:style:width|style:rel-width|table:align)="[^"]*")"));
-    static const QRegularExpression cellProps(
-        QStringLiteral(R"(<style:table-cell-properties\b[^>]*>)"));
-    static const QRegularExpression border(QStringLiteral(R"(\sfo:border(?:-left|-right|-top|-bottom)?="[^"]*")"));
-    const QString rule = QStringLiteral(" fo:border=\"0.5pt solid %1\"").arg(tableBorderColor().name());
-
-    auto rewrite = [&xml](const QRegularExpression &element, const std::function<QString(QString)> &fix) {
-        QString out;
-        out.reserve(xml.size() + 256);
-        qsizetype last = 0;
-        auto it = element.globalMatch(xml);
-        while (it.hasNext()) {
-            const QRegularExpressionMatch m = it.next();
-            out += QStringView(xml).mid(last, m.capturedStart() - last);
-            out += fix(m.captured());
-            last = m.capturedEnd();
+    const QString rule = QStringLiteral("0.5pt solid %1").arg(tableBorderColor().name());
+    static const QStringList borders{QStringLiteral("fo:border"), QStringLiteral("fo:border-left"),
+                                     QStringLiteral("fo:border-right"), QStringLiteral("fo:border-top"),
+                                     QStringLiteral("fo:border-bottom")};
+    OdfXml::forEachElement(root, [&](OdfXml::Node &n) {
+        if (n.isElement(QStringLiteral("style:table-properties"))) {
+            n.removeAttribute(QStringLiteral("style:width"));
+            n.removeAttribute(QStringLiteral("style:rel-width"));
+            n.removeAttribute(QStringLiteral("table:align"));
+            n.attributes.prepend({QStringLiteral("table:align"), QStringLiteral("margins")});
+            n.attributes.prepend({QStringLiteral("style:rel-width"), QStringLiteral("100%")});
+        } else if (n.isElement(QStringLiteral("style:table-cell-properties"))) {
+            bool had = false;
+            for (const QString &b : borders) {
+                had = n.removeAttribute(b) || had;
+            }
+            if (had) { // Qt also writes unused border-less cell styles
+                n.attributes.prepend({QStringLiteral("fo:border"), rule});
+            }
         }
-        out += QStringView(xml).mid(last);
-        xml = out;
-    };
-    rewrite(tableProps, [&](QString tag) {
-        tag.remove(width);
-        const qsizetype at = tag.indexOf(QLatin1String("style:table-properties")) + 22;
-        tag.insert(at, QStringLiteral(" style:rel-width=\"100%\" table:align=\"margins\""));
-        return tag;
     });
-    rewrite(cellProps, [&](QString tag) {
-        if (!border.match(tag).hasMatch()) {
-            return tag; // Qt also writes unused border-less cell styles
-        }
-        tag.remove(border);
-        const qsizetype at = tag.indexOf(QLatin1String("style:table-cell-properties")) + 27;
-        tag.insert(at, rule);
-        return tag;
-    });
-    return xml;
 }
 
 // Text wrap: Qt writes every picture as an as-char frame. A floating image
 // becomes a char-anchored frame with a graphic style that puts it at the left
 // or right of the paragraph with text running past it (LibreOffice's
 // "Wrap: Page/Optimal" look).
-QString framePatchedContent(const QString &xml, const QList<Images::Wrap> &wraps)
+bool patchFrames(OdfXml::Node &root, const QList<Images::Wrap> &wraps)
 {
-    static const QRegularExpression frame(QStringLiteral(R"(<draw:frame\b[^>]*>)"));
-    static const QRegularExpression anchor(QStringLiteral(R"(\stext:anchor-type="[^"]*")"));
-    QString out;
-    out.reserve(xml.size() + 1024);
-    qsizetype last = 0;
     int index = 0;
-    auto it = frame.globalMatch(xml);
-    while (it.hasNext()) {
-        const QRegularExpressionMatch m = it.next();
-        out += QStringView(xml).mid(last, m.capturedStart() - last);
-        QString tag = m.captured();
+    OdfXml::forEachElement(root, [&](OdfXml::Node &n) {
+        if (!n.isElement(QStringLiteral("draw:frame"))) {
+            return;
+        }
         const Images::Wrap w = index < wraps.size() ? wraps.at(index) : Images::Wrap::Inline;
         ++index;
         if (w != Images::Wrap::Inline) {
-            tag.remove(anchor);
-            tag.insert(11, QStringLiteral(" draw:style-name=\"%1\" text:anchor-type=\"char\"")
-                               .arg(w == Images::Wrap::Left ? QStringLiteral("zwImageLeft")
-                                                            : QStringLiteral("zwImageRight")));
+            n.removeAttribute(QStringLiteral("text:anchor-type"));
+            n.removeAttribute(QStringLiteral("draw:style-name"));
+            n.attributes.prepend({QStringLiteral("text:anchor-type"), QStringLiteral("char")});
+            n.attributes.prepend({QStringLiteral("draw:style-name"),
+                                  w == Images::Wrap::Left ? QStringLiteral("zwImageLeft") : QStringLiteral("zwImageRight")});
         }
-        out += tag;
-        last = m.capturedEnd();
-    }
-    out += QStringView(xml).mid(last);
+    });
     const QString styles = QStringLiteral(
         "<style:style style:name=\"zwImageLeft\" style:family=\"graphic\">"
         "<style:graphic-properties style:wrap=\"right\" style:number-wrapped-paragraphs=\"no-limit\" "
@@ -2419,23 +2365,12 @@ QString framePatchedContent(const QString &xml, const QList<Images::Wrap> &wraps
         "<style:graphic-properties style:wrap=\"left\" style:number-wrapped-paragraphs=\"no-limit\" "
         "style:horizontal-pos=\"right\" style:horizontal-rel=\"paragraph\" style:vertical-pos=\"top\" "
         "style:vertical-rel=\"paragraph\" fo:margin-left=\"0.25cm\" fo:margin-bottom=\"0.1cm\"/></style:style>");
-    const qsizetype close = out.indexOf(QLatin1String("</office:automatic-styles>"));
-    if (close >= 0) {
-        out.insert(close, styles);
-    } else {
-        const qsizetype body = out.indexOf(QLatin1String("<office:body"));
-        if (body >= 0) {
-            out.insert(body, QStringLiteral("<office:automatic-styles>%1</office:automatic-styles>").arg(styles));
-        }
-    }
-    return out;
+    return appendAutomaticStyles(root, styles, true);
 }
 
-// Put the original tables of contents back over the paragraphs that show
-// them (Qt's writer would save them as plain paragraphs).
 // zwriter's generated ToC as a real ODF table of contents: LibreOffice shows
 // the dot leaders, and its page numbers once updated there.
-QString generatedTocContent(const QString &src, const QTextDocument *copy)
+bool patchGeneratedToc(OdfXml::Node &root, const QTextDocument *copy)
 {
     QSet<QString> tocStyles;
     QString title = QStringLiteral("Contents");
@@ -2461,27 +2396,7 @@ QString generatedTocContent(const QString &src, const QTextDocument *copy)
         }
     }
     if (tocStyles.isEmpty()) {
-        return src;
-    }
-    static const QRegularExpression paraRe(QStringLiteral(
-        R"re(<text:(p|h)\b[^>]*?text:style-name="(p\d+)"[^>]*?(?:/>|>.*?</text:\1>))re"),
-        QRegularExpression::DotMatchesEverythingOption);
-    qsizetype start = -1;
-    qsizetype end = -1;
-    auto it = paraRe.globalMatch(src);
-    while (it.hasNext()) {
-        const QRegularExpressionMatch m = it.next();
-        if (tocStyles.contains(m.captured(2))) {
-            if (start < 0) {
-                start = m.capturedStart(0);
-            }
-            end = m.capturedEnd(0);
-        } else if (start >= 0) {
-            break; // one contiguous table
-        }
-    }
-    if (start < 0) {
-        return src;
+        return true;
     }
     QString templates;
     for (int l = 1; l <= maxLevel; ++l) {
@@ -2500,8 +2415,33 @@ QString generatedTocContent(const QString &src, const QTextDocument *copy)
         "</text:index-body></text:table-of-content>")
                             .arg(maxLevel)
                             .arg(title.toHtmlEscaped(), templates, body);
-    QString out = src;
-    out.replace(start, end - start, toc);
+    // The ToC paragraphs: the first run of them (in document order) is
+    // replaced by the text:table-of-content.
+    std::vector<ParaRef> paras;
+    collectStyledParagraphs(root.children, &paras);
+    size_t first = paras.size();
+    size_t last = first;
+    for (size_t i = 0; i < paras.size(); ++i) {
+        if (tocStyles.contains(paras[i].style)) {
+            if (first == paras.size()) {
+                first = i;
+            } else if (paras[i].parent != paras[first].parent) {
+                break; // one contiguous table, under one parent
+            }
+            last = i;
+        } else if (first != paras.size()) {
+            break;
+        }
+    }
+    if (first == paras.size()) {
+        return true;
+    }
+    std::vector<OdfXml::Node> nodes;
+    if (!OdfXml::parseFragment(toc, &nodes)) {
+        return false;
+    }
+    replaceRange(paras[first].parent, paras[first].index, paras[last].index, std::move(nodes));
+
     // Styles: a right tab with dot leaders at the text column's edge.
     QString styles = QStringLiteral(
         "<style:style style:name=\"Sect_zwToc\" style:family=\"section\"><style:section-properties style:editable=\"false\"/></style:style>"
@@ -2519,18 +2459,16 @@ QString generatedTocContent(const QString &src, const QTextDocument *copy)
                       .arg(QString::number(16.0 - 0.6 * (l - 1), 'f', 2))
                       .arg(l == 1 ? QStringLiteral("<style:text-properties fo:font-weight=\"600\"/>") : QString());
     }
-    const qsizetype at = out.indexOf(QLatin1String("</office:automatic-styles>"));
-    if (at >= 0) {
-        out.insert(at, styles);
-    }
-    return out;
+    return appendAutomaticStyles(root, styles, false);
 }
 
-QString tocRestoredContent(const QString &src, const QTextDocument *copy, const QTextDocument *original)
+// Put the original tables of contents back over the paragraphs that show
+// them (Qt's writer would save them as plain paragraphs).
+bool patchRestoredTocs(OdfXml::Node &root, const QTextDocument *copy, const QTextDocument *original)
 {
     const QStringList raw = original->property("zwriter.odtTocs").toStringList();
     if (raw.isEmpty()) {
-        return src;
+        return true;
     }
     QHash<QString, int> styleToToc; // "p<format index>" -> table
     for (QTextBlock b = copy->begin(); b.isValid(); b = b.next()) {
@@ -2540,64 +2478,86 @@ QString tocRestoredContent(const QString &src, const QTextDocument *copy, const 
         }
     }
     if (styleToToc.isEmpty()) {
-        return src; // the table was deleted
+        return true; // the table was deleted
     }
-    static const QRegularExpression paraRe(QStringLiteral(
-        R"re(<text:(p|h)\b[^>]*?text:style-name="(p\d+)"[^>]*?(?:/>|>.*?</text:\1>))re"),
-        QRegularExpression::DotMatchesEverythingOption);
-    QHash<int, QPair<qsizetype, qsizetype>> spans; // table -> [first start, last end)
-    auto it = paraRe.globalMatch(src);
-    while (it.hasNext()) {
-        const QRegularExpressionMatch m = it.next();
-        const auto t = styleToToc.constFind(m.captured(2));
+    std::vector<ParaRef> paras;
+    collectStyledParagraphs(root.children, &paras);
+    struct Span {
+        std::vector<OdfXml::Node> *parent;
+        size_t first;
+        size_t last;
+        size_t order;
+    };
+    QHash<int, Span> spans; // table -> first .. last paragraph (same parent)
+    for (size_t i = 0; i < paras.size(); ++i) {
+        const auto t = styleToToc.constFind(paras[i].style);
         if (t == styleToToc.cend()) {
             continue;
         }
         auto span = spans.find(*t);
         if (span == spans.end()) {
-            spans.insert(*t, {m.capturedStart(0), m.capturedEnd(0)});
-        } else {
-            span->second = m.capturedEnd(0);
+            spans.insert(*t, {paras[i].parent, paras[i].index, paras[i].index, i});
+        } else if (span->parent == paras[i].parent) {
+            span->last = paras[i].index;
         }
     }
     QList<int> order = spans.keys();
-    std::sort(order.begin(), order.end(), [&](int a, int b) { return spans[a].first > spans[b].first; });
-    QString out = src;
-    for (int t : std::as_const(order)) { // back to front keeps offsets valid
-        out.replace(spans[t].first, spans[t].second - spans[t].first, raw.at(t));
+    // Back to front keeps the other spans' indices valid.
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return spans[a].order > spans[b].order; });
+    for (int t : std::as_const(order)) {
+        std::vector<OdfXml::Node> nodes;
+        if (!OdfXml::parseFragment(raw.at(t), &nodes)) {
+            return false;
+        }
+        const Span &s = spans[t];
+        replaceRange(s.parent, s.first, s.last, std::move(nodes));
     }
     // The styles they use, and any namespace the original declared.
     const QString styles = original->property("zwriter.odtTocStyles").toString();
-    if (!styles.isEmpty()) {
-        const qsizetype at = out.indexOf(QLatin1String("</office:automatic-styles>"));
-        if (at >= 0) {
-            out.insert(at, styles);
-        } else {
-            const qsizetype body = out.indexOf(QLatin1String("<office:body"));
-            if (body >= 0) {
-                out.insert(body, QStringLiteral("<office:automatic-styles>%1</office:automatic-styles>").arg(styles));
-            }
+    if (!styles.isEmpty() && !appendAutomaticStyles(root, styles, true)) {
+        return false;
+    }
+    for (const QString &decl : original->property("zwriter.odtTocNs").toStringList()) {
+        const QString name = decl.section(QLatin1Char('='), 0, 0);
+        QString value = decl.section(QLatin1Char('='), 1);
+        if (value.size() >= 2 && value.startsWith(QLatin1Char('"')) && value.endsWith(QLatin1Char('"'))) {
+            value = value.mid(1, value.size() - 2);
+        }
+        if (!name.isEmpty() && !root.hasAttribute(name)) {
+            root.attributes.append({name, value});
         }
     }
-    const qsizetype rootStart = out.indexOf(QLatin1String("<office:document-content"));
-    const qsizetype rootEnd = rootStart >= 0 ? out.indexOf(QLatin1Char('>'), rootStart) : -1;
-    if (rootEnd > 0) {
-        const QString root = out.mid(rootStart, rootEnd - rootStart);
-        QString add;
-        for (const QString &decl : original->property("zwriter.odtTocNs").toStringList()) {
-            const QString prefix = decl.section(QLatin1Char('='), 0, 0);
-            if (!root.contains(prefix + QLatin1Char('='))) {
-                add += QLatin1Char(' ') + decl;
-            }
-        }
-        out.insert(rootEnd, add);
-    }
-    return out;
+    return true;
 }
 
-// Post-process content.xml written by QTextDocumentWriter: headings (text:h)
-// and table styling. Best effort: the document itself is already saved.
-bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error, const QTextDocument *source = nullptr)
+// Adds a file-entry to META-INF/manifest.xml for each path it lacks.
+bool manifestAddEntries(QByteArray *manifest, const QStringList &paths, const QString &mediaType)
+{
+    OdfXml::Node root;
+    if (!OdfXml::parse(*manifest, &root)) {
+        return false;
+    }
+    QSet<QString> have;
+    for (const OdfXml::Node &c : root.children) {
+        if (c.isElement(QStringLiteral("manifest:file-entry"))) {
+            have.insert(c.attribute(QStringLiteral("manifest:full-path")));
+        }
+    }
+    for (const QString &p : paths) {
+        if (!have.contains(p)) {
+            root.children.push_back(OdfXml::Node::element(QStringLiteral("manifest:file-entry"),
+                                                          {{QStringLiteral("manifest:full-path"), p},
+                                                           {QStringLiteral("manifest:media-type"), mediaType}}));
+        }
+    }
+    *manifest = OdfXml::serialize(root);
+    return true;
+}
+
+// Post-process content.xml written by QTextDocumentWriter (in `pkg`, in
+// memory): headings (text:h), tables, wraps, fonts, styles and tables of
+// contents, in one parse of the XML tree. A failure fails the save.
+bool patchOdtContent(QTextDocument *doc, ZipPackage::Package &pkg, QString *error, const QTextDocument *source = nullptr)
 {
     QHash<QString, int> headingStyles;
     for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
@@ -2665,68 +2625,78 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error, co
         }
         return false;
     };
-    QProcess unzip;
-    unzip.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("content.xml")});
-    if (!unzip.waitForFinished(15000) || unzip.exitStatus() != QProcess::NormalExit
-        || unzip.exitCode() != 0) {
-        return fail(QStringLiteral("Headings/tables saved unpatched (unzip unavailable)."));
+    bool found = false;
+    const QByteArray original = pkg.member(QStringLiteral("content.xml"), &found);
+    if (!found) {
+        return fail(QStringLiteral("the package has no content.xml"));
     }
-    const QString original = QString::fromUtf8(unzip.readAllStandardOutput());
-    QString patched = original;
+    OdfXml::Node root;
+    QString xmlError;
+    if (!OdfXml::parse(original, &root, &xmlError)) {
+        return fail(QStringLiteral("could not parse content.xml: %1").arg(xmlError));
+    }
     if (!headingStyles.isEmpty()) {
-        patched = headingPatchedContent(patched, headingStyles);
-        if (patched.isEmpty()) {
-            return fail(QStringLiteral("Headings saved as plain paragraphs (could not parse content.xml)."));
-        }
+        patchHeadings(root, headingStyles);
     }
     if (!tables.isEmpty()) {
-        patched = tablePatchedContent(patched);
-        patched = tableColumnsPatchedContent(patched, tableSaveInfo(tables));
+        patchTableStyles(root);
+        if (!patchTableColumns(root, tableSaveInfo(tables))) {
+            return fail(QStringLiteral("could not write the table columns"));
+        }
     }
-    if (anyFloat) {
-        patched = framePatchedContent(patched, frameWraps);
+    if (anyFloat && !patchFrames(root, frameWraps)) {
+        return fail(QStringLiteral("could not write the picture wraps"));
     }
     if (!textStyleFamilies.isEmpty()) {
-        static const QRegularExpression re(QStringLiteral(
-            R"re((<style:style style:name="(c\d+)" style:family="text">\s*<style:text-properties[^>]*?fo:font-family=")([^"]*)("))re"));
-        QString out;
-        qsizetype last = 0;
-        auto it = re.globalMatch(patched);
-        while (it.hasNext()) {
-            const QRegularExpressionMatch m = it.next();
-            const auto fam = textStyleFamilies.constFind(m.captured(2));
-            if (fam == textStyleFamilies.cend()) {
-                continue;
+        OdfXml::forEachElement(root, [&](OdfXml::Node &n) {
+            if (!n.isElement(QStringLiteral("style:style"))
+                || n.attribute(QStringLiteral("style:family")) != QLatin1String("text")) {
+                return;
             }
-            out += QStringView(patched).mid(last, m.capturedStart(3) - last);
-            out += fam->toHtmlEscaped();
-            last = m.capturedEnd(3);
-        }
-        out += QStringView(patched).mid(last);
-        patched = out;
+            const auto fam = textStyleFamilies.constFind(n.attribute(QStringLiteral("style:name")));
+            if (fam == textStyleFamilies.cend()) {
+                return;
+            }
+            for (OdfXml::Node &c : n.children) {
+                if (c.kind != OdfXml::Node::Element) {
+                    continue;
+                }
+                if (c.isElement(QStringLiteral("style:text-properties")) && c.hasAttribute(QStringLiteral("fo:font-family"))) {
+                    c.setAttribute(QStringLiteral("fo:font-family"), *fam);
+                }
+                break; // only the first child element
+            }
+        });
     }
-    for (auto it = namedStyles.constBegin(); it != namedStyles.constEnd(); ++it) {
-        const QString tag = QStringLiteral("<style:style style:name=\"%1\" style:family=\"paragraph\"").arg(it.key());
-        const qsizetype at = patched.indexOf(tag);
-        if (at >= 0) {
-            patched.insert(at + tag.size(), QStringLiteral(" style:parent-style-name=\"%1\"").arg(it.value()));
-        }
+    if (!namedStyles.isEmpty()) {
+        QSet<QString> done;
+        OdfXml::forEachElement(root, [&](OdfXml::Node &n) {
+            if (!n.isElement(QStringLiteral("style:style"))
+                || n.attribute(QStringLiteral("style:family")) != QLatin1String("paragraph")) {
+                return;
+            }
+            const QString name = n.attribute(QStringLiteral("style:name"));
+            const auto named = namedStyles.constFind(name);
+            if (named != namedStyles.cend() && !done.contains(name)) {
+                n.setAttribute(QStringLiteral("style:parent-style-name"), *named);
+                done.insert(name);
+            }
+        });
     }
     if (anyLineHeight) {
-        patched.replace(QLatin1String(" style:line-height=\""), QLatin1String(" fo:line-height=\""));
+        // Qt writes the non-standard style:line-height; ODF readers want fo:line-height.
+        OdfXml::forEachElement(root, [](OdfXml::Node &n) {
+            n.renameAttribute(QStringLiteral("style:line-height"), QStringLiteral("fo:line-height"));
+        });
     }
-    if (anyGeneratedToc) {
-        patched = generatedTocContent(patched, doc);
+    if (anyGeneratedToc && !patchGeneratedToc(root, doc)) {
+        return fail(QStringLiteral("could not write the table of contents"));
     }
-    if (anyToc && source) {
-        patched = tocRestoredContent(patched, doc, source);
+    if (anyToc && source && !patchRestoredTocs(root, doc, source)) {
+        return fail(QStringLiteral("could not restore the table of contents"));
     }
-    if (patched == original) {
-        return true;
-    }
-    QStringList members{QStringLiteral("content.xml")};
-    QTemporaryDir dir;
-    if (!namedStyles.isEmpty() && dir.isValid()) {
+    pkg.setMember(QStringLiteral("content.xml"), OdfXml::serialize(root));
+    if (!namedStyles.isEmpty()) {
         // styles.xml with the named styles (LibreOffice lists them by name),
         // and its manifest entry.
         QString defs;
@@ -2744,47 +2714,17 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error, co
                         .arg(st.weight >= 600 ? QStringLiteral("bold") : QStringLiteral("normal"),
                              st.italic ? QStringLiteral("italic") : QStringLiteral("normal"));
         }
-        QFile styles(dir.filePath(QStringLiteral("styles.xml")));
-        if (styles.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            styles.write(QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        pkg.setMember(QStringLiteral("styles.xml"),
+                      QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                                         "<office:document-styles xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
                                         "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" "
                                         "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" "
-                                        "office:version=\"1.2\"><office:styles>%1</office:styles></office:document-styles>\n")
-                             .arg(defs).toUtf8());
-            styles.close();
-            members << QStringLiteral("styles.xml");
-            QProcess man;
-            man.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("META-INF/manifest.xml")});
-            if (man.waitForFinished(15000) && man.exitCode() == 0) {
-                QString manifest = QString::fromUtf8(man.readAllStandardOutput());
-                if (!manifest.contains(QLatin1String("\"styles.xml\""))) {
-                    manifest.replace(QLatin1String("</manifest:manifest>"),
-                                     QLatin1String("<manifest:file-entry manifest:media-type=\"text/xml\" "
-                                                   "manifest:full-path=\"styles.xml\"/></manifest:manifest>"));
-                    QDir(dir.path()).mkpath(QStringLiteral("META-INF"));
-                    QFile mf(dir.filePath(QStringLiteral("META-INF/manifest.xml")));
-                    if (mf.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                        mf.write(manifest.toUtf8());
-                        members << QStringLiteral("META-INF/manifest.xml");
-                    }
-                }
-            }
+                                        "office:version=\"1.2\"><office:styles>%1</office:styles></office:document-styles>\n").arg(defs).toUtf8());
+        QByteArray manifest = pkg.member(QStringLiteral("META-INF/manifest.xml"), &found);
+        if (!found || !manifestAddEntries(&manifest, {QStringLiteral("styles.xml")}, QStringLiteral("text/xml"))) {
+            return fail(QStringLiteral("could not update META-INF/manifest.xml"));
         }
-    }
-    QFile content(dir.filePath(QStringLiteral("content.xml")));
-    if (!dir.isValid() || !content.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        return fail(QStringLiteral("Headings/tables saved unpatched (temp dir unavailable)."));
-    }
-    content.write(patched.toUtf8());
-    content.close();
-    // Replace just that member; the stored "mimetype" member stays first.
-    QProcess zip;
-    zip.setWorkingDirectory(dir.path());
-    zip.start(QStringLiteral("zip"), QStringList{QStringLiteral("-X"), QStringLiteral("-q"),
-                                                 QFileInfo(path).absoluteFilePath()} + members);
-    if (!zip.waitForFinished(30000) || zip.exitStatus() != QProcess::NormalExit || zip.exitCode() != 0) {
-        return fail(QStringLiteral("Headings/tables saved unpatched (zip unavailable)."));
+        pkg.setMember(QStringLiteral("META-INF/manifest.xml"), manifest);
     }
     return true;
 }
@@ -2823,7 +2763,7 @@ void spellOutDefaultFamilies(QTextDocument *doc, const QFont &defaultFont)
 // Qt's ODF writer re-encodes every picture as PNG. Put JPEG originals back
 // (photos would grow several times over and lose nothing by staying JPEG):
 // the frame's draw:name is the image resource name, so map frame -> member.
-bool restoreJpegPictures(QTextDocument *doc, const QString &path, QString *error)
+bool restoreJpegPictures(QTextDocument *doc, ZipPackage::Package &pkg, QString *error)
 {
     auto fail = [&](const QString &msg) {
         if (error) {
@@ -2831,13 +2771,13 @@ bool restoreJpegPictures(QTextDocument *doc, const QString &path, QString *error
         }
         return false;
     };
-    QProcess unzip;
-    unzip.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("content.xml")});
-    if (!unzip.waitForFinished(15000) || unzip.exitCode() != 0) {
-        return fail(QStringLiteral("Pictures saved as PNG (unzip unavailable)."));
+    bool found = false;
+    const QByteArray content = pkg.member(QStringLiteral("content.xml"), &found);
+    if (!found) {
+        return fail(QStringLiteral("the package has no content.xml"));
     }
     QHash<QString, QByteArray> jpegs; // member -> original bytes
-    QXmlStreamReader r(unzip.readAllStandardOutput());
+    QXmlStreamReader r(content);
     QString frameName;
     while (!r.atEnd()) {
         if (r.readNext() != QXmlStreamReader::StartElement) {
@@ -2854,46 +2794,28 @@ bool restoreJpegPictures(QTextDocument *doc, const QString &path, QString *error
             frameName.clear();
         }
     }
+    if (r.hasError()) {
+        return fail(QStringLiteral("could not parse content.xml for pictures"));
+    }
     if (jpegs.isEmpty()) {
         return true;
     }
-    QTemporaryDir dir;
-    if (!dir.isValid()) {
-        return fail(QStringLiteral("Pictures saved as PNG (no temp dir)."));
+    const QByteArray manifestXml = pkg.member(QStringLiteral("META-INF/manifest.xml"), &found);
+    OdfXml::Node manifest;
+    if (!found || !OdfXml::parse(manifestXml, &manifest)) {
+        return fail(QStringLiteral("pictures: the package has no readable manifest"));
     }
-    QProcess man;
-    man.start(QStringLiteral("unzip"), {QStringLiteral("-p"), path, QStringLiteral("META-INF/manifest.xml")});
-    if (!man.waitForFinished(15000) || man.exitCode() != 0) {
-        return fail(QStringLiteral("Pictures saved as PNG (no manifest)."));
-    }
-    QString manifest = QString::fromUtf8(man.readAllStandardOutput());
-    QStringList members;
     for (auto it = jpegs.cbegin(); it != jpegs.cend(); ++it) {
-        const QString file = dir.filePath(it.key());
-        QDir().mkpath(QFileInfo(file).absolutePath());
-        QFile f(file);
-        if (!f.open(QIODevice::WriteOnly) || f.write(it.value()) != it.value().size()) {
-            return fail(QStringLiteral("Pictures saved as PNG (temp write failed)."));
+        pkg.setMember(it.key(), it.value());
+    }
+    for (OdfXml::Node &e : manifest.children) {
+        if (e.isElement(QStringLiteral("manifest:file-entry"))
+            && jpegs.contains(e.attribute(QStringLiteral("manifest:full-path")))
+            && e.attribute(QStringLiteral("manifest:media-type")) == QLatin1String("image/png")) {
+            e.setAttribute(QStringLiteral("manifest:media-type"), QStringLiteral("image/jpeg"));
         }
-        members << it.key();
-        static const QRegularExpression entry(QStringLiteral(
-            "manifest:media-type=\"image/png\"(\\s+manifest:full-path=\"%1\")"));
-        const QRegularExpression one(entry.pattern().arg(QRegularExpression::escape(it.key())));
-        manifest.replace(one, QStringLiteral("manifest:media-type=\"image/jpeg\"\\1"));
     }
-    QDir().mkpath(dir.filePath(QStringLiteral("META-INF")));
-    QFile mf(dir.filePath(QStringLiteral("META-INF/manifest.xml")));
-    if (!mf.open(QIODevice::WriteOnly) || mf.write(manifest.toUtf8()) < 0) {
-        return fail(QStringLiteral("Pictures saved as PNG (temp write failed)."));
-    }
-    mf.close();
-    members << QStringLiteral("META-INF/manifest.xml");
-    QProcess zip;
-    zip.setWorkingDirectory(dir.path());
-    zip.start(QStringLiteral("zip"), QStringList{QStringLiteral("-X"), QStringLiteral("-q"), path} + members);
-    if (!zip.waitForFinished(30000) || zip.exitCode() != 0) {
-        return fail(QStringLiteral("Pictures saved as PNG (zip unavailable)."));
-    }
+    pkg.setMember(QStringLiteral("META-INF/manifest.xml"), OdfXml::serialize(manifest));
     return true;
 }
 
@@ -3216,18 +3138,33 @@ bool writeFormat(QTextDocument *doc, const QString &path, Format format, QString
         // out so the file records the face actually shown.
         std::unique_ptr<QTextDocument> copy(doc->clone());
         spellOutDefaultFamilies(copy.get(), doc->defaultFont());
-        if (!saveWithWriter(copy.get(), path, QByteArrayLiteral("odf"), error)) {
-            return false;
+        // Qt's ODF package is built in memory, patched there, and written once.
+        QByteArray odf;
+        {
+            QBuffer buffer(&odf);
+            buffer.open(QIODevice::WriteOnly);
+            QTextDocumentWriter writer(&buffer, QByteArrayLiteral("odf"));
+            if (!writer.write(copy.get())) {
+                return fail(QStringLiteral("Failed to write %1.").arg(path));
+            }
+        }
+        ZipPackage::Package pkg;
+        QString zipError;
+        if (!pkg.readData(odf, &zipError)) {
+            return fail(QStringLiteral("Could not finish the ODT (%1)").arg(zipError));
         }
         // The patches are part of the save: a failed patch fails it (the
         // target is untouched), never a silently degraded file.
         QString headingError;
-        if (!patchOdtContent(copy.get(), path, &headingError, doc)) {
+        if (!patchOdtContent(copy.get(), pkg, &headingError, doc)) {
             return fail(QStringLiteral("Could not finish the ODT (%1)").arg(headingError));
         }
         QString pictureError;
-        if (!restoreJpegPictures(copy.get(), path, &pictureError)) {
+        if (!restoreJpegPictures(copy.get(), pkg, &pictureError)) {
             return fail(QStringLiteral("Could not finish the ODT (%1)").arg(pictureError));
+        }
+        if (!pkg.write(path, &zipError)) {
+            return fail(QStringLiteral("Could not write the ODT (%1)").arg(zipError));
         }
         return true;
     }
@@ -3357,6 +3294,13 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
         return fail(stepError);
     }
 
+    if (!info.exists()) {
+        // QTemporaryFile creates 0600; a new document gets the usual mode
+        // (0666 less the umask), as QFile would have given it.
+        const mode_t mask = ::umask(0);
+        ::umask(mask);
+        ::chmod(QFile::encodeName(tempPath).constData(), 0666 & ~mask);
+    }
     if (info.exists()) {
         // Keep the replaced file's permissions, and a backup of it.
         QFile::setPermissions(tempPath, QFile::permissions(finalPath));

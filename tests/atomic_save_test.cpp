@@ -2,9 +2,10 @@
 // to the target, patches and checks it there, keeps "<path>.bak" and renames
 // over the target only when every step worked. A failed step fails the save
 // and leaves the target (and its .bak) exactly as they were.
-// Needs `unzip` and `zip` on PATH. Run headless (QT_QPA_PLATFORM=offscreen).
+// Zip handling is in-process (1.18.0). Run headless (QT_QPA_PLATFORM=offscreen).
 #include "DocumentIo.hpp"
 #include "DocumentMeta.hpp"
+#include "ZipPackage.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -13,6 +14,7 @@
 #include <QTextDocument>
 
 #include <cstdio>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -47,20 +49,10 @@ QString loadedText(const QString &path)
     return DocumentIo::load(&d, path) ? d.toPlainText() : QStringLiteral("<load failed>");
 }
 
-// Puts a `zip` that always fails first on PATH while alive.
+// Makes every zip write fail (as a full disk would) while alive.
 struct BrokenZip {
-    QTemporaryDir bin;
-    QByteArray oldPath = qgetenv("PATH");
-    BrokenZip()
-    {
-        QFile z(bin.filePath(QStringLiteral("zip")));
-        z.open(QIODevice::WriteOnly);
-        z.write("#!/bin/sh\necho 'zip: simulated failure' >&2\nexit 12\n");
-        z.close();
-        z.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
-        qputenv("PATH", QFile::encodeName(bin.path()) + ':' + oldPath);
-    }
-    ~BrokenZip() { qputenv("PATH", oldPath); }
+    BrokenZip() { ZipPackage::Testing::setFailWrites(true); }
+    ~BrokenZip() { ZipPackage::Testing::setFailWrites(false); }
 };
 
 void formatRoundTrip(const QString &dir, DocumentIo::Format format, const QString &name)
@@ -127,7 +119,7 @@ int main(int argc, char **argv)
         check(leftovers(dir).isEmpty(), "no temp files after meta patch");
     }
 
-    // zip fails: zwriter's own ODT patch and the meta patch both fail the save.
+    // The zip write fails: the ODT save and the meta patch both fail.
     {
         const QByteArray before = readAll(odt);
         const QByteArray bakBefore = readAll(DocumentIo::backupPath(odt));
@@ -184,6 +176,45 @@ int main(int argc, char **argv)
         check(DocumentIo::save(&d, path, DocumentIo::Format::Txt, &err), "save over 0600 file", err);
         const int got = int(QFile::permissions(path));
         check((got & 0xF000) == int(p) && (got & 0x00FF) == 0, "permissions kept");
+    }
+
+    // A corrupt package: the metadata patch fails and leaves it alone; load fails.
+    {
+        const QString bad = dir + QStringLiteral("/corrupt.odt");
+        QFile f(bad);
+        check(f.open(QIODevice::WriteOnly) && f.write("PK\x03\x04 not really a zip") > 0, "write corrupt.odt");
+        f.close();
+        const QByteArray before = readAll(bad);
+        DocumentMeta meta;
+        err.clear();
+        check(!OdtMeta::writeToOdt(bad, meta, &err), "writeToOdt fails on a corrupt package", err);
+        check(readAll(bad) == before, "corrupt package untouched");
+        QTextDocument d;
+        check(!DocumentIo::load(&d, bad, &err), "load fails on a corrupt package", err);
+        // A save whose meta patch hits the corrupt temp is impossible to
+        // construct directly; a patch that corrupts the temp must fail verify.
+        const QByteArray odtBefore = readAll(odt);
+        QTextDocument d2;
+        d2.setPlainText(QStringLiteral("will be corrupted"));
+        check(!DocumentIo::save(&d2, odt, DocumentIo::Format::Odt, &err, [](const QString &t, QString *) {
+                  QFile c(t);
+                  return c.open(QIODevice::WriteOnly | QIODevice::Truncate) && c.write("garbage") == 7;
+              }),
+              "a corrupted temp file fails the check");
+        check(readAll(odt) == odtBefore, "corrupted temp: target untouched");
+    }
+
+    // A new file gets the usual mode (0666 less the umask), not 0600.
+    {
+        const mode_t mask = ::umask(022);
+        const QString path = dir + QStringLiteral("/fresh.odt");
+        QTextDocument d;
+        d.setPlainText(QStringLiteral("fresh"));
+        check(DocumentIo::save(&d, path, DocumentIo::Format::Odt, &err), "save a new file", err);
+        struct stat st {};
+        check(::stat(QFile::encodeName(path).constData(), &st) == 0 && (st.st_mode & 0777) == 0644,
+              "new file is 0644 under umask 022");
+        ::umask(mask);
     }
 
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");

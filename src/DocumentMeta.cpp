@@ -1,3 +1,7 @@
+#include "OdfXml.hpp"
+#include "ZipPackage.hpp"
+#include <QSet>
+#include <cstdio>
 #include "DocumentMeta.hpp"
 #include "version.hpp"
 
@@ -6,7 +10,6 @@
 #include <QDir>
 #include <QFile>
 #include <QIODevice>
-#include <QProcess>
 #include <QRegularExpression>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -328,23 +331,26 @@ QString buildStylesXml(const DocumentMeta &meta, const OdtPageStyle &page)
 
 QString manifestWithEntries(const QString &manifest, const QStringList &paths)
 {
-    QString out = manifest;
-    const qsizetype close = out.lastIndexOf(QLatin1String("</manifest:manifest>"));
-    if (close < 0) {
-        return out;
+    // Empty when the manifest cannot be parsed.
+    OdfXml::Node root;
+    if (!OdfXml::parse(manifest.toUtf8(), &root)) {
+        return QString();
     }
-    QString add;
-    for (const QString &p : paths) {
-        if (out.contains(QStringLiteral("manifest:full-path=\"%1\"").arg(p))) {
-            continue;
+    QSet<QString> have;
+    for (const OdfXml::Node &c : root.children) {
+        if (c.isElement(QStringLiteral("manifest:file-entry"))) {
+            have.insert(c.attribute(QStringLiteral("manifest:full-path")));
         }
-        add += QStringLiteral(" <manifest:file-entry manifest:media-type=\"text/xml\" "
-                              "manifest:full-path=\"%1\"/>\n").arg(p);
     }
-    out.insert(close, add);
-    return out;
+    for (const QString &p : paths) {
+        if (!have.contains(p)) {
+            root.children.push_back(OdfXml::Node::element(QStringLiteral("manifest:file-entry"),
+                                                          {{QStringLiteral("manifest:media-type"), QStringLiteral("text/xml")},
+                                                           {QStringLiteral("manifest:full-path"), p}}));
+        }
+    }
+    return QString::fromUtf8(OdfXml::serialize(root));
 }
-
 
 qreal odfLengthToMm(const QString &length)
 {
@@ -393,12 +399,9 @@ bool parsePageSizeXml(const QByteArray &stylesXml, QSizeF *sheetMm, bool *landsc
 
 bool readPageSizeFromOdt(const QString &odtPath, QSizeF *sheetMm, bool *landscape)
 {
-    QProcess proc;
-    proc.start(QStringLiteral("unzip"), {QStringLiteral("-p"), odtPath, QStringLiteral("styles.xml")});
-    if (!proc.waitForFinished(15000) || proc.exitCode() != 0) {
-        return false;
-    }
-    return parsePageSizeXml(proc.readAllStandardOutput(), sheetMm, landscape);
+    bool ok = false;
+    const QByteArray xml = ZipPackage::readMember(odtPath, QStringLiteral("styles.xml"), &ok);
+    return ok && parsePageSizeXml(xml, sheetMm, landscape);
 }
 
 bool readFromOdt(const QString &odtPath, DocumentMeta *meta, QString *error)
@@ -406,128 +409,60 @@ bool readFromOdt(const QString &odtPath, DocumentMeta *meta, QString *error)
     if (!meta) {
         return false;
     }
-    QProcess proc;
-    proc.start(QStringLiteral("unzip"),
-               {QStringLiteral("-p"), odtPath, QStringLiteral("meta.xml")});
-    if (!proc.waitForFinished(15000) || proc.exitCode() != 0) {
+    bool ok = false;
+    const QByteArray xml = ZipPackage::readMember(odtPath, QStringLiteral("meta.xml"), &ok);
+    if (!ok) {
         // Older/minimal packages may lack meta.xml — not fatal.
         if (error) {
             *error = QStringLiteral("No readable meta.xml in ODT (using defaults).");
         }
         return false;
     }
-    parseMetaXml(proc.readAllStandardOutput(), meta);
+    parseMetaXml(xml, meta);
     return true;
 }
 
 bool writeToOdt(const QString &odtPath, const DocumentMeta &meta, QString *error,
                 const OdtPageStyle &page)
 {
-    QTemporaryDir dir;
-    if (!dir.isValid()) {
+    auto fail = [error](const QString &msg) {
         if (error) {
-            *error = QStringLiteral("Could not create temp dir for ODT metadata.");
+            *error = msg;
         }
         return false;
+    };
+    ZipPackage::Package pkg;
+    QString zipError;
+    if (!pkg.read(odtPath, &zipError)) {
+        return fail(QStringLiteral("Could not read the ODT to patch metadata (%1).").arg(zipError));
     }
-
-    // Extract existing package so we can replace meta.xml without rebuilding.
-    QProcess unzip;
-    unzip.setWorkingDirectory(dir.path());
-    unzip.start(QStringLiteral("unzip"), {QStringLiteral("-o"), odtPath});
-    if (!unzip.waitForFinished(30000) || unzip.exitCode() != 0) {
-        if (error) {
-            *error = QStringLiteral("Could not unpack ODT to patch metadata.");
-        }
-        return false;
+    bool found = false;
+    const QByteArray manifest = pkg.member(QStringLiteral("META-INF/manifest.xml"), &found);
+    if (!found) {
+        return fail(QStringLiteral("ODT has no META-INF/manifest.xml."));
     }
-
-    const QString metaPath = dir.filePath(QStringLiteral("meta.xml"));
-    QFile metaFile(metaPath);
-    if (!metaFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (error) {
-            *error = QStringLiteral("Could not write meta.xml.");
-        }
-        return false;
-    }
-    const QByteArray xml = buildMetaXml(meta).toUtf8();
-    if (metaFile.write(xml) != xml.size()) {
-        if (error) {
-            *error = QStringLiteral("Could not write meta.xml.");
-        }
-        return false;
-    }
-    metaFile.close();
-
-    QFile stylesFile(dir.filePath(QStringLiteral("styles.xml")));
-    if (!stylesFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (error) {
-            *error = QStringLiteral("Could not write styles.xml.");
-        }
-        return false;
-    }
-    stylesFile.write(buildStylesXml(meta, page).toUtf8());
-    stylesFile.close();
-
     // Every package member must be in the manifest (LibreOffice rejects the
     // file otherwise); Qt's writer lists only content.xml.
-    QFile manifestFile(dir.filePath(QStringLiteral("META-INF/manifest.xml")));
-    if (!manifestFile.open(QIODevice::ReadOnly)) {
-        if (error) {
-            *error = QStringLiteral("ODT has no META-INF/manifest.xml.");
-        }
-        return false;
+    const QString patchedManifest = manifestWithEntries(QString::fromUtf8(manifest),
+                                                        {QStringLiteral("styles.xml"), QStringLiteral("meta.xml")});
+    if (patchedManifest.isEmpty()) {
+        return fail(QStringLiteral("Could not update META-INF/manifest.xml."));
     }
-    const QString manifest = manifestWithEntries(QString::fromUtf8(manifestFile.readAll()),
-                                                 {QStringLiteral("styles.xml"), QStringLiteral("meta.xml")});
-    manifestFile.close();
-    if (!manifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (error) {
-            *error = QStringLiteral("Could not update META-INF/manifest.xml.");
-        }
-        return false;
-    }
-    manifestFile.write(manifest.toUtf8());
-    manifestFile.close();
+    pkg.setMember(QStringLiteral("meta.xml"), buildMetaXml(meta).toUtf8());
+    pkg.setMember(QStringLiteral("styles.xml"), buildStylesXml(meta, page).toUtf8());
+    pkg.setMember(QStringLiteral("META-INF/manifest.xml"), patchedManifest.toUtf8());
 
-    // Rezip package (mimetype first, stored; then the rest).
-    const QString rebuilt = dir.filePath(QStringLiteral("rebuilt.odt"));
-    QFile::remove(rebuilt);
-    {
-        QProcess z0;
-        z0.setWorkingDirectory(dir.path());
-        z0.start(QStringLiteral("zip"),
-                 {QStringLiteral("-X"), QStringLiteral("-0"), rebuilt, QStringLiteral("mimetype")});
-        if (!z0.waitForFinished(15000) || z0.exitCode() != 0) {
-            // Some writers omit a separate mimetype member; fall through.
-            QFile::remove(rebuilt);
-        }
+    // Written next to the file and renamed over it in one step. (DocumentIo::
+    // save() calls this on its own temp file, so the user's file is never
+    // touched here; a failure fails that save.)
+    const QString part = odtPath + QStringLiteral(".part");
+    if (!pkg.write(part, &zipError)) {
+        QFile::remove(part);
+        return fail(QStringLiteral("Could not rebuild ODT after metadata patch (%1).").arg(zipError));
     }
-    {
-        QProcess z1;
-        z1.setWorkingDirectory(dir.path());
-        QStringList args = {QStringLiteral("-X"), QStringLiteral("-r"), rebuilt, QStringLiteral(".")};
-        if (QFile::exists(rebuilt)) {
-            args.insert(2, QStringLiteral("-u")); // update existing archive that has mimetype
-        }
-        args << QStringLiteral("-x") << QStringLiteral("rebuilt.odt");
-        z1.start(QStringLiteral("zip"), args);
-        if (!z1.waitForFinished(60000) || z1.exitCode() != 0) {
-            if (error) {
-                *error = QStringLiteral("Could not rebuild ODT after metadata patch.");
-            }
-            return false;
-        }
-    }
-
-    // DocumentIo::save() calls this on its temp file (see MainWindow), so the
-    // user's file is never touched here; a failure fails that save.
-    QFile::remove(odtPath);
-    if (!QFile::copy(rebuilt, odtPath)) {
-        if (error) {
-            *error = QStringLiteral("Could not replace ODT with metadata-patched copy.");
-        }
-        return false;
+    if (std::rename(QFile::encodeName(part).constData(), QFile::encodeName(odtPath).constData()) != 0) {
+        QFile::remove(part);
+        return fail(QStringLiteral("Could not replace ODT with metadata-patched copy."));
     }
     return true;
 }

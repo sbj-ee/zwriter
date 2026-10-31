@@ -130,7 +130,7 @@ never installed.
 - Daily word / time goal, scene / chapter navigation (the Book sidebar lists chapters; there is no in-document outline yet)
 - Whole-book export limits: the table of contents goes two levels deep (chapters and their top headings; deeper headings such as Heading 3 are left out on purpose, to keep it to a page or two) and long entries are cut to one line; the title page shows only the book title; EPUB has no cover or author, its language is English, tables become plain paragraphs, lists are not nested and only web links are kept. The page numbers in the editor's table of contents are the whole-book PDF's (not the editor's own pages) and are read from the saved chapter files, so they catch up when a chapter is saved; only "Figure" captions are numbered
 - Richer ODT/RTF style round-trip (colours, footnotes, per-table styling — reopened tables always get the standard border/padding); RTF is best-effort (bold/italic/underline, paragraph alignment, headings by size, tables, Unicode; lists are exported as literal bullet/number text)
-- ODT Properties: body save is real; metadata is patched via `unzip`/`zip` into `meta.xml` (requires those tools). If patch fails, body still saves and a status message notes it. Headings are written as `text:h` the same way (a patch of `content.xml`); without `zip` they save as styled paragraphs and reopen as body text
+- ODT Properties: metadata (`meta.xml`), page layout (`styles.xml`) and headings (`text:h` in `content.xml`) are written into the package in-process (vendored miniz plus an XML tree pass; no `zip`/`unzip` needed). Every save is atomic: if any step fails the save fails with a message and the file on disk is unchanged; the previous file is kept as `<name>.bak`.
 - macOS app is ad-hoc signed only — no Developer ID signature or notarization yet, so the first launch needs right-click → Open (see Install)
 - Status extras (pages / paragraphs) — later
 - Markdown mode: setext headings (`Title` over `===`), indented code blocks, reference-style links, HTML and tables are not styled (they are kept as typed). A file with mixed or lone-CR line endings, or invalid UTF-8, is opened but saved with normalised line endings / replacement characters; zwriter says so in the status bar when it opens such a file. Saving a Markdown document as ODT/TXT/RTF (or the reverse) through Save As writes the new file and reopens it in the matching mode. The ~66-character column applies to Markdown mode; ODT's continuous view keeps its existing width
@@ -234,7 +234,7 @@ also in the sidebar's right-click menu, put all chapters together in book order.
 | **Export only** | PDF (document or whole book), EPUB 3 (whole book) |
 | **Not in v1** | DOCX, proprietary `.zwriter` |
 
-Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file. Pictures in a Markdown document are image files in a `<name>.assets/` folder next to it, linked from the text. ODT open uses `unzip` to read `content.xml` / `meta.xml` (Linux + macOS). Prefer ODT for fidelity; RTF is readable interchange.
+Markdown and TXT are plain UTF-8 text; nothing else is written into a `.md` file. Pictures in a Markdown document are image files in a `<name>.assets/` folder next to it, linked from the text. ODT packages are read and written in-process (no `unzip`/`zip` programs). Prefer ODT for fidelity; RTF is readable interchange.
 
 ## Version bumps
 
