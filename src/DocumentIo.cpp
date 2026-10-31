@@ -38,6 +38,7 @@
 #include <QTextList>
 #include <QTextFragment>
 #include <QUrl>
+#include <cmath>
 #include <functional>
 #include <QtGlobal>
 
@@ -1789,6 +1790,191 @@ void normaliseImportedBlocks(QTextDocument *doc)
     c.endEditBlock();
 }
 
+// Column widths and header rows of the ODT's tables (1.16.0), in document
+// order. Widths come from the table-column styles (number-columns-repeated
+// honoured): style:rel-column-width when every column has one (LibreOffice and
+// zwriter write it), else the absolute style:column-width (some writers give
+// only that), as proportions in percent. Header rows: the rows inside
+// table:table-header-rows.
+struct OdtTableLayout {
+    QList<double> percents;
+    int headerRows = 0;
+};
+
+double odtLengthPt(QStringView v, bool *percent = nullptr)
+{
+    static const QRegularExpression re(QStringLiteral(R"(^\s*([0-9]*\.?[0-9]+)\s*([a-z%]*)\s*$)"));
+    const QRegularExpressionMatch m = re.match(v.toString());
+    if (percent) {
+        *percent = false;
+    }
+    if (!m.hasMatch()) {
+        return -1;
+    }
+    const double n = m.captured(1).toDouble();
+    const QString u = m.captured(2);
+    if (u == QLatin1String("cm")) return n * 72.0 / 2.54;
+    if (u == QLatin1String("mm")) return n * 72.0 / 25.4;
+    if (u == QLatin1String("in") || u == QLatin1String("inch")) return n * 72.0;
+    if (u == QLatin1String("pt") || u.isEmpty()) return n;
+    if (u == QLatin1String("pc")) return n * 12.0;
+    if (u == QLatin1String("px")) return n * 0.75;
+    if (u == QLatin1String("%")) {
+        if (percent) {
+            *percent = true;
+        }
+        return n;
+    }
+    return -1;
+}
+
+QList<OdtTableLayout> odtTableLayouts(const QByteArray &xml)
+{
+    struct ColStyle {
+        double rel = -1;
+        double abs = -1;
+        double pct = -1;
+    };
+    QHash<QString, ColStyle> colStyles;
+    QList<OdtTableLayout> out;
+    struct Open {
+        int index;
+        QList<ColStyle> cols;
+        bool inHeader = false;
+        int depth = 0; // element depth of the table element
+    };
+    QList<Open> stack;
+    QString currentStyle; // inside a table-column style:style
+    int depth = 0;
+    QXmlStreamReader r(xml);
+    while (!r.atEnd()) {
+        const auto tok = r.readNext();
+        if (tok == QXmlStreamReader::StartElement) {
+            ++depth;
+            const QStringView name = r.name();
+            const QStringView prefix = r.prefix();
+            const auto a = r.attributes();
+            if (prefix == QLatin1String("style") && name == QLatin1String("style")
+                && a.value(QStringLiteral("style:family")) == QLatin1String("table-column")) {
+                currentStyle = a.value(QStringLiteral("style:name")).toString();
+                colStyles.insert(currentStyle, ColStyle{});
+            } else if (prefix == QLatin1String("style") && name == QLatin1String("table-column-properties")
+                       && !currentStyle.isEmpty()) {
+                ColStyle &cs = colStyles[currentStyle];
+                const QStringView rel = a.value(QStringLiteral("style:rel-column-width"));
+                if (!rel.isEmpty()) {
+                    bool ok = false;
+                    const double v = rel.toString().remove(QLatin1Char('*')).trimmed().toDouble(&ok);
+                    if (ok && v > 0) {
+                        cs.rel = v;
+                    }
+                }
+                bool pct = false;
+                const double w = odtLengthPt(a.value(QStringLiteral("style:column-width")), &pct);
+                if (w > 0) {
+                    (pct ? cs.pct : cs.abs) = w;
+                }
+            } else if (prefix == QLatin1String("table") && name == QLatin1String("table")) {
+                Open o{int(out.size())};
+                o.depth = depth;
+                out.append(OdtTableLayout{});
+                stack << o;
+            } else if (!stack.isEmpty() && prefix == QLatin1String("table")
+                       && name == QLatin1String("table-column")) {
+                const int n = qBound(1, a.value(QStringLiteral("table:number-columns-repeated")).toInt(), 1024);
+                const ColStyle cs = colStyles.value(a.value(QStringLiteral("table:style-name")).toString());
+                for (int i = 0; i < n; ++i) {
+                    stack.last().cols << cs;
+                }
+            } else if (!stack.isEmpty() && prefix == QLatin1String("table")
+                       && name == QLatin1String("table-header-rows") && depth == stack.last().depth + 1) {
+                stack.last().inHeader = true;
+            } else if (!stack.isEmpty() && prefix == QLatin1String("table") && name == QLatin1String("table-row")
+                       && stack.last().inHeader) {
+                ++out[stack.last().index].headerRows;
+            }
+        } else if (tok == QXmlStreamReader::EndElement) {
+            const QStringView name = r.name();
+            const QStringView prefix = r.prefix();
+            if (prefix == QLatin1String("style") && name == QLatin1String("style")) {
+                currentStyle.clear();
+            } else if (!stack.isEmpty() && prefix == QLatin1String("table")
+                       && name == QLatin1String("table-header-rows") && depth == stack.last().depth + 1) {
+                stack.last().inHeader = false;
+            } else if (!stack.isEmpty() && prefix == QLatin1String("table") && name == QLatin1String("table")) {
+                const Open o = stack.takeLast();
+                auto all = [&](auto get) {
+                    if (o.cols.isEmpty()) {
+                        return false;
+                    }
+                    for (const ColStyle &c : o.cols) {
+                        if (!(get(c) > 0)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+                std::function<double(const ColStyle &)> pick;
+                if (all([](const ColStyle &c) { return c.rel; })) {
+                    pick = [](const ColStyle &c) { return c.rel; };
+                } else if (all([](const ColStyle &c) { return c.abs; })) {
+                    pick = [](const ColStyle &c) { return c.abs; };
+                } else if (all([](const ColStyle &c) { return c.pct; })) {
+                    pick = [](const ColStyle &c) { return c.pct; };
+                }
+                if (pick) {
+                    double sum = 0;
+                    for (const ColStyle &c : o.cols) {
+                        sum += pick(c);
+                    }
+                    QList<double> p;
+                    for (const ColStyle &c : o.cols) {
+                        p << std::round(pick(c) / sum * 10000.0) / 100.0;
+                    }
+                    out[o.index].percents = p;
+                }
+            }
+            --depth;
+        }
+    }
+    return out;
+}
+
+// Put the widths and header rows back on the loaded tables (Qt's HTML
+// importer, which the ODT reader goes through, keeps neither).
+void applyOdtTableLayouts(QTextDocument *doc, const QList<OdtTableLayout> &layouts)
+{
+    QList<QTextTable *> tables;
+    collectTables(doc->rootFrame(), &tables);
+    if (tables.size() != layouts.size()) {
+        return; // the importer merged or dropped a table: do not guess
+    }
+    QTextCursor batch(doc);
+    batch.beginEditBlock();
+    for (int i = 0; i < tables.size(); ++i) {
+        QTextTable *t = tables.at(i);
+        const OdtTableLayout &l = layouts.at(i);
+        QTextTableFormat f = t->format();
+        bool changed = false;
+        if (l.percents.size() == t->columns()) {
+            QList<QTextLength> c;
+            for (double v : l.percents) {
+                c << QTextLength(QTextLength::PercentageLength, v);
+            }
+            f.setColumnWidthConstraints(c);
+            changed = true;
+        }
+        if (l.headerRows > 0 && l.headerRows < t->rows() + 1) {
+            f.setHeaderRowCount(qMin(l.headerRows, t->rows()));
+            changed = true;
+        }
+        if (changed) {
+            t->setFormat(f);
+        }
+    }
+    batch.endEditBlock();
+}
+
 bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
 {
     QProcess proc;
@@ -1899,6 +2085,7 @@ bool loadOdt(QTextDocument *doc, const QString &path, QString *error)
         }
     }
     restyleTables(doc->rootFrame());
+    applyOdtTableLayouts(doc, odtTableLayouts(xml));
     normaliseImportedBlocks(doc);
     {
         QTextCursor c(doc);
@@ -1976,6 +2163,174 @@ QString headingPatchedContent(const QString &src, const QHash<QString, int> &hea
         out.replace(it->pos, it->len, it->text);
     }
     return out;
+}
+
+// Column widths and header rows of every table (1.16.0), in document order
+// (pre-order, the order of both table:table elements and collectTables()).
+struct TableSaveInfo {
+    QList<double> percents; // empty: Qt sizes the columns itself
+    int headerRows = 0;
+};
+
+QList<TableSaveInfo> tableSaveInfo(const QList<QTextTable *> &tables)
+{
+    QList<TableSaveInfo> out;
+    for (const QTextTable *t : tables) {
+        TableSaveInfo info;
+        const QList<QTextLength> c = t->format().columnWidthConstraints();
+        if (c.size() == t->columns()) {
+            for (const QTextLength &l : c) {
+                if (l.type() != QTextLength::PercentageLength || l.rawValue() <= 0) {
+                    info.percents.clear();
+                    break;
+                }
+                info.percents << l.rawValue();
+            }
+        }
+        info.headerRows = qBound(0, t->format().headerRowCount(), t->rows());
+        out << info;
+    }
+    return out;
+}
+
+// Write each table's columns the way LibreOffice does: one automatic
+// table-column style per column with style:rel-column-width (the proportion,
+// out of 65535) and an absolute style:column-width (of a 6.5 in text column;
+// readers that size by the absolute width keep the proportions). The leading
+// header rows go into table:table-header-rows, which LibreOffice repeats on
+// every page. Qt's own "TableN.k" column styles (width in "%", not valid ODF)
+// are dropped.
+QString tableColumnsPatchedContent(const QString &xml, const QList<TableSaveInfo> &info)
+{
+    bool any = false;
+    for (const TableSaveInfo &t : info) {
+        any = any || !t.percents.isEmpty() || t.headerRows > 0;
+    }
+    if (!any) {
+        return xml;
+    }
+    static const QRegularExpression tag(
+        QStringLiteral(R"(<(/?)table:(table-row|table-column|table)(?=[\s/>])[^>]*?(/?)>)"));
+    struct Open {
+        int index;
+        int rows = 0;
+        bool headerOpen = false;
+        bool dropColumns = false;
+    };
+    QList<Open> stack;
+    QString out;
+    out.reserve(xml.size() + 4096);
+    QString styles;
+    qsizetype last = 0;
+    int counter = 0;
+    constexpr double kTextWidthCm = 16.51; // 6.5 in
+    auto it = tag.globalMatch(xml);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        const bool closing = !m.captured(1).isEmpty();
+        const bool selfClosing = !m.captured(3).isEmpty();
+        const QString kind = m.captured(2);
+        out += QStringView(xml).mid(last, m.capturedStart() - last);
+        last = m.capturedEnd();
+        const TableSaveInfo *ti = stack.isEmpty() || stack.last().index >= info.size()
+            ? nullptr : &info.at(stack.last().index);
+        if (kind == QLatin1String("table")) {
+            if (!closing) {
+                Open o{counter++};
+                out += m.captured();
+                if (o.index < info.size() && !info.at(o.index).percents.isEmpty()) {
+                    o.dropColumns = true;
+                    const QList<double> &p = info.at(o.index).percents;
+                    double sum = 0;
+                    for (double v : p) {
+                        sum += v;
+                    }
+                    for (int c = 0; c < p.size(); ++c) {
+                        const QString name = QStringLiteral("zwTable%1.C%2").arg(o.index + 1).arg(c + 1);
+                        const int rel = qMax(1, qRound(p.at(c) / sum * 65535.0));
+                        styles += QStringLiteral("<style:style style:name=\"%1\" style:family=\"table-column\">"
+                                                 "<style:table-column-properties style:column-width=\"%2cm\" "
+                                                 "style:rel-column-width=\"%3*\"/></style:style>")
+                                      .arg(name, QString::number(kTextWidthCm * p.at(c) / sum, 'f', 3))
+                                      .arg(rel);
+                        out += QStringLiteral("<table:table-column table:style-name=\"%1\"/>").arg(name);
+                    }
+                }
+                if (!selfClosing) {
+                    stack << o;
+                }
+            } else {
+                if (!stack.isEmpty()) {
+                    if (stack.last().headerOpen) {
+                        out += QStringLiteral("</table:table-header-rows>");
+                    }
+                    stack.removeLast();
+                }
+                out += m.captured();
+            }
+        } else if (kind == QLatin1String("table-column")) {
+            if (!(stack.isEmpty() || !stack.last().dropColumns)) {
+                if (!selfClosing && !closing) {
+                    // <table:table-column ...></table:table-column>: drop through its end tag
+                    const qsizetype end = xml.indexOf(QLatin1String("</table:table-column>"), last);
+                    if (end >= 0) {
+                        last = end + 21;
+                        // keep the iterator in step
+                        while (it.hasNext() && it.peekNext().capturedStart() < last) {
+                            it.next();
+                        }
+                    }
+                }
+                continue; // ours were written after the table start tag
+            }
+            out += m.captured();
+        } else { // table-row
+            if (!closing && !stack.isEmpty() && ti && ti->headerRows > 0 && stack.last().rows == 0) {
+                out += QStringLiteral("<table:table-header-rows>");
+                stack.last().headerOpen = true;
+            }
+            out += m.captured();
+            if (!stack.isEmpty() && (closing || selfClosing)) {
+                Open &o = stack.last();
+                ++o.rows;
+                if (o.headerOpen && ti && o.rows == ti->headerRows) {
+                    out += QStringLiteral("</table:table-header-rows>");
+                    o.headerOpen = false;
+                }
+            }
+        }
+    }
+    out += QStringView(xml).mid(last);
+    // Qt's own percentage column styles are no longer referenced.
+    static const QRegularExpression qtColumnStyle(
+        QStringLiteral(R"(<style:style style:name="[^"]*" style:family="table-column">\s*<style:table-column-properties[^>]*/>\s*</style:style>)"));
+    QString cleaned;
+    {
+        qsizetype from = 0;
+        auto ci = qtColumnStyle.globalMatch(out);
+        while (ci.hasNext()) {
+            const QRegularExpressionMatch m = ci.next();
+            const QString name = QRegularExpression(QStringLiteral(R"re(style:name="([^"]*)")re")).match(m.captured()).captured(1);
+            if (out.contains(QStringLiteral("table:style-name=\"%1\"").arg(name))) {
+                continue; // still used (a table without stored widths)
+            }
+            cleaned += QStringView(out).mid(from, m.capturedStart() - from);
+            from = m.capturedEnd();
+        }
+        cleaned += QStringView(out).mid(from);
+    }
+    if (!styles.isEmpty()) {
+        const qsizetype close = cleaned.indexOf(QLatin1String("</office:automatic-styles>"));
+        if (close >= 0) {
+            cleaned.insert(close, styles);
+        } else {
+            const qsizetype body = cleaned.indexOf(QLatin1String("<office:body"));
+            if (body >= 0) {
+                cleaned.insert(body, QStringLiteral("<office:automatic-styles>%1</office:automatic-styles>").arg(styles));
+            }
+        }
+    }
+    return cleaned;
 }
 
 // Qt's ODF writer gets tables wrong for zwriter: a 100 % wide table is written
@@ -2324,6 +2679,7 @@ bool patchOdtContent(QTextDocument *doc, const QString &path, QString *error, co
     }
     if (!tables.isEmpty()) {
         patched = tablePatchedContent(patched);
+        patched = tableColumnsPatchedContent(patched, tableSaveInfo(tables));
     }
     if (anyFloat) {
         patched = framePatchedContent(patched, frameWraps);

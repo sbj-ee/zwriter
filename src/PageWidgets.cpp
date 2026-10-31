@@ -3,6 +3,7 @@
 #include <QTextLayout>
 #include "DocumentIo.hpp"
 #include "Images.hpp"
+#include "TableColumns.hpp"
 
 #include <QBuffer>
 #include <QFile>
@@ -461,14 +462,99 @@ void PageTextEdit::paintLeaders(QPainter *p, const QRectF &docClip) const
     }
 }
 
+void PageTextEdit::setTableResizeEnabled(bool on)
+{
+    m_tableResize = on;
+    viewport()->setMouseTracking(true);
+    if (!on) {
+        endTableResize(false);
+    }
+}
+
+QPointF PageTextEdit::docPoint(const QMouseEvent *event) const
+{
+    return event->position() / m_zoom + scrollOffset();
+}
+
+bool PageTextEdit::beginTableResize(const QPointF &docPos)
+{
+    if (!m_tableResize || isReadOnly()) {
+        return false;
+    }
+    QTextTable *t = TableColumns::tableAt(document(), docPos);
+    const int border = TableColumns::borderAt(t, docPos, 4.0);
+    if (border < 0) {
+        return false;
+    }
+    const QList<double> x = TableColumns::edges(t);
+    m_resizeTable = t;
+    m_resizeBorder = border;
+    m_resizeStart = TableColumns::effectivePercents(t);
+    m_resizeX0 = x.at(border);
+    m_resizeWidth = qMax(1.0, x.last() - x.first());
+    m_guideX = m_resizeX0;
+    viewport()->update();
+    return true;
+}
+
+void PageTextEdit::moveTableResize(const QPointF &docPos)
+{
+    if (m_resizeBorder < 0) {
+        return;
+    }
+    // Clamp the guide to where the widths can actually go.
+    const QList<double> p = TableColumns::dragged(m_resizeStart, m_resizeBorder,
+                                                  (docPos.x() - m_resizeX0) / m_resizeWidth * 100.0);
+    m_guideX = m_resizeX0 + (p.at(m_resizeBorder - 1) - m_resizeStart.at(m_resizeBorder - 1)) / 100.0 * m_resizeWidth;
+    viewport()->update();
+}
+
+void PageTextEdit::endTableResize(bool apply)
+{
+    if (m_resizeBorder < 0) {
+        return;
+    }
+    const int border = m_resizeBorder;
+    m_resizeBorder = -1;
+    viewport()->update();
+    if (!apply || !m_resizeTable || m_resizeStart.size() != m_resizeTable->columns()
+        || qFuzzyCompare(m_guideX, m_resizeX0)) {
+        return;
+    }
+    const QList<double> p = TableColumns::dragged(m_resizeStart, border,
+                                                  (m_guideX - m_resizeX0) / m_resizeWidth * 100.0);
+    QTextCursor edit(document());
+    edit.beginEditBlock(); // one undo step
+    TableColumns::setPercents(m_resizeTable, p);
+    edit.endEditBlock();
+    emit tableColumnsResized();
+}
+
+void PageTextEdit::paintTableResizeGuide()
+{
+    if (m_resizeBorder < 0 || !m_resizeTable) {
+        return;
+    }
+    const QRectF frame = document()->documentLayout()->frameBoundingRect(m_resizeTable);
+    const QPointF off = scrollOffset();
+    QPainter p(viewport());
+    QPen pen(palette().color(QPalette::Highlight), 1.0, Qt::DashLine);
+    p.setPen(pen);
+    const double x = (m_guideX - off.x()) * m_zoom;
+    p.drawLine(QPointF(x, (frame.top() - off.y()) * m_zoom), QPointF(x, (frame.bottom() - off.y()) * m_zoom));
+}
+
 void PageTextEdit::paintEvent(QPaintEvent *event)
 {
     if (!isZoomed()) {
         QTextEdit::paintEvent(event);
-        QPainter p(viewport());
-        const QPointF offset(horizontalScrollBar()->value(), verticalScrollBar()->value());
-        p.translate(-offset);
-        paintLeaders(&p, QRectF(event->rect()).translated(offset));
+        {
+            QPainter p(viewport());
+            const QPointF offset(horizontalScrollBar()->value(), verticalScrollBar()->value());
+            p.translate(-offset);
+            paintLeaders(&p, QRectF(event->rect()).translated(offset));
+        }
+        paintTableResizeGuide();
         return;
     }
     // Draw the true-size layout scaled, with the caret and selections QTextEdit
@@ -501,6 +587,8 @@ void PageTextEdit::paintEvent(QPaintEvent *event)
     p.setClipRect(ctx.clip);
     document()->documentLayout()->draw(&p, ctx);
     paintLeaders(&p, ctx.clip);
+    p.end();
+    paintTableResizeGuide();
 }
 
 namespace {
@@ -513,6 +601,10 @@ QMouseEvent unzoomed(const QMouseEvent *e, qreal zoom)
 
 void PageTextEdit::mousePressEvent(QMouseEvent *event)
 {
+    if (event->button() == Qt::LeftButton && beginTableResize(docPoint(event))) {
+        event->accept();
+        return;
+    }
     if (!isZoomed()) {
         QTextEdit::mousePressEvent(event);
         return;
@@ -524,6 +616,20 @@ void PageTextEdit::mousePressEvent(QMouseEvent *event)
 
 void PageTextEdit::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_resizeBorder >= 0) {
+        moveTableResize(docPoint(event));
+        event->accept();
+        return;
+    }
+    if (m_tableResize && event->buttons() == Qt::NoButton) {
+        const QPointF d = docPoint(event);
+        const bool over = !isReadOnly()
+            && TableColumns::borderAt(TableColumns::tableAt(document(), d), d, 4.0) >= 0;
+        if (over != m_resizeCursor) {
+            m_resizeCursor = over;
+            viewport()->setCursor(over ? Qt::SplitHCursor : Qt::IBeamCursor);
+        }
+    }
     if (!isZoomed()) {
         QTextEdit::mouseMoveEvent(event);
         return;
@@ -535,6 +641,12 @@ void PageTextEdit::mouseMoveEvent(QMouseEvent *event)
 
 void PageTextEdit::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (m_resizeBorder >= 0 && event->button() == Qt::LeftButton) {
+        moveTableResize(docPoint(event));
+        endTableResize(true);
+        event->accept();
+        return;
+    }
     if (!isZoomed()) {
         QTextEdit::mouseReleaseEvent(event);
         return;

@@ -24,6 +24,7 @@
 #include <QTextDocumentFragment>
 #include <QTextList>
 #include <QTextOption>
+#include <QTextTable>
 #include <QUrl>
 #include <QUuid>
 
@@ -594,6 +595,85 @@ struct NavHeading {
     QString id, text;
 };
 
+// The outermost table a block is in (nullptr outside tables).
+QTextTable *outerTable(const QTextBlock &b)
+{
+    QTextTable *found = nullptr;
+    for (QTextFrame *f = QTextCursor(b).currentFrame(); f; f = f->parentFrame()) {
+        if (auto *t = qobject_cast<QTextTable *>(f)) {
+            found = t;
+        }
+    }
+    return found;
+}
+
+} // namespace
+
+// A table as XHTML (1.16.0): <colgroup> with the column widths in percent, the
+// header rows (Table > Repeat Header Row) as <thead> with <th> cells, merged
+// cells as colspan/rowspan. Each paragraph of a cell is a <p>; a table nested
+// in a cell comes out as its paragraphs.
+QString tableXhtml(const QTextTable *t, const std::function<QString(const QTextBlock &)> &paragraph)
+{
+    QString out = QStringLiteral("<table>\n");
+    const QList<QTextLength> widths = t->format().columnWidthConstraints();
+    bool percent = widths.size() == t->columns();
+    for (const QTextLength &l : widths) {
+        percent = percent && l.type() == QTextLength::PercentageLength;
+    }
+    if (percent) {
+        out += QStringLiteral("<colgroup>");
+        for (const QTextLength &l : widths) {
+            out += QStringLiteral("<col style=\"width:%1%\"/>").arg(QString::number(l.rawValue(), 'f', 2));
+        }
+        out += QStringLiteral("</colgroup>\n");
+    }
+    const int header = qBound(0, t->format().headerRowCount(), t->rows());
+    for (int r = 0; r < t->rows(); ++r) {
+        if (r == 0 && header > 0) {
+            out += QStringLiteral("<thead>\n");
+        }
+        if (r == header) {
+            out += QStringLiteral("<tbody>\n");
+        }
+        out += QStringLiteral("<tr>");
+        const QString tag = r < header ? QStringLiteral("th") : QStringLiteral("td");
+        for (int c = 0; c < t->columns(); ++c) {
+            const QTextTableCell cell = t->cellAt(r, c);
+            if (!cell.isValid() || cell.row() != r || cell.column() != c) {
+                continue; // covered by a merged cell
+            }
+            out += QLatin1Char('<') + tag;
+            if (cell.columnSpan() > 1) {
+                out += QStringLiteral(" colspan=\"%1\"").arg(cell.columnSpan());
+            }
+            if (cell.rowSpan() > 1) {
+                out += QStringLiteral(" rowspan=\"%1\"").arg(cell.rowSpan());
+            }
+            out += QLatin1Char('>');
+            const QTextBlock last = cell.lastCursorPosition().block();
+            for (QTextBlock b = cell.firstCursorPosition().block(); b.isValid(); b = b.next()) {
+                out += paragraph(b);
+                if (b == last) {
+                    break;
+                }
+            }
+            out += QStringLiteral("</") + tag + QLatin1Char('>');
+        }
+        out += QStringLiteral("</tr>\n");
+        if (r == header - 1) {
+            out += QStringLiteral("</thead>\n");
+        }
+    }
+    if (t->rows() > header) {
+        out += QStringLiteral("</tbody>\n");
+    }
+    out += QStringLiteral("</table>\n");
+    return out;
+}
+
+namespace {
+
 QString chapterXhtml(const QTextDocument &d, const QString &title, int chapter, Css *css,
                      QList<EpubImage> *images, QList<NavHeading> *headings)
 {
@@ -606,6 +686,17 @@ QString chapterXhtml(const QTextDocument &d, const QString &title, int chapter, 
         }
     };
     for (QTextBlock b = d.begin(); b.isValid(); b = b.next()) {
+        if (QTextTable *t = outerTable(b)) {
+            closeList();
+            body += tableXhtml(t, [&](const QTextBlock &cb) {
+                const QString pc = css->classFor(cb);
+                const QString content = inlineXhtml(d, cb, chapter, images);
+                return pc.isEmpty() ? QStringLiteral("<p>%1</p>").arg(content)
+                                    : QStringLiteral("<p class=\"%1\">%2</p>").arg(pc, content);
+            });
+            b = d.findBlock(t->lastPosition());
+            continue;
+        }
         const QString content = inlineXhtml(d, b, chapter, images);
         QTextList *bl = b.textList();
         if (bl != list) {
@@ -768,6 +859,10 @@ bool writeEpub(const BookManifest &book, const Options &options, const QString &
         "h2 { font-size: 1.3em; } h3 { font-size: 1.15em; } h4, h5, h6 { font-size: 1em; }\n"
         "p { margin: 0 0 0.5em 0; }\n"
         "img { max-width: 100%; }\n"
+        "table { border-collapse: collapse; width: 100%; margin: 0 0 0.8em 0; }\n"
+        "td, th { border: 1px solid #b8b8b8; padding: 0.25em 0.4em; vertical-align: top; }\n"
+        "th { font-weight: bold; text-align: left; }\n"
+        "td p, th p { margin: 0; }\n"
         ".caption { text-align: center; font-style: italic; }\n"
         ".titlepage { text-align: center; margin-top: 30%; }\n"
         ".title { font-size: 2.2em; }\n"

@@ -3,6 +3,25 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.16.0] — 2026-10-31
+
+Tables: column widths, merged cells and repeating header rows.
+
+- **Drag to resize columns.** Hover an inner column border for a resize cursor; drag to see a
+  guide line, release to apply (one Undo step). Widths are kept as percentages of the table, so
+  they follow the page width. Insert / Remove Column keep the other columns' widths. Merged cells
+  are respected: a border hidden inside a merged cell can't be grabbed.
+- **Merge Cells / Split Cells** in Format → Table and in the editor's right-click **Table** menu
+  (one Undo step each).
+- **Repeat Header Row** (checkable): the table's first row repeats at the top of every page in Full
+  Page view, Print and PDF.
+- **ODT.** Column widths are written the way LibreOffice writes them (`style:rel-column-width` plus
+  an absolute `style:column-width`), header rows as `table:table-header-rows`. On open, zwriter reads
+  table-column styles (including `table:number-columns-repeated`) and header rows; absolute-only
+  widths become proportions. Merged cells keep round-tripping.
+- **EPUB.** Tables export as `<table>` with `<colgroup><col style="width:NN%"/>`, header rows as
+  `<thead>`/`<th>`, and merged cells as `colspan`/`rowspan`.
+
 ## [1.15.0] — 2026-10-30
 
 A font and size for every paragraph style.

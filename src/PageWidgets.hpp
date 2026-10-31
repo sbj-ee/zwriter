@@ -1,6 +1,9 @@
 #pragma once
 
 #include <QColor>
+#include <QList>
+#include <QPointer>
+#include <QTextTable>
 #include <functional>
 #include <QMarginsF>
 #include <QSizeF>
@@ -66,9 +69,21 @@ public:
         m_plainImageHandler = std::move(handler);
     }
 
+    // Drag-to-resize table columns (1.16.0): a resize cursor over an inner
+    // column border, a guide line while dragging, the new widths applied on
+    // release as one undo step. Turns on mouse tracking.
+    void setTableResizeEnabled(bool on);
+    bool isResizingTable() const { return m_resizeBorder >= 0; }
+    // Programmatic drag (tests, screenshots): document coordinates.
+    bool beginTableResize(const QPointF &docPos);
+    void moveTableResize(const QPointF &docPos);
+    void endTableResize(bool apply = true);
+
 signals:
     // A status-bar note about a pasted / dropped picture (refused, scaled down).
     void imageNote(const QString &message);
+    // Column widths changed by a drag (one undo step).
+    void tableColumnsResized();
 
 protected:
     // Rich paste keeps structure and emphasis but drops hard-coded text and
@@ -98,6 +113,17 @@ private:
     void ensureZoomedCaretVisible();
     QPointF scrollOffset() const;
 
+    QPointF docPoint(const QMouseEvent *event) const;
+    void paintTableResizeGuide();
+
+    bool m_tableResize = false;
+    int m_resizeBorder = -1;          // dragging this inner border, or -1
+    QPointer<QTextTable> m_resizeTable;
+    QList<double> m_resizeStart;      // widths (%) when the drag began
+    double m_resizeX0 = 0;            // border x when the drag began (document px)
+    double m_resizeWidth = 1;         // table content width (document px)
+    double m_guideX = 0;
+    bool m_resizeCursor = false;      // the split cursor is showing
     QSizeF m_pageSize; // invalid until set
     bool m_continuousInset = false;
     QMarginsF m_documentMargins;

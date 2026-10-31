@@ -1,4 +1,5 @@
 #include "MainWindow.hpp"
+#include "TableColumns.hpp"
 #include "ParagraphDialog.hpp"
 #include "ParagraphStyles.hpp"
 #include "StylesDialog.hpp"
@@ -389,6 +390,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_editor->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_editor, &QWidget::customContextMenuRequested,
             this, &MainWindow::showEditorContextMenu);
+    m_editor->setTableResizeEnabled(true);
+    connect(m_editor, &PageTextEdit::tableColumnsResized, this, [this]() {
+        markDirty();
+        statusBar()->showMessage(QStringLiteral("Column widths changed"), 2000);
+    });
 
     // The paragraph style at the caret, always visible (the toolbar may be hidden).
     m_styleLabel = new QLabel(QStringLiteral("Body Text"), this);
@@ -985,6 +991,19 @@ void MainWindow::createFormatActions()
     connect(m_tableRemoveRowAction, &QAction::triggered, this, &MainWindow::tableRemoveRow);
     m_tableRemoveColAction = new QAction(QStringLiteral("Remove Colu&mn"), this);
     connect(m_tableRemoveColAction, &QAction::triggered, this, &MainWindow::tableRemoveColumn);
+    m_tableMergeAction = new QAction(QStringLiteral("M&erge Cells"), this);
+    m_tableMergeAction->setObjectName(QStringLiteral("tableMergeCells"));
+    m_tableMergeAction->setToolTip(QStringLiteral("Merge the selected cells into one"));
+    connect(m_tableMergeAction, &QAction::triggered, this, &MainWindow::tableMergeCells);
+    m_tableSplitAction = new QAction(QStringLiteral("&Split Cells"), this);
+    m_tableSplitAction->setObjectName(QStringLiteral("tableSplitCells"));
+    m_tableSplitAction->setToolTip(QStringLiteral("Split the merged cell back into single cells"));
+    connect(m_tableSplitAction, &QAction::triggered, this, &MainWindow::tableSplitCell);
+    m_tableHeaderAction = new QAction(QStringLiteral("Repeat &Header Row"), this);
+    m_tableHeaderAction->setObjectName(QStringLiteral("tableHeaderRow"));
+    m_tableHeaderAction->setCheckable(true);
+    m_tableHeaderAction->setToolTip(QStringLiteral("Make the first row a header row, repeated at the top of every page"));
+    connect(m_tableHeaderAction, &QAction::triggered, this, &MainWindow::tableToggleHeaderRow);
 }
 
 void MainWindow::buildFormatMenu()
@@ -1030,6 +1049,11 @@ void MainWindow::buildFormatMenu()
     tableMenu->addSeparator();
     tableMenu->addAction(m_tableRemoveRowAction);
     tableMenu->addAction(m_tableRemoveColAction);
+    tableMenu->addSeparator();
+    tableMenu->addAction(m_tableMergeAction);
+    tableMenu->addAction(m_tableSplitAction);
+    tableMenu->addSeparator();
+    tableMenu->addAction(m_tableHeaderAction);
 
     m_insertImageAction = m_formatMenu->addAction(QStringLiteral("Insert I&mage…"));
     m_insertImageAction->setToolTip(QStringLiteral("Insert a picture from a file (PNG, JPEG, GIF, WebP, BMP, SVG)"));
@@ -1322,13 +1346,93 @@ QTextTable *MainWindow::currentTable() const
 
 void MainWindow::updateTableActions()
 {
-    const bool inTable = !m_markdownMode && currentTable() != nullptr;
+    QTextTable *table = m_markdownMode ? nullptr : currentTable();
+    const bool inTable = table != nullptr;
     for (QAction *a : {m_tableInsertRowAction, m_tableInsertColAction,
                        m_tableRemoveRowAction, m_tableRemoveColAction}) {
         if (a) {
             a->setEnabled(inTable);
         }
     }
+    bool canMerge = false;
+    bool canSplit = false;
+    if (table) {
+        const QTextCursor c = m_editor->textCursor();
+        int r = 0, nr = 0, col = 0, nc = 0;
+        c.selectedTableCells(&r, &nr, &col, &nc);
+        canMerge = r >= 0 && nr * nc > 1;
+        const QTextTableCell cell = table->cellAt(c);
+        canSplit = !canMerge && cell.isValid() && (cell.rowSpan() > 1 || cell.columnSpan() > 1);
+    }
+    if (m_tableMergeAction) {
+        m_tableMergeAction->setEnabled(canMerge);
+        m_tableSplitAction->setEnabled(canSplit);
+        m_tableHeaderAction->setEnabled(inTable && table->rows() > 1);
+        const QSignalBlocker block(m_tableHeaderAction);
+        m_tableHeaderAction->setChecked(inTable && table->format().headerRowCount() > 0);
+    }
+}
+
+void MainWindow::tableMergeCells()
+{
+    QTextTable *table = currentTable();
+    if (!table) {
+        return;
+    }
+    QTextCursor c = m_editor->textCursor();
+    int r = 0, nr = 0, col = 0, nc = 0;
+    c.selectedTableCells(&r, &nr, &col, &nc);
+    if (r < 0 || nr * nc < 2) {
+        return;
+    }
+    c.beginEditBlock(); // one undo step
+    table->mergeCells(r, col, nr, nc);
+    DocumentIo::styleTable(table);
+    c.endEditBlock();
+    m_editor->setTextCursor(table->cellAt(r, col).firstCursorPosition());
+    updateTableActions();
+    markDirty();
+}
+
+void MainWindow::tableSplitCell()
+{
+    QTextTable *table = currentTable();
+    if (!table) {
+        return;
+    }
+    QTextCursor c = m_editor->textCursor();
+    const QTextTableCell cell = table->cellAt(c);
+    if (!cell.isValid() || (cell.rowSpan() < 2 && cell.columnSpan() < 2)) {
+        return;
+    }
+    const int r = cell.row();
+    const int col = cell.column();
+    c.beginEditBlock();
+    table->splitCell(r, col, 1, 1);
+    DocumentIo::styleTable(table); // the freed cells get the grid
+    c.endEditBlock();
+    m_editor->setTextCursor(table->cellAt(r, col).firstCursorPosition());
+    updateTableActions();
+    markDirty();
+}
+
+void MainWindow::tableToggleHeaderRow(bool on)
+{
+    QTextTable *table = currentTable();
+    if (!table) {
+        return;
+    }
+    QTextTableFormat f = table->format();
+    if ((f.headerRowCount() > 0) == on) {
+        return;
+    }
+    QTextCursor c = m_editor->textCursor();
+    c.beginEditBlock();
+    f.setHeaderRowCount(on ? 1 : 0);
+    table->setFormat(f);
+    c.endEditBlock();
+    updateTableActions();
+    markDirty();
 }
 
 void MainWindow::insertTable()
@@ -1433,8 +1537,12 @@ void MainWindow::tableInsertColumn()
     }
     QTextCursor c = m_editor->textCursor();
     const int col = table->cellAt(c).column();
+    const QList<double> widths = TableColumns::storedPercents(table);
     c.beginEditBlock();
     table->insertColumns(col + 1, 1);
+    if (!widths.isEmpty()) {
+        TableColumns::setPercents(table, TableColumns::afterInsert(widths, col + 1, 1));
+    }
     DocumentIo::styleTable(table); // new cells get the grid too
     c.endEditBlock();
     updateTableActions();
@@ -1470,7 +1578,13 @@ void MainWindow::tableRemoveColumn()
     const QTextTableCell cell = table->cellAt(c);
     const int row = cell.row();
     const int col = cell.column();
+    const QList<double> widths = TableColumns::storedPercents(table);
+    c.beginEditBlock();
     table->removeColumns(col, 1);
+    if (!widths.isEmpty()) {
+        TableColumns::setPercents(table, TableColumns::afterRemove(widths, col, 1));
+    }
+    c.endEditBlock();
     m_editor->setTextCursor(
         table->cellAt(qMin(row, table->rows() - 1), qMin(col, table->columns() - 1)).firstCursorPosition());
     updateTableActions();
@@ -2434,6 +2548,29 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
                 insertBefore(action);
             }
         }
+    }
+
+    // Table commands (1.16.0) when the click is in a table; a right-click
+    // there without a selection puts the caret in that cell first.
+    if (!m_markdownMode && !m_editor->textCursor().hasSelection()) {
+        const QTextCursor at = m_editor->cursorForPosition(docPos);
+        if (at.currentTable()) {
+            m_editor->setTextCursor(at);
+        }
+    }
+    if (!m_markdownMode && currentTable()) {
+        updateTableActions();
+        menu->addSeparator();
+        QMenu *table = menu->addMenu(QStringLiteral("Table"));
+        for (QAction *a : {m_tableInsertRowAction, m_tableInsertColAction, m_tableRemoveRowAction,
+                           m_tableRemoveColAction}) {
+            table->addAction(a);
+        }
+        table->addSeparator();
+        table->addAction(m_tableMergeAction);
+        table->addAction(m_tableSplitAction);
+        table->addSeparator();
+        table->addAction(m_tableHeaderAction);
     }
 
     menu->exec(m_editor->viewport()->mapToGlobal(pos));

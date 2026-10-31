@@ -1,5 +1,10 @@
 #pragma once
 
+#include <functional>
+
+class QTextBlock;
+class QTextTable;
+
 #include "StyleFonts.hpp"
 
 // Whole-book export (1.10.0): every chapter of book.json, in book order, as
@@ -83,6 +88,10 @@ bool writePdf(const BookManifest &book, const Options &options, const QPageLayou
 // The EPUB's style-font rules (body, h1-h6) for `fonts`; empty when every
 // style uses its built-in face and size (exposed for the tests).
 QString epubStyleFontCss(const StyleFonts::Map &fonts);
+// One table as EPUB XHTML (1.16.0): <colgroup><col style="width:NN%"/> from the
+// stored column widths, header rows as <thead>/<th>, merged cells as
+// colspan/rowspan; `paragraph` renders each paragraph of a cell.
+QString tableXhtml(const QTextTable *table, const std::function<QString(const QTextBlock &)> &paragraph);
 bool writeEpub(const BookManifest &book, const Options &options, const QString &path,
                QString *error = nullptr, QStringList *skipped = nullptr);
 
