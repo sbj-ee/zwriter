@@ -3,6 +3,24 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.17.1] — 2026-10-31
+
+Saving is atomic, keeps a backup, and never reports success for a half-finished file.
+
+- **Atomic save** for ODT, RTF, Markdown and TXT: the file is built in a hidden temp file in the
+  same folder (`.<name>.XXXXXX.tmp`), patched and checked there, and only then renamed over the
+  original in one step. A crash or full disk mid-save can no longer leave a truncated document.
+- **Backup:** the file being replaced is kept as `<name>.bak` next to it.
+- **Failures are visible.** A failed ODT patch step (heading/table or JPEG restore, the
+  `meta.xml`/`styles.xml` page-layout patch, `zip`/`unzip`) now fails the save with a
+  "Save failed" dialog, and the file on disk is left as it was. Before, these only logged a
+  warning (or showed "metadata patch skipped") and the save reported success.
+- The metadata patch no longer deletes and re-copies the user's file: it runs on the temp file.
+- Saving keeps the replaced file's permissions and writes through a symlink to its target.
+- Tests: new `atomic_save` test — every format saves twice and checks the `.bak`; a failing patch,
+  a broken `zip` on `PATH` and a read-only folder each fail the save with the original and its
+  `.bak` byte-for-byte unchanged and no temp files left.
+
 ## [1.17.0] — 2026-10-31
 
 Settings carry over to the next session.

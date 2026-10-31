@@ -34,6 +34,8 @@
 #include <QXmlStreamReader>
 #include <QRegularExpression>
 #include <QTemporaryDir>
+#include <QTemporaryFile>
+#include <cstdio>
 #include <QSet>
 #include <QTextList>
 #include <QTextFragment>
@@ -3195,15 +3197,18 @@ bool load(QTextDocument *doc, const QString &path, QString *error)
     return true;
 }
 
-bool save(QTextDocument *doc, const QString &path, Format format, QString *error)
-{
-    if (!doc) {
-        return false;
-    }
-    if (format == Format::Unknown) {
-        format = Format::Odt;
-    }
+namespace {
 
+// Writes `doc` in `format` to `path` (a fresh temp file), running zwriter's
+// ODT patches. Every failure is reported.
+bool writeFormat(QTextDocument *doc, const QString &path, Format format, QString *error)
+{
+    auto fail = [&](const QString &msg) {
+        if (error) {
+            *error = msg;
+        }
+        return false;
+    };
     if (format == Format::Odt) {
         // Text typed with the document's default font carries no family of
         // its own; some Qt versions (6.4) then write the application default
@@ -3214,63 +3219,168 @@ bool save(QTextDocument *doc, const QString &path, Format format, QString *error
         if (!saveWithWriter(copy.get(), path, QByteArrayLiteral("odf"), error)) {
             return false;
         }
-        // Best effort, like the meta.xml patch: the body is already saved.
+        // The patches are part of the save: a failed patch fails it (the
+        // target is untouched), never a silently degraded file.
         QString headingError;
         if (!patchOdtContent(copy.get(), path, &headingError, doc)) {
-            qWarning("zwriter: %s", qPrintable(headingError));
+            return fail(QStringLiteral("Could not finish the ODT (%1)").arg(headingError));
         }
         QString pictureError;
         if (!restoreJpegPictures(copy.get(), path, &pictureError)) {
-            qWarning("zwriter: %s", qPrintable(pictureError));
+            return fail(QStringLiteral("Could not finish the ODT (%1)").arg(pictureError));
         }
         return true;
     }
     if (format == Format::Txt) {
         return saveWithWriter(doc, path, QByteArrayLiteral("plaintext"), error);
     }
+    QByteArray data;
     if (format == Format::Markdown) {
-        QSaveFile file(path);
-        if (!file.open(QIODevice::WriteOnly)) {
-            if (error) {
-                *error = QStringLiteral("Could not write %1.").arg(path);
-            }
-            return false;
-        }
-        QByteArray data;
         if (doc->property(kMarkdownBomProperty).toBool()) {
             data = QByteArrayLiteral("\xEF\xBB\xBF");
         }
         data += markdownText(doc).toUtf8();
-        if (file.write(data) != data.size() || !file.commit()) {
-            if (error) {
-                *error = QStringLiteral("Could not write %1.").arg(path);
-            }
-            return false;
-        }
-        return true;
-    }
-    if (format == Format::Rtf) {
+    } else if (format == Format::Rtf) {
         // Basic RTF: paragraphs, character formatting, lists and tables.
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        data = documentToRtf(doc).toLatin1(); // ASCII only: non-ASCII is escaped
+    } else {
+        return fail(QStringLiteral("Unsupported format."));
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return fail(QStringLiteral("Could not write %1.").arg(path));
+    }
+    if (file.write(data) != data.size() || !file.flush()) {
+        return fail(QStringLiteral("Short write to %1.").arg(path));
+    }
+    file.close();
+    if (file.error() != QFileDevice::NoError) {
+        return fail(QStringLiteral("Could not write %1.").arg(path));
+    }
+    return true;
+}
+
+// A cheap sanity check of the finished temp file before it replaces anything.
+bool verifyWritten(const QString &path, Format format, QString *error)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        if (error) {
+            *error = QStringLiteral("Could not read back the saved file.");
+        }
+        return false;
+    }
+    if (format == Format::Odt) {
+        // A zip package whose first member is the stored "mimetype".
+        const QByteArray head = f.read(4);
+        if (head != QByteArrayLiteral("PK\x03\x04")) {
             if (error) {
-                *error = QStringLiteral("Could not write %1.").arg(path);
+                *error = QStringLiteral("The saved ODT is not a valid package.");
             }
             return false;
         }
-        const QByteArray data = documentToRtf(doc).toLatin1(); // ASCII only: non-ASCII is escaped
-        if (file.write(data) != data.size()) {
-            if (error) {
-                *error = QStringLiteral("Short write to %1.").arg(path);
-            }
-            return false;
+    } else if (format == Format::Rtf && !f.read(5).startsWith("{\\rtf")) {
+        if (error) {
+            *error = QStringLiteral("The saved RTF is not valid.");
         }
-        return true;
+        return false;
     }
-    if (error) {
-        *error = QStringLiteral("Unsupported format.");
+    return true;
+}
+
+} // namespace
+
+QString backupPath(const QString &path)
+{
+    return path + QStringLiteral(".bak");
+}
+
+bool save(QTextDocument *doc, const QString &path, Format format, QString *error)
+{
+    return save(doc, path, format, error, SavePatch());
+}
+
+bool save(QTextDocument *doc, const QString &path, Format format, QString *error, const SavePatch &patch)
+{
+    auto fail = [&](const QString &msg) {
+        if (error) {
+            *error = msg;
+        }
+        return false;
+    };
+    if (!doc) {
+        return fail(QStringLiteral("No document."));
     }
-    return false;
+    if (format == Format::Unknown) {
+        format = Format::Odt;
+    }
+    const QFileInfo target(path);
+    // Saving through a symlink replaces the file it points to, not the link.
+    const QString finalPath = target.isSymLink() ? target.symLinkTarget() : target.absoluteFilePath();
+    const QFileInfo info(finalPath);
+    if (info.exists() && !info.isFile()) {
+        return fail(QStringLiteral("%1 is not a file.").arg(path));
+    }
+
+    // A unique temp file in the same directory, so the final rename is atomic
+    // (same file system). QTemporaryFile only reserves the name; the writers
+    // below truncate it.
+    QString tempPath;
+    {
+        QTemporaryFile reserve(info.absolutePath() + QStringLiteral("/.") + info.fileName()
+                               + QStringLiteral(".XXXXXX.tmp"));
+        reserve.setAutoRemove(false);
+        if (!reserve.open()) {
+            return fail(QStringLiteral("Could not write %1: cannot create a file in %2.")
+                            .arg(path, QDir::toNativeSeparators(info.absolutePath())));
+        }
+        tempPath = reserve.fileName();
+    }
+    struct TempGuard {
+        QString path;
+        ~TempGuard()
+        {
+            if (!path.isEmpty()) {
+                QFile::remove(path);
+            }
+        }
+    } guard{tempPath};
+
+    QString stepError;
+    if (!writeFormat(doc, tempPath, format, &stepError)) {
+        return fail(stepError.isEmpty() ? QStringLiteral("Could not write %1.").arg(path) : stepError);
+    }
+    if (patch && !patch(tempPath, &stepError)) {
+        return fail(stepError.isEmpty() ? QStringLiteral("Could not finish %1.").arg(path) : stepError);
+    }
+    if (!verifyWritten(tempPath, format, &stepError)) {
+        return fail(stepError);
+    }
+
+    if (info.exists()) {
+        // Keep the replaced file's permissions, and a backup of it.
+        QFile::setPermissions(tempPath, QFile::permissions(finalPath));
+        const QString bak = backupPath(finalPath);
+        const QString bakTemp = tempPath + QStringLiteral(".bak");
+        QFile::remove(bakTemp);
+        if (!QFile::copy(finalPath, bakTemp)) {
+            QFile::remove(bakTemp);
+            return fail(QStringLiteral("Could not save %1: the backup %2 could not be written.")
+                            .arg(path, QFileInfo(bak).fileName()));
+        }
+        if (std::rename(QFile::encodeName(bakTemp).constData(), QFile::encodeName(bak).constData()) != 0) {
+            QFile::remove(bakTemp);
+            return fail(QStringLiteral("Could not save %1: the backup %2 could not be written.")
+                            .arg(path, QFileInfo(bak).fileName()));
+        }
+    }
+    // POSIX rename() replaces the target atomically: readers see the old file
+    // or the new one, never a partial one.
+    if (std::rename(QFile::encodeName(tempPath).constData(), QFile::encodeName(finalPath).constData()) != 0) {
+        return fail(QStringLiteral("Could not replace %1 with the saved file.").arg(path));
+    }
+    guard.path.clear();
+    return true;
 }
 
 } // namespace DocumentIo
