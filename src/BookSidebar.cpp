@@ -789,7 +789,7 @@ QMenu *BookSidebar::buildContextMenu(int row)
         });
         open->setEnabled(!m_book.isMissing(row));
         menu->addAction(QStringLiteral("Edit Details…"), this, [this, row]() { editChapter(row); });
-        QAction *rename = menu->addAction(QStringLiteral("Rename"), this, [this, row]() { renameChapter(row); });
+        menu->addAction(QStringLiteral("Rename"), this, [this, row]() { renameChapter(row); });
         menu->addSeparator();
         QAction *up = menu->addAction(QStringLiteral("Move Up"), this,
                                       [this, row]() { moveChapter(row, row - 1); });

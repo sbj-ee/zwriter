@@ -205,7 +205,7 @@ static QString firstFamily(const QTextCharFormat &f)
     if (!fams.isEmpty()) {
         return fams.first();
     }
-    return f.hasProperty(QTextFormat::FontFamily) ? f.fontFamily() : QString();
+    return f.hasProperty(QTextFormat::FontFamily) ? f.stringProperty(QTextFormat::FontFamily) : QString();
 }
 
 int restyle(QTextDocument *doc, const Map &from, const Map &to, const QStringList &bodyChain,

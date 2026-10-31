@@ -69,6 +69,41 @@ jobs:
           path: build/*.deb
           if-no-files-found: error
 
+  sanitizers:
+    name: Linux ASan+UBSan (Debug)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Qt6 + build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            qt6-base-dev qt6-multimedia-dev cmake ninja-build g++ \
+            unzip zip \
+            libhunspell-dev hunspell-en-us \
+            libsodium-dev pkg-config
+
+      - name: Configure (Debug, -fsanitize=address,undefined)
+        run: |
+          SAN="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="$SAN" -DCMAKE_CXX_FLAGS="$SAN" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test under sanitizers
+        env:
+          QT_QPA_PLATFORM: offscreen
+          # Leak checking is off: Qt's global singletons and plugin caches are
+          # reported as leaks at exit. Memory errors and UB still fail the run.
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir build --output-on-failure --timeout 1200
+
   macos:
     name: macOS arm64
     runs-on: macos-15

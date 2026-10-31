@@ -118,7 +118,9 @@ void writeFile(const QString &path, const QByteArray &b)
 {
     QDir().mkpath(QFileInfo(path).path());
     QFile f(path);
-    f.open(QIODevice::WriteOnly);
+    if (!f.open(QIODevice::WriteOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     f.write(b);
 }
 } // namespace

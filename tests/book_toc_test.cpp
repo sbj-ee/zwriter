@@ -34,7 +34,9 @@ void write(const QString &path, const QByteArray &b)
 {
     QDir().mkpath(QFileInfo(path).path());
     QFile f(path);
-    f.open(QIODevice::WriteOnly);
+    if (!f.open(QIODevice::WriteOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     f.write(b);
 }
 QString member(const QString &zip, const QString &name)
@@ -147,7 +149,9 @@ int main(int argc, char **argv)
                           QStringLiteral("--outdir"), tmp.filePath(QStringLiteral("lo")), out});
         p.waitForFinished(120000);
         QFile f(tmp.filePath(QStringLiteral("lo/toc.fodt")));
-        f.open(QIODevice::ReadOnly);
+        if (!f.open(QIODevice::ReadOnly)) {
+            qFatal("cannot open %s", qPrintable(f.fileName()));
+        }
         const QString flat = QString::fromUtf8(f.readAll());
         check(flat.contains(QLatin1String("text:name=\"zwriter-toc\"")) && flat.contains(QLatin1String("Bald Eagle")),
               "O LibreOffice reads it as a table of contents");

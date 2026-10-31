@@ -69,14 +69,18 @@ void write(const QString &path, const QByteArray &bytes)
 {
     QDir().mkpath(QFileInfo(path).absolutePath());
     QFile f(path);
-    f.open(QIODevice::WriteOnly);
+    if (!f.open(QIODevice::WriteOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     f.write(bytes);
 }
 
 QByteArray readAll(const QString &path)
 {
     QFile f(path);
-    f.open(QIODevice::ReadOnly);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     return f.readAll();
 }
 
@@ -486,8 +490,10 @@ void usabilityTests()
         // word count, and the footer the book total.
         QStringList opened;
         auto conn = QObject::connect(side, &BookSidebar::fileActivated, [&opened](const QString &p) { opened << p; });
-        QApplication::setActiveWindow(&win);
-        QTest::qWaitForWindowExposed(&win);
+        win.activateWindow();
+        if (!QTest::qWaitForWindowExposed(&win)) {
+            std::printf("WARN  window not exposed\n");
+        }
         list->scrollToItem(list->item(2));
         const QRect r = list->visualItemRect(list->item(2));
         QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, r.center());
@@ -880,7 +886,7 @@ void headerLayoutTests()
     if (!header) {
         return;
     }
-    for (const QString theme : {QStringLiteral("dark"), QStringLiteral("paper")}) {
+    for (const QString &theme : {QStringLiteral("dark"), QStringLiteral("paper")}) {
         side->applyTheme(Theme::colors(theme));
         for (int w : {180, 220, 260, 320, 480}) {
             win.resize(w, 500);

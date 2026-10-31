@@ -216,7 +216,9 @@ void testRtf(const QString &dir)
     QString err;
     check(DocumentIo::save(&doc, path, DocumentIo::Format::Rtf, &err), "RTF save", err);
     QFile f(path);
-    f.open(QIODevice::ReadOnly);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     const QString rtf = QString::fromLatin1(f.readAll());
     check(rtf.contains(QLatin1String("\\ql")) && rtf.contains(QLatin1String("\\qc"))
               && rtf.contains(QLatin1String("\\qr")) && rtf.contains(QLatin1String("\\qj")),

@@ -43,13 +43,17 @@ void write(const QString &path, const QByteArray &b)
 {
     QDir().mkpath(QFileInfo(path).path());
     QFile f(path);
-    f.open(QIODevice::WriteOnly);
+    if (!f.open(QIODevice::WriteOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     f.write(b);
 }
 QByteArray readAll(const QString &path)
 {
     QFile f(path);
-    f.open(QIODevice::ReadOnly);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     return f.readAll();
 }
 QString member(const QString &zip, const QString &name)

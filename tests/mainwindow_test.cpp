@@ -124,7 +124,7 @@ void check(bool ok, const QString &what, const QString &detail = QString())
     check(ok, what.toUtf8().constData(), detail);
 }
 
-void wait(int ms)
+void waitMs(int ms)
 {
     QEventLoop loop;
     QTimer::singleShot(ms, &loop, &QEventLoop::quit);
@@ -221,7 +221,7 @@ void testViewChangesStayClean(const QString &path, PromptWatcher &prompts)
     auto win = std::make_unique<MainWindow>();
     win->show();
     win->openExternalFile(path);
-    wait(600);
+    waitMs(600);
     QTextEdit *ed = editorOf(*win);
     const char *viewSlots[] = {"toggleChrome",         "setThemeDark",       "setThemeInverse",
                            "setThemePaper",        "toggleFullPageView", "toggleFitPageWidth",
@@ -230,10 +230,10 @@ void testViewChangesStayClean(const QString &path, PromptWatcher &prompts)
                            "toggleMarkdownPreview", "toggleLibrary",     "toggleLibrary",
                            "toggleFullPageView"};
     win->resize(1100, 760);
-    wait(150);
+    waitMs(150);
     for (const char *slot : viewSlots) {
         QMetaObject::invokeMethod(win.get(), slot);
-        wait(80);
+        waitMs(80);
         if (isDirty(*win) || (ed && ed->document()->isModified())) {
             check(false, qPrintable(QStringLiteral("V %1: stays clean after %2").arg(name, QLatin1String(slot))),
                   QStringLiteral("%1 docModified=%2").arg(win->windowTitle()).arg(ed && ed->document()->isModified()));
@@ -241,9 +241,9 @@ void testViewChangesStayClean(const QString &path, PromptWatcher &prompts)
         }
     }
     win->resize(700, 500);
-    wait(200);
+    waitMs(200);
     win->showMaximized();
-    wait(300);
+    waitMs(300);
     prompts.seen = 0;
     const bool closed = win->close();
     check(!isDirty(*win) && closed && prompts.seen == 0,
@@ -257,13 +257,13 @@ void testOpenClean(const QStringList &paths, PromptWatcher &prompts)
         const QString name = QFileInfo(path).fileName();
         auto win = std::make_unique<MainWindow>();
         win->show();
-        wait(50);
+        waitMs(50);
         prompts.seen = 0;
         win->openExternalFile(path);
         check(!isDirty(*win), qPrintable(QStringLiteral("C %1: clean right after open").arg(name)),
               win->windowTitle());
         // Timers, deferred highlighting, spell check, status updates: all settle.
-        wait(1200);
+        waitMs(1200);
         QTextEdit *ed = editorOf(*win);
         check(!isDirty(*win), qPrintable(QStringLiteral("C %1: still clean after the open settles").arg(name)),
               win->windowTitle());
@@ -318,7 +318,7 @@ void testSidebarOpensClean(const QString &root, PromptWatcher &prompts, const QS
     auto win = std::make_unique<MainWindow>();
     win->resize(1024, 640);
     win->show();
-    wait(100);
+    waitMs(100);
     auto *side = win->findChild<BookSidebar *>();
     QListWidget *list = side ? side->view() : nullptr;
     check(list && list->count() == 4, qPrintable("K " + tag + ": book with 4 chapters shown"));
@@ -331,7 +331,7 @@ void testSidebarOpensClean(const QString &root, PromptWatcher &prompts, const QS
         // the release.
         const QPoint at = list->visualItemRect(list->item(row)).center();
         QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at);
-        wait(700);
+        waitMs(700);
     };
     prompts.seen = 0;
     for (int row : {0, 1, 2, 3, 0}) {
@@ -372,7 +372,7 @@ void testSidebarOpensClean(const QString &root, PromptWatcher &prompts, const QS
             im.setCommitString(same, 0, 1);
             QApplication::sendEvent(ed, &im);
         }
-        wait(100);
+        waitMs(100);
         const QString name = list->item(row)->data(Qt::UserRole + 1).toString();
         check(!isDirty(*win), qPrintable("K " + tag + ": non-edits leave " + name + " clean"),
               win->windowTitle());
@@ -385,12 +385,12 @@ void testSidebarOpensClean(const QString &root, PromptWatcher &prompts, const QS
     // Library view: the same files from the tree.
     auto *libSide = win->findChild<LibrarySidebar *>();
     QMetaObject::invokeMethod(win.get(), "toggleLibrary");
-    wait(300);
+    waitMs(300);
     prompts.seen = 0;
     for (const char *file : {"Chapter 2.txt", "Chapter 3.md", "Chapter 4.odt", "Chapter 1.txt"}) {
         const QString path = book + QLatin1Char('/') + QLatin1String(file);
         emit libSide->fileActivated(path); // what a click on the row emits
-        wait(700);
+        waitMs(700);
         QTextEdit *ed = editorOf(*win);
         check(prompts.seen == 0 && !isDirty(*win) && ed && !ed->document()->isModified()
                   && win->windowTitle().contains(QLatin1String(file)),
@@ -405,10 +405,10 @@ void testSidebarOpensClean(const QString &root, PromptWatcher &prompts, const QS
     c.movePosition(QTextCursor::End);
     ed->setTextCursor(c);
     ed->insertPlainText(QStringLiteral(" edited"));
-    wait(50);
+    waitMs(50);
     prompts.seen = 0;
     emit libSide->fileActivated(book + QStringLiteral("/Chapter 2.txt"));
-    wait(300);
+    waitMs(300);
     check(isDirty(*win) && prompts.seen == 1 && win->windowTitle().contains("Chapter 1.txt"),
           qPrintable("K " + tag + ": a real edit prompts; Cancel keeps the chapter"),
           QStringLiteral("prompts=%1 title=%2").arg(prompts.seen).arg(win->windowTitle()));
@@ -423,7 +423,7 @@ void testEditAndSave(const QString &dir, PromptWatcher &prompts)
     auto win = std::make_unique<MainWindow>();
     win->show();
     win->openExternalFile(path);
-    wait(800);
+    waitMs(800);
     QTextEdit *ed = editorOf(*win);
     if (!ed) {
         check(false, "E editor found");
@@ -431,7 +431,7 @@ void testEditAndSave(const QString &dir, PromptWatcher &prompts)
     }
     ed->moveCursor(QTextCursor::End);
     ed->textCursor().insertText(QStringLiteral("more"));
-    wait(50);
+    waitMs(50);
     check(isDirty(*win), "E a real edit marks the window dirty", win->windowTitle());
     prompts.seen = 0;
     const bool closed = win->close();
@@ -441,7 +441,7 @@ void testEditAndSave(const QString &dir, PromptWatcher &prompts)
     // Undo back to the saved text: still reported dirty (conservative: another
     // change, e.g. properties, may be pending), and closing asks.
     ed->undo();
-    wait(50);
+    waitMs(50);
     prompts.seen = 0;
     const bool closed2 = win->close();
     check(isDirty(*win) == !closed2 && (closed2 || prompts.seen == 1),
@@ -453,14 +453,14 @@ void testEditAndSave(const QString &dir, PromptWatcher &prompts)
     auto win2 = std::make_unique<MainWindow>();
     win2->show();
     win2->openExternalFile(path);
-    wait(800);
+    waitMs(800);
     QTextEdit *ed2 = editorOf(*win2);
     ed2->moveCursor(QTextCursor::End);
     ed2->textCursor().insertText(QStringLiteral(" saved"));
-    wait(50);
+    waitMs(50);
     check(isDirty(*win2), "S edited again: dirty");
     QMetaObject::invokeMethod(win2.get(), "fileSave");
-    wait(500);
+    waitMs(500);
     check(!isDirty(*win2) && !ed2->document()->isModified(), "S after Save the window is clean",
           win2->windowTitle());
     prompts.seen = 0;
@@ -468,7 +468,9 @@ void testEditAndSave(const QString &dir, PromptWatcher &prompts)
     check(closed3 && prompts.seen == 0, "S a saved window closes without asking",
           QStringLiteral("closed=%1 prompts=%2").arg(closed3).arg(prompts.seen));
     QFile f(path);
-    f.open(QIODevice::ReadOnly);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     check(f.readAll().contains("saved"), "S the file on disk has the edit");
 }
 
@@ -497,7 +499,7 @@ void testPageGuidesContainText()
         }
         MainWindow win;
         win.show();
-        wait(100);
+        waitMs(100);
         QTextEdit *ed = editorOf(win);
         QAction *guides = nullptr;
         for (QAction *a : win.findChildren<QAction *>()) {
@@ -521,7 +523,7 @@ void testPageGuidesContainText()
                 QMetaObject::invokeMethod(&win, theme);
                 for (int w : widths) {
                     win.resize(w, 700);
-                    wait(60);
+                    waitMs(60);
                     const QPair<qreal, qreal> col = win.pageGuideColumn();
                     const qreal caretX = ed->cursorRect(c).left();
                     QTextCursor end(ed->document());
@@ -539,7 +541,7 @@ void testPageGuidesContainText()
                 }
             }
             QMetaObject::invokeMethod(&win, "toggleLibrary");
-            wait(60);
+            waitMs(60);
         }
         win.close();
     }
@@ -555,7 +557,9 @@ void testOdtImageOpens(const QString &dir)
     img.fill(QColor(200, 40, 40));
     QByteArray png;
     QBuffer buf(&png);
-    buf.open(QIODevice::WriteOnly);
+    if (!buf.open(QIODevice::WriteOnly)) {
+        qFatal("cannot open buffer");
+    }
     img.save(&buf, "PNG");
     QTextImageFormat f;
     f.setName(Images::addImageData(&src, png));
@@ -568,7 +572,7 @@ void testOdtImageOpens(const QString &dir)
     win.resize(1000, 700);
     win.show();
     win.openExternalFile(path);
-    wait(600);
+    waitMs(600);
     QTextEdit *ed = editorOf(win);
     check(ed && Images::imageFormats(ed->document()).size() == 1, "I the opened ODT has its picture");
     check(!isDirty(win), "I opening it is not an edit", win.windowTitle());
@@ -592,7 +596,9 @@ QByteArray pngBytes(int w, int h, QColor c)
     img.fill(c);
     QByteArray out;
     QBuffer buf(&out);
-    buf.open(QIODevice::WriteOnly);
+    if (!buf.open(QIODevice::WriteOnly)) {
+        qFatal("cannot open buffer");
+    }
     img.save(&buf, "PNG");
     return out;
 }
@@ -602,13 +608,15 @@ void testInsertPictures(const QString &dir)
     const QString file = dir + QStringLiteral("/pic.png");
     {
         QFile f(file);
-        f.open(QIODevice::WriteOnly);
+        if (!f.open(QIODevice::WriteOnly)) {
+            qFatal("cannot open %s", qPrintable(f.fileName()));
+        }
         f.write(pngBytes(300, 150, QColor(60, 120, 180)));
     }
     MainWindow win;
     win.resize(1000, 700);
     win.show();
-    wait(200);
+    waitMs(200);
     auto *ed = qobject_cast<PageTextEdit *>(editorOf(win));
     check(ed != nullptr, "P editor is a PageTextEdit");
     if (!ed) {
@@ -648,7 +656,7 @@ void testInsertPictures(const QString &dir)
         MainWindow md;
         md.show();
         QMetaObject::invokeMethod(&md, "fileNewMarkdown");
-        wait(150);
+        waitMs(150);
         auto *med = qobject_cast<PageTextEdit *>(editorOf(md));
         check(med && med->insertImagesFromMimeData(&drop) == 0 && !md.insertImageFile(file),
               "P an unsaved Markdown file refuses pictures (they need a folder next to it)");
@@ -674,14 +682,16 @@ void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
     const QString file = dir + QStringLiteral("/k.png");
     {
         QFile f(file);
-        f.open(QIODevice::WriteOnly);
+        if (!f.open(QIODevice::WriteOnly)) {
+            qFatal("cannot open %s", qPrintable(f.fileName()));
+        }
         f.write(pngBytes(300, 150, QColor(60, 120, 180)));
     }
     {
         MainWindow win;
         win.resize(1000, 700);
         win.show();
-        wait(150);
+        waitMs(150);
         QTextEdit *ed = editorOf(win);
         win.insertImageFile(file);
         const int pos = 0;
@@ -698,7 +708,9 @@ void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
         const QString pdf = dir + QStringLiteral("/k.pdf");
         check(win.exportPdfTo(pdf), "K export PDF");
         QFile pf(pdf);
-        pf.open(QIODevice::ReadOnly);
+        if (!pf.open(QIODevice::ReadOnly)) {
+            qFatal("cannot open %s", qPrintable(pf.fileName()));
+        }
         const QByteArray bytes = pf.readAll();
         check(bytes.contains("/Subtype /Image"), "K the PDF has an image object");
         check(bytes.contains("/Width 300") && bytes.contains("/Height 150"),
@@ -713,7 +725,7 @@ void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
         win.resize(1000, 700);
         win.show();
         win.openExternalFile(md);
-        wait(300);
+        waitMs(300);
         QTextEdit *ed = editorOf(win);
         QTextCursor end = ed->textCursor();
         end.movePosition(QTextCursor::End);
@@ -733,7 +745,7 @@ void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
         if (preview && !preview->isVisible()) {
             QMetaObject::invokeMethod(&win, "toggleMarkdownPreview");
         }
-        wait(900);
+        waitMs(900);
         bool shown = false;
         for (QTextBrowser *b : win.findChildren<QTextBrowser *>()) {
             for (QTextBlock blk = b->document()->begin(); blk.isValid(); blk = blk.next()) {
@@ -754,7 +766,7 @@ void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
         ed->setPlainText(text);
         prompts.seen = 0;
         QMetaObject::invokeMethod(&win, "fileSave");
-        wait(200);
+        waitMs(200);
         check(prompts.seen == 1 && QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-002.png")),
               "K save offers cleanup of the unused picture; default keeps it",
               QString::number(prompts.seen));
@@ -773,7 +785,7 @@ void testCaptionsPdfMarkdown(const QString &dir, PromptWatcher &prompts)
         deleter.start();
         ed->insertPlainText(QStringLiteral(" "));
         QMetaObject::invokeMethod(&win, "fileSave");
-        wait(200);
+        waitMs(200);
         deleter.stop();
         check(!QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-002.png"))
                   && QFileInfo::exists(dir + QStringLiteral("/Field notes.assets/image-001.png")),
@@ -816,8 +828,8 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
     win->resize(1024, 640);
     win->show();
     win->activateWindow();
-    QApplication::setActiveWindow(win.get());
-    wait(100);
+    win->activateWindow();
+    waitMs(100);
     check(win->isActiveWindow(), "B window active (shortcuts are delivered)");
     auto *side = win->findChild<BookSidebar *>();
     QListWidget *list = side ? side->view() : nullptr;
@@ -828,7 +840,7 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
     const auto at = [&](int row) { return list->visualItemRect(list->item(row)).center(); };
     const auto titleHas = [&](const char *name) { return win->windowTitle().contains(QLatin1String(name)); };
     QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(0));
-    wait(300);
+    waitMs(300);
     check(titleHas("01 Intro.md"), "B click opens chapter 1", win->windowTitle());
 
     // Ctrl+Shift+E from the editor, Enter in the dialog, then one click on
@@ -836,7 +848,7 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
     for (int round = 0; round < 3; ++round) {
         QTextEdit *ed = editorOf(*win);
         ed->setFocus();
-        wait(50);
+        waitMs(50);
         const QString pdf = root + QStringLiteral("/feedback-%1.pdf").arg(round);
         bool sawDialog = false;
         int ticks = 0;
@@ -879,13 +891,13 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
             exportAct->trigger(); // what Ctrl+Shift+E does; runs the modal dialog
         }
         closer.stop();
-        wait(200);
+        waitMs(200);
         check(sawDialog && QFileInfo::exists(pdf) && !isDirty(*win),
               qPrintable(QStringLiteral("B round %1: export dialog, Enter exports, document stays clean").arg(round)),
               QStringLiteral("action=%1 dialog=%2 ticks=%3").arg(exportAct != nullptr).arg(sawDialog).arg(ticks));
         const int row = 1 + round % 2;
         QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(row));
-        wait(300);
+        waitMs(300);
         const QByteArray want = row == 1 ? "02 Songbirds.md" : "03 Raptors.md";
         check(titleHas(want.constData()), qPrintable(QStringLiteral("B round %1: first click after the dialog opens chapter %2").arg(round).arg(row + 1)),
               win->windowTitle());
@@ -897,26 +909,26 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
                          Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
         QApplication::sendEvent(list->viewport(), &move);
         QTest::mouseRelease(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(other) + QPoint(4, 3));
-        wait(300);
+        waitMs(300);
         check(titleHas(other == 3 ? "04 Owls.odt" : "01 Intro.md"),
               qPrintable(QStringLiteral("B round %1: a slightly moving click still opens").arg(round)), win->windowTitle());
     }
 
     // Alt+Down / Alt+Up with the editor focused move the open chapter.
     QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, at(1));
-    wait(300);
+    waitMs(300);
     QTextEdit *ed = editorOf(*win);
     ed->setFocus();
-    wait(50);
+    waitMs(50);
     QTest::keyClick(ed, Qt::Key_Down, Qt::AltModifier);
-    wait(100);
+    waitMs(100);
     BookManifest saved;
     saved.load(book);
     check(saved.count() == 4 && saved.at(2).path == QLatin1String("02 Songbirds.md") && ed->hasFocus(),
           "B Alt+Down in the editor moves the open chapter down (book.json saved, focus kept)",
           saved.count() ? saved.at(2).path : QString());
     QTest::keyClick(ed, Qt::Key_Up, Qt::AltModifier);
-    wait(100);
+    waitMs(100);
     saved = BookManifest();
     saved.load(book);
     check(saved.at(1).path == QLatin1String("02 Songbirds.md"), "B Alt+Up in the editor moves it back");
@@ -929,19 +941,19 @@ void testBookFeedback(const QString &root, PromptWatcher &prompts)
         check(newChapter && newBook, "B File menu has New Book… and New Chapter…");
         if (newChapter && newBook) {
             newChapter->trigger();
-            wait(50);
+            waitMs(50);
             QDialog *d = side->newChapterDialog();
             check(d && side->isVisible(), "B File → New Chapter… shows the New Chapter dialog");
             if (d) {
                 d->reject();
             }
             newBook->trigger();
-            wait(50);
+            waitMs(50);
             check(side->newBookDialog() != nullptr, "B File → New Book… shows the New Book dialog");
             if (side->newBookDialog()) {
                 side->newBookDialog()->reject();
             }
-            wait(50);
+            waitMs(50);
         }
     }
 
@@ -957,7 +969,7 @@ void testParagraphFormatting()
     MainWindow w;
     w.resize(1100, 800);
     w.show();
-    wait(50);
+    waitMs(50);
     QTextEdit *ed = editorOf(w);
     ed->setPlainText(QStringLiteral("First paragraph.\nSecond paragraph."));
     QTextCursor c(ed->document());
@@ -984,7 +996,7 @@ void testParagraphFormatting()
           "G ruler off by default");
     if (ruler && w.ruler()) {
         ruler->trigger();
-        wait(50);
+        waitMs(50);
         Ruler *r = w.ruler();
         check(r->isVisible(), "G View > Ruler shows it");
         const int left = r->markerX(Ruler::Marker::Left);
@@ -1068,7 +1080,7 @@ void testReportFixes(const QString &root)
     MainWindow w;
     w.resize(1100, 800);
     w.show();
-    wait(50);
+    waitMs(50);
     QTextEdit *ed = editorOf(w);
     ed->setFocus();
 
@@ -1213,7 +1225,9 @@ void testReportFixes(const QString &root)
         check(QDir::cleanPath(w.saveStartDir(bookDir)) == QDir::cleanPath(bookDir), "F5 untitled + book: book folder");
         const QString other = root + QStringLiteral("/elsewhere/x.odt");
         QDir().mkpath(root + QStringLiteral("/elsewhere"));
-        QFile(other).open(QIODevice::WriteOnly);
+        if (!QFile(other).open(QIODevice::WriteOnly)) {
+            qFatal("cannot create %s", qPrintable(other));
+        }
         w.setCurrentPathForTest(other);
         check(QDir::cleanPath(w.saveStartDir(bookDir)) == QDir::cleanPath(root + QStringLiteral("/elsewhere")),
               "F5 a saved file: its own folder");
@@ -1230,7 +1244,9 @@ void testBookToc(const QString &root)
     QDir().mkpath(dir);
     auto put = [](const QString &p, const QByteArray &b) {
         QFile f(p);
-        f.open(QIODevice::WriteOnly);
+        if (!f.open(QIODevice::WriteOnly)) {
+            qFatal("cannot open %s", qPrintable(f.fileName()));
+        }
         f.write(b);
     };
     put(dir + QStringLiteral("/01 Prairie.md"), "# Prairie\n\n## Meadowlarks\n");
@@ -1238,7 +1254,7 @@ void testBookToc(const QString &root)
     MainWindow w;
     w.resize(1100, 800);
     w.show();
-    wait(50);
+    waitMs(50);
     auto *side = w.findChild<BookSidebar *>();
     side->setRootPath(lib);
     check(side->createBook(QStringLiteral("Birds")) && side->book().count() == 2, "T book with two chapters");
@@ -1320,7 +1336,7 @@ void testBookToc(const QString &root)
         QTest::keyClicks(line, QStringLiteral("Wetlands"));
         QTest::keyClick(line, Qt::Key_Return);
     }
-    wait(50);
+    waitMs(50);
     check(collect() == QLatin1String("1. Wetlands | Rails | 2. Prairie | Meadowlarks"), "T a rename updates it", collect());
     // A changed heading in a chapter file shows up too (the book saves when the file does).
     put(dir + QStringLiteral("/01 Prairie.md"), "# Prairie\n\n## Larks and Meadowlarks\n");
@@ -1340,7 +1356,9 @@ void testFigureNumbers(const QString &root)
     QDir().mkpath(dir);
     {
         QFile f(dir + QStringLiteral("/01 Intro.md"));
-        f.open(QIODevice::WriteOnly);
+        if (!f.open(QIODevice::WriteOnly)) {
+            qFatal("cannot open %s", qPrintable(f.fileName()));
+        }
         f.write("# Intro\n");
     }
     QImage img(60, 30, QImage::Format_RGB32);
@@ -1355,7 +1373,7 @@ void testFigureNumbers(const QString &root)
     MainWindow w;
     w.resize(1100, 800);
     w.show();
-    wait(50);
+    waitMs(50);
     auto *side = w.findChild<BookSidebar *>();
     side->setRootPath(lib);
     side->createBook(QStringLiteral("Birds"));
@@ -1400,13 +1418,13 @@ void testFigureNumbers(const QString &root)
             break;
         }
     }
-    wait(400);
+    waitMs(400);
     check(caps() == QLatin1String("Figure 2.1. Mallards"), "N removing a figure renumbers the rest", caps());
     ed->document()->undo();
-    wait(400);
+    waitMs(400);
     check(caps() == QLatin1String("Figure 2.1. Trumpeter swan | Figure 2.2. Mallards"), "N one Undo brings the caption and its numbers back", caps());
     ed->document()->redo();
-    wait(400);
+    waitMs(400);
     check(caps() == QLatin1String("Figure 2.1. Mallards") && !ed->document()->isRedoAvailable(), "N and Redo still works", caps());
     side->moveChapter(1, 0);
     QApplication::processEvents();
@@ -1424,7 +1442,9 @@ void testBookExport(const QString &root)
     QDir().mkpath(dir);
     auto put = [](const QString &p, const QByteArray &b) {
         QFile f(p);
-        f.open(QIODevice::WriteOnly);
+        if (!f.open(QIODevice::WriteOnly)) {
+            qFatal("cannot open %s", qPrintable(f.fileName()));
+        }
         f.write(b);
     };
     QByteArray prairie = "# Prairie\n\n";
@@ -1436,7 +1456,7 @@ void testBookExport(const QString &root)
     MainWindow w;
     w.resize(1100, 800);
     w.show();
-    wait(50);
+    waitMs(50);
     auto *side = w.findChild<BookSidebar *>();
     side->setRootPath(lib);
     check(side->createBook(QStringLiteral("Birds")) && side->book().count() == 2, "X book with two chapters");
@@ -1519,8 +1539,8 @@ void testBookFocus(const QString &root)
     win->resize(1024, 640);
     win->show();
     win->activateWindow();
-    QApplication::setActiveWindow(win.get());
-    wait(100);
+    win->activateWindow();
+    waitMs(100);
     auto *side = win->findChild<BookSidebar *>();
     QListWidget *list = side ? side->view() : nullptr;
     check(list && list->count() == 3, "Q book has 3 chapters");
@@ -1528,16 +1548,16 @@ void testBookFocus(const QString &root)
         return;
     }
     QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, list->visualItemRect(list->item(0)).center());
-    wait(200);
+    waitMs(200);
     QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, list->visualItemRect(list->item(2)).center());
-    wait(300);
+    waitMs(300);
     QTextEdit *ed = editorOf(*win);
     check(win->windowTitle().contains(QLatin1String("03 Raptors")) && list->currentRow() == 2,
           "Q click opens chapter 3", QString::number(list->currentRow()));
     ed->setFocus();
-    wait(50);
+    waitMs(50);
     QTest::keyClick(ed, Qt::Key_F2);
-    wait(100);
+    waitMs(100);
     auto *editor = qobject_cast<QLineEdit *>(QApplication::focusWidget());
     check(editor && list->isAncestorOf(editor)
               && list->currentRow() == 2 && editor->text() == QLatin1String("Raptors"),
@@ -1545,25 +1565,25 @@ void testBookFocus(const QString &root)
     if (editor) {
         QTest::keyClick(editor, Qt::Key_Escape);
     }
-    wait(100);
+    waitMs(100);
     check(ed->toPlainText().contains(QLatin1String("Raptors")) && !ed->document()->isModified(),
           "Q ... and types nothing into the document");
 
     ed->setFocus();
-    wait(50);
+    waitMs(50);
     list->setFocus(Qt::TabFocusReason);
-    wait(50);
+    waitMs(50);
     check(list->hasFocus() && list->currentRow() == 2 && list->currentItem() && list->currentItem()->isSelected(),
           "Q the list keeps the current row when it gets focus", QString::number(list->currentRow()));
     list->setFocus(Qt::MouseFocusReason);
     ed->setFocus();
     list->setFocus(Qt::OtherFocusReason);
-    wait(50);
+    waitMs(50);
     check(list->currentRow() == 2, "Q ... for any focus reason", QString::number(list->currentRow()));
     check(side->styleSheet().contains(QLatin1String("#bookList:focus")), "Q the list draws a focus ring");
 
     ed->setFocus();
-    wait(50);
+    waitMs(50);
     QWidget *next = ed->nextInFocusChain();
     while (next && next != ed && !(next->focusPolicy() & Qt::TabFocus && next->isVisible() && next->isEnabled())) {
         next = next->nextInFocusChain();
@@ -1573,31 +1593,31 @@ void testBookFocus(const QString &root)
     // Tab types a tab in the document; Ctrl+Tab moves on (Qt's rule for text editors).
     const int before = ed->toPlainText().size();
     QTest::keyClick(ed, Qt::Key_Tab, Qt::ControlModifier);
-    wait(50);
+    waitMs(50);
     check(QApplication::focusWidget() == list && ed->toPlainText().size() == before && list->currentRow() == 2,
           "Q Ctrl+Tab from the editor reaches the chapter list, on the open chapter",
           QApplication::focusWidget() ? QApplication::focusWidget()->objectName() : QString());
     QTest::keyClick(list, Qt::Key_F2);
-    wait(100);
+    waitMs(100);
     auto *ed2 = qobject_cast<QLineEdit *>(QApplication::focusWidget());
     check(ed2 && list->isAncestorOf(ed2) && ed2->text() == QLatin1String("Raptors"), "Q F2 in the list still renames");
     if (ed2) {
         ed2->setText(QStringLiteral("Hawks"));
         QTest::keyClick(ed2, Qt::Key_Return);
     }
-    wait(200);
+    waitMs(200);
     check(side->book().displayTitle(2) == QLatin1String("Hawks"), "Q the new title is saved", side->book().displayTitle(2));
     check(list->currentRow() == 2, "Q renaming keeps the row", QString::number(list->currentRow()));
     ed->setFocus();
-    wait(50);
+    waitMs(50);
     QTest::keyClick(ed, Qt::Key_Tab, Qt::ControlModifier); // focus comes back from the editor
-    wait(50);
+    waitMs(50);
     check(list->hasFocus() && list->currentRow() == 2, "Q focus back into the list keeps the row",
           QString::number(list->currentRow()));
     ed->setFocus();
-    wait(50);
+    waitMs(50);
     QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, list->visualItemRect(list->item(2)).center());
-    wait(300);
+    waitMs(300);
     check(list->currentRow() == 2 && side->book().at(2).path.startsWith(QLatin1String("03")),
           "Q clicking the open chapter again keeps it (no move, no jump)", QString::number(list->currentRow()));
     ed->document()->setModified(false);
@@ -1616,14 +1636,14 @@ void testRulerDrag()
         MainWindow w;
         w.resize(1280, 800);
         w.show();
-        wait(100);
+        waitMs(100);
         if (fit) {
             if (QAction *a = w.findChild<QAction *>(QStringLiteral("viewFitWidth"))) {
                 if (!a->isChecked()) {
                     a->trigger();
                 }
             }
-            wait(200);
+            waitMs(200);
         }
         const char *tag = fit ? "fit" : "full";
         QTextEdit *ed = editorOf(w);
@@ -1642,7 +1662,7 @@ void testRulerDrag()
         if (!ruler->isChecked()) {
             ruler->trigger();
         }
-        wait(100);
+        waitMs(100);
         Ruler *r = w.ruler();
         const int y = r->height() - 3;
         const auto drag = [&](int from, int to) {
@@ -1679,7 +1699,7 @@ void testRulerDrag()
         narrow.setLeftMargin(r->columnWidth() / 2 - 20);
         narrow.setRightMargin(r->columnWidth() / 2 - 20 - ParagraphStyles::cmToPx(3.0) + 40);
         ParagraphStyles::setGeometry(QTextCursor(ed->document()), narrow);
-        wait(50);
+        waitMs(50);
         const int lx = r->markerX(Ruler::Marker::Left);
         const int rx = r->markerX(Ruler::Marker::Right);
         check(r->hitTest(QPoint(lx - 3, y)) == Ruler::Marker::Left && r->hitTest(QPoint(rx + 3, y)) == Ruler::Marker::Right,
@@ -1717,8 +1737,8 @@ void testSidebarRetest(const QString &root)
     win->resize(1024, 640);
     win->show();
     win->activateWindow();
-    QApplication::setActiveWindow(win.get());
-    wait(100);
+    win->activateWindow();
+    waitMs(100);
     auto *side = win->findChild<BookSidebar *>();
     QListWidget *list = side ? side->view() : nullptr;
     if (!list || list->count() != 3) {
@@ -1736,10 +1756,10 @@ void testSidebarRetest(const QString &root)
     // nothing (QListWidget ignores Ctrl+Tab). Keys go to the focus widget here.
     auto press = [&](Qt::Key key, Qt::KeyboardModifiers mods) {
         QTest::keyClick(QApplication::focusWidget() ? QApplication::focusWidget() : win.get(), key, mods);
-        wait(50);
+        waitMs(50);
     };
     ed->setFocus();
-    wait(50);
+    waitMs(50);
     press(Qt::Key_Tab, ctrl);
     check(list->hasFocus(), "W1 Ctrl+Tab: editor to the chapter list");
     press(Qt::Key_Tab, ctrl);
@@ -1758,18 +1778,18 @@ void testSidebarRetest(const QString &root)
           "W6 the open chapter is marked");
     list->setFocus();
     list->setCurrentRow(0); // arrowed up to Alpha: highlighted, not open
-    wait(50);
+    waitMs(50);
     check(list->item(1)->data(BookSidebar::OpenRole).toBool() && list->currentRow() == 0,
           "W6 highlight and open marker can differ");
     QTest::keyClick(list, Qt::Key_F2);
-    wait(100);
+    waitMs(100);
     auto *line = qobject_cast<QLineEdit *>(QApplication::focusWidget());
     check(line && line->text() == QLatin1String("Beta"), "W6 F2 renames the open chapter, even from the list",
           line ? line->text() : QString());
     if (line) {
         QTest::keyClick(line, Qt::Key_Escape);
     }
-    wait(100);
+    waitMs(100);
     // Right-click Gamma: no selection change, nothing opened, the menu names it.
     list->setCurrentRow(1);
     const QString title = win->windowTitle();
@@ -1785,7 +1805,7 @@ void testSidebarRetest(const QString &root)
                   "W6 the menu names the chapter it acts on", acts.isEmpty() ? QString() : acts.first()->text());
             bool hint = false;
             for (QAction *a : acts) {
-                hint = hint || !a->shortcut().isEmpty() && a->shortcut() != QKeySequence(QKeySequence::Delete);
+                hint = hint || (!a->shortcut().isEmpty() && a->shortcut() != QKeySequence(QKeySequence::Delete));
             }
             check(!hint, "W6 no F2/Alt+arrow hints on a row menu (those keys act on the open chapter)");
             menu->close();
@@ -1793,7 +1813,7 @@ void testSidebarRetest(const QString &root)
     });
     QContextMenuEvent ev(QContextMenuEvent::Mouse, at, list->viewport()->mapToGlobal(at));
     emit list->customContextMenuRequested(at);
-    wait(500);
+    waitMs(500);
     check(menu != nullptr, "W6 the context menu opened");
     check(!list->item(2)->data(BookSidebar::ContextRole).toBool() && win->windowTitle() == title,
           "W6 closing it clears the outline; nothing was opened");
@@ -1806,12 +1826,12 @@ void testSidebarRetest(const QString &root)
         }
     };
     pin(true);
-    wait(100);
+    waitMs(100);
     const QPoint listAt = list->mapTo(win.get(), QPoint(0, 0));
     const QPoint edAt = ed->mapTo(win.get(), QPoint(0, 0));
     pin(false);
     QMetaObject::invokeMethod(win.get(), "hideAwayIdle");
-    wait(100);
+    waitMs(100);
     check(!win->chromeShown(), "W7 chrome hidden away");
     check(list->mapTo(win.get(), QPoint(0, 0)) == listAt && ed->mapTo(win.get(), QPoint(0, 0)) == edAt,
           "W7 the chapter list and editor do not move",
@@ -1819,7 +1839,7 @@ void testSidebarRetest(const QString &root)
     QWidget *bar = win->findChild<QToolBar *>();
     check(bar && bar->testAttribute(Qt::WA_TransparentForMouseEvents), "W7 the hidden toolbar takes no clicks");
     pin(true);
-    wait(50);
+    waitMs(50);
     check(win->chromeShown() && bar && !bar->testAttribute(Qt::WA_TransparentForMouseEvents) && !bar->graphicsEffect(),
           "W7 shown again, it works as before");
     ed->document()->setModified(false);
@@ -1864,8 +1884,8 @@ void testHeadingsRetest(const QString &root)
     win->resize(1024, 640);
     win->show();
     win->activateWindow();
-    QApplication::setActiveWindow(win.get());
-    wait(100);
+    win->activateWindow();
+    waitMs(100);
     auto *side = win->findChild<BookSidebar *>();
     if (!side || side->book().count() != 3) {
         check(false, "X book");
@@ -1878,7 +1898,7 @@ void testHeadingsRetest(const QString &root)
             line->setText(to);
             QTest::keyClick(line, Qt::Key_Return);
         }
-        wait(100);
+        waitMs(100);
     };
     auto fileText = [&](const QString &rel) {
         QTextDocument d;
@@ -1889,7 +1909,9 @@ void testHeadingsRetest(const QString &root)
     check(win->openPathForTest(book + QStringLiteral("/02 Beta.odt")), "X chapter 2 open");
     rename(0, QStringLiteral("Prairie"));
     QFile md(book + QStringLiteral("/01 Prairie.md")); // 1.11.3: the file follows the title
-    md.open(QIODevice::ReadOnly);
+    if (!md.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(md.fileName()));
+    }
     const QByteArray mdNow = md.readAll();
     md.close();
     check(mdNow == "# Prairie\n\nOne.\n", "X3 rename a closed chapter: its heading line changes, nothing else",
@@ -1929,13 +1951,13 @@ void testHeadingsRetest(const QString &root)
     };
     answer(QStringLiteral("Keep Heading"));
     rename(1, QStringLiteral("Wetlands"));
-    wait(300);
+    waitMs(300);
     qApp->setProperty("zwHoldPrompts", false);
     check(ed->document()->firstBlock().text() == QLatin1String("Marsh") && side->book().displayTitle(1) == QLatin1String("Wetlands"),
           "X3 unsaved chapter: asks; Keep Heading keeps it", ed->document()->firstBlock().text());
     answer(QStringLiteral("Change Heading"));
     rename(1, QStringLiteral("Marshes"));
-    wait(300);
+    waitMs(300);
     qApp->setProperty("zwHoldPrompts", false);
     check(ed->document()->firstBlock().text() == QLatin1String("Marshes") && ed->document()->isModified()
               && fileText(QStringLiteral("02 Marshes.odt")).startsWith(QLatin1String("Marsh\n")),
@@ -2023,7 +2045,7 @@ void testTocPagesRetest(const QString &root)
     MainWindow w;
     w.resize(1100, 800);
     w.show();
-    wait(50);
+    waitMs(50);
     const QString copy = root + QStringLiteral("/toc-leaders.odt");
     QFile::remove(copy);
     QFile::copy(QStringLiteral(ZW_SOURCE_DIR "/tests/data/toc-libreoffice.odt"), copy);
@@ -2126,7 +2148,7 @@ void testBigBookTimings(const QString &root)
     MainWindow w;
     w.resize(1100, 800);
     w.show();
-    wait(100);
+    waitMs(100);
     auto *side = w.findChild<BookSidebar *>();
     if (!side || side->book().count() != 30) {
         check(false, "Z big book");
@@ -2157,7 +2179,7 @@ void testBigBookTimings(const QString &root)
         QApplication::processEvents();
         worst = qMax(worst, one.elapsed());
     }
-    wait(400);
+    waitMs(400);
     QElapsedTimer settle;
     settle.start();
     QApplication::processEvents();
@@ -2199,8 +2221,8 @@ void testUsabilityFixes(const QString &root)
     win->resize(1024, 640);
     win->show();
     win->activateWindow();
-    QApplication::setActiveWindow(win.get());
-    wait(100);
+    win->activateWindow();
+    waitMs(100);
     auto *side = win->findChild<BookSidebar *>();
     QListWidget *list = side ? side->view() : nullptr;
     if (!list || list->count() != 3) {
@@ -2212,7 +2234,7 @@ void testUsabilityFixes(const QString &root)
     QTextEdit *ed = editorOf(*win);
     ed->setFocus();
     QTest::keyClick(ed, Qt::Key_Up, Qt::AltModifier);
-    wait(100);
+    waitMs(100);
     check(side->book().at(1).path.startsWith(QLatin1String("03")) && side->book().at(0).path.startsWith(QLatin1String("01")),
           "U3 Alt+Up moves the chapter open in the editor, not the selected one",
           side->book().at(0).path + QLatin1Char(',') + side->book().at(1).path);
@@ -2246,12 +2268,12 @@ void testUsabilityFixes(const QString &root)
         check(false, "U2 Remove Chapter dialog shown");
     }
     qApp->setProperty("zwHoldPrompts", false);
-    wait(100);
+    waitMs(100);
 
     if (auto *combo = win->findChild<QComboBox *>(QStringLiteral("styleCombo"))) {
         combo->setCurrentIndex(qMin(4, combo->count() - 1));
         combo->showPopup();
-        wait(300);
+        waitMs(300);
         QWidget *popup = combo->view()->window();
         const int comboBottom = combo->mapToGlobal(QPoint(0, combo->height())).y();
         check(popup && popup->isVisible() && popup->geometry().top() >= comboBottom - 2,
@@ -2325,7 +2347,7 @@ void testUsabilityFixes(const QString &root)
         MainWindow w3;
         w3.resize(1000, 700);
         w3.show();
-        wait(50);
+        waitMs(50);
         QTextEdit *e3 = editorOf(w3);
         auto *cb = w3.findChild<QComboBox *>(QStringLiteral("styleCombo"));
         const QStringList names{QStringLiteral("Heading 1"), QStringLiteral("Heading 2"), QStringLiteral("Heading 3"),
@@ -2419,7 +2441,7 @@ void testUsabilityFixes(const QString &root)
         QApplication::processEvents(); // whatever the keystroke triggers, including repaint
         worst = qMax(worst, one.elapsed());
     }
-    wait(400); // debounced work (figure numbers, stats) runs too
+    waitMs(400); // debounced work (figure numbers, stats) runs too
     QElapsedTimer settle;
     settle.start();
     QApplication::processEvents();
@@ -2464,8 +2486,8 @@ void testRetest1111(const QString &root)
     win->resize(1024, 640);
     win->show();
     win->activateWindow();
-    QApplication::setActiveWindow(win.get());
-    wait(100);
+    win->activateWindow();
+    waitMs(100);
     auto *side = win->findChild<BookSidebar *>();
     if (!side || side->book().count() != 3) {
         check(false, "R book");
@@ -2526,7 +2548,7 @@ void testRetest1111(const QString &root)
         const int height = list->visualItemRect(list->item(1)).height();
         side->renameChapter(1);
         QApplication::processEvents();
-        wait(50);
+        waitMs(50);
         auto *line = list->findChild<QLineEdit *>();
         check(line && line->isVisible(), "R M6 rename box open");
         check(list->visualItemRect(list->item(2)).top() == below && list->visualItemRect(list->item(1)).height() == height,
@@ -2536,7 +2558,7 @@ void testRetest1111(const QString &root)
         if (line) {
             QTest::keyClick(line, Qt::Key_Escape);
         }
-        wait(50);
+        waitMs(50);
         check(list->visualItemRect(list->item(2)).top() == below, "R M6 ... nor after Esc");
     }
     // M4: renaming a chapter renames its file, number kept; book.json and the
@@ -2549,7 +2571,7 @@ void testRetest1111(const QString &root)
             line->setText(QStringLiteral("Bravo"));
             QTest::keyClick(line, Qt::Key_Return);
         }
-        wait(150);
+        waitMs(150);
         check(QFileInfo::exists(book + QStringLiteral("/02 Bravo.odt")) && !QFileInfo::exists(book + QStringLiteral("/02 Beta.odt")),
               "R M4 02 Beta.odt renamed to 02 Bravo.odt");
         check(side->book().at(1).path == QLatin1String("02 Bravo.odt"), "R M4 book.json follows", side->book().at(1).path);
@@ -2570,7 +2592,9 @@ void testRetest1111(const QString &root)
         check(!side->renameChapterFile(2, &err) && QFileInfo::exists(book + QStringLiteral("/03 Gamma.md")) && !err.isEmpty(),
               "R M4 an existing file is not overwritten", err);
         QFile keep(book + QStringLiteral("/03 Taken.md"));
-        keep.open(QIODevice::ReadOnly);
+        if (!keep.open(QIODevice::ReadOnly)) {
+            qFatal("cannot open %s", qPrintable(keep.fileName()));
+        }
         check(keep.readAll() == "keep me\n", "R M4 ... its contents are untouched");
         keep.close();
         QFile::remove(book + QStringLiteral("/03 Taken.md"));
@@ -3592,7 +3616,9 @@ void testStyleFonts(const QString &root)
     check(w.exportPdfTo(pdf), "SF PDF export");
     {
         QFile f(pdf);
-        f.open(QIODevice::ReadOnly);
+        if (!f.open(QIODevice::ReadOnly)) {
+            qFatal("cannot open %s", qPrintable(f.fileName()));
+        }
         const QByteArray bytes = f.readAll();
         const QByteArray s1 = QString(serif).remove(QLatin1Char(' ')).toLatin1();
         const QByteArray s2 = QString(sans).remove(QLatin1Char(' ')).toLatin1();

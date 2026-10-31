@@ -3,6 +3,24 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.18.1] — 2026-10-31
+
+Compiler warnings on, a sanitizer CI job, and the fixes they surfaced.
+
+- **Warnings:** zwriter's own targets build with `-Wall -Wextra` (GCC/Clang); vendored
+  `third_party/miniz` is built without them. The 41 distinct warnings this surfaced (GCC 15,
+  Qt 6.12) are fixed, so the build is warning-free; warnings are not errors.
+  - 27 ignored `QFile::open` results in tests (now fail the test with a message instead of
+    reading an unopened file), unused variables, a missing-field initializer, a copying
+    range loop, a `&&`/`||` precedence warning, and deprecated `QApplication::setActiveWindow`,
+    `QTextCharFormat::fontFamily` and (Qt ≥ 6.12) the `QPoint` `QDragMoveEvent` constructor.
+  - `mainwindow_test`'s `wait()` helper is renamed `waitMs()` (it clashed with POSIX `wait`).
+- **Fix (found by Qt's checked-integer assert in a Debug build):** while zoomed, a full relayout
+  reports a ~1e9-sized update rect; scaling it and adjusting it as an `int` `QRect` overflowed
+  (undefined behavior). The rect is now clipped to the viewport in floating point first.
+- **CI:** new Linux job builds Debug with `-fsanitize=address,undefined` and runs all tests
+  offscreen; UB and memory errors fail it (leak checking is off because of Qt's globals).
+
 ## [1.18.0] — 2026-10-31
 
 ODT and EPUB packages are read and written in-process: no more `zip` / `unzip` child processes.
