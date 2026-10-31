@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.15.0 LANGUAGES CXX)
+project(zwriter VERSION 1.16.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -141,6 +141,8 @@ add_executable(zwriter
   src/FocusRange.cpp
   src/FocusRange.hpp
   src/PageWidgets.cpp
+  src/TableColumns.cpp
+  src/TableColumns.hpp
   src/PageWidgets.hpp
   src/PrintLayout.cpp
   src/PrintLayout.hpp
@@ -395,6 +397,26 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(book_export_test PRIVATE Qt6::Widgets Qt6::PrintSupport)
   add_test(NAME book_export COMMAND book_export_test)
   set_tests_properties(book_export PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+  # Tables (1.16.0): column widths, merged cells and header rows through ODT
+  # (incl. LibreOffice-style widths) and EPUB; drag-resize geometry.
+  add_executable(table_test
+    tests/table_test.cpp
+    src/TableColumns.cpp
+    src/BookExport.cpp
+    src/BookManifest.cpp
+    src/Captions.cpp
+    src/DocumentIo.cpp
+    src/Images.cpp
+    src/ParagraphStyles.cpp
+    src/StyleFonts.cpp
+    src/Alignment.cpp
+    src/PrintLayout.cpp
+  )
+  target_include_directories(table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(table_test PRIVATE Qt6::Widgets Qt6::PrintSupport)
+  add_test(NAME table COMMAND table_test)
+  set_tests_properties(table PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
   # Subscript / superscript (1.13.0): ODT/RTF round trips, PDF layout, EPUB <sub>/<sup>.
   add_executable(script_test

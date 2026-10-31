@@ -224,6 +224,9 @@ private slots:
     void tableInsertColumn();
     void tableRemoveRow();
     void tableRemoveColumn();
+    void tableMergeCells();      // Table > Merge Cells (1.16.0)
+    void tableSplitCell();       // Table > Split Cells
+    void tableToggleHeaderRow(bool on); // Table > Repeat Header Row
     void helpAbout();
     void helpCheckUpdates();
     void printPreview(QPrinter *printer);
@@ -452,6 +455,9 @@ private:
     QAction *m_tableInsertColAction = nullptr;
     QAction *m_tableRemoveRowAction = nullptr;
     QAction *m_tableRemoveColAction = nullptr;
+    QAction *m_tableMergeAction = nullptr;
+    QAction *m_tableSplitAction = nullptr;
+    QAction *m_tableHeaderAction = nullptr;
     QPrinter *m_printer = nullptr;
     // Side panes (PreviewPane.cpp / LibrarySidebar.cpp): library | desk | preview.
     QSplitter *m_splitter = nullptr;
