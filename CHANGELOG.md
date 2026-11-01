@@ -3,6 +3,23 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.19.0] — 2026-10-31
+
+Source reorganization only; no change in behaviour.
+
+- `src/MainWindow.cpp` (6,478 lines) is split by concern into translation units of the same
+  `MainWindow` class. Function bodies were moved verbatim (the sorted line sets match exactly):
+  - `MainWindowFile.cpp`: new/open/save/save-as, recent files, export PDF, print, page setup,
+    document properties.
+  - `MainWindowBook.cpp`: library and book sidebar, chapter titles and numbering, book ToC,
+    book PDF/EPUB export and printing.
+  - `MainWindowView.cpp`: chrome hide-away, full screen, full-page view, zoom, page metrics and
+    page guides, page overlays.
+  - `MainWindowInternal.hpp`: the shared constants (recent-file limit, default font sizes,
+    reading speed).
+- `MainWindow.cpp` keeps construction, menus and toolbars, editing, formatting, tables, find,
+  focus mode, settings and the event handlers (4,447 lines).
+
 ## [1.18.3] — 2026-10-31
 
 CI supply-chain pinning. No change to the app.
