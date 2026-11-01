@@ -315,7 +315,9 @@ void testRtf(const QString &dir)
     const QString outPath = dir + QStringLiteral("/out.rtf");
     check(DocumentIo::save(&src, outPath, DocumentIo::Format::Rtf, &err), "L1 RTF saved", err);
     QFile f(outPath);
-    f.open(QIODevice::ReadOnly);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     const QByteArray rtf = f.readAll();
     check(rtf.contains("\\b ") && rtf.contains("\\i ") && rtf.contains("Courier New")
               && !rtf.contains("Times New Roman"),

@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.18.0 LANGUAGES CXX)
+project(zwriter VERSION 1.18.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -76,6 +76,12 @@ configure_file(
 
 # The in-app updater (check, download, verify, install, restart prompt), a
 # library so the tests link exactly what the app runs.
+# Warnings for zwriter's own targets (all targets below; vendored
+# third_party/miniz has them cleared).
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-Wall -Wextra)
+endif()
+
 add_library(zwriter_update STATIC
   src/Minisign.cpp
   src/Minisign.hpp
@@ -102,6 +108,8 @@ enable_language(C)
 add_library(miniz STATIC third_party/miniz/miniz.c)
 target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz)
 set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
+# Vendored code is built without the project's warning flags.
+set_property(TARGET miniz PROPERTY COMPILE_OPTIONS "")
 add_library(zwriter_odf STATIC src/ZipPackage.cpp src/ZipPackage.hpp src/OdfXml.cpp src/OdfXml.hpp)
 target_include_directories(zwriter_odf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(zwriter_odf PUBLIC Qt6::Core PRIVATE miniz)

@@ -1880,7 +1880,8 @@ QList<OdtTableLayout> odtTableLayouts(const QByteArray &xml)
                     (pct ? cs.pct : cs.abs) = w;
                 }
             } else if (prefix == QLatin1String("table") && name == QLatin1String("table")) {
-                Open o{int(out.size())};
+                Open o{};
+                o.index = int(out.size());
                 o.depth = depth;
                 out.append(OdtTableLayout{});
                 stack << o;

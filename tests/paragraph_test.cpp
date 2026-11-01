@@ -148,7 +148,6 @@ void testOdt(const QString &dir)
 
     QTextDocument back;
     check(DocumentIo::load(&back, path, &err), "O reopen", err);
-    int i = 0;
     bool stylesOk = true;
     QString got;
     QTextBlock b = back.begin();
@@ -156,7 +155,6 @@ void testOdt(const QString &dir)
         got += styleOf(b.blockFormat()) + QLatin1Char(',');
         stylesOk = stylesOk && styleOf(b.blockFormat()) == st.name;
         b = b.next();
-        ++i;
     }
     check(stylesOk, "O every named style survives save + open", got);
     const QTextBlockFormat bib = back.findBlockByNumber(4).blockFormat();
@@ -185,7 +183,9 @@ void testRtf(const QString &dir)
     QString err;
     check(DocumentIo::save(&doc, path, DocumentIo::Format::Rtf, &err), "R save RTF", err);
     QFile f(path);
-    f.open(QIODevice::ReadOnly);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(f.fileName()));
+    }
     const QString rtf = QString::fromLatin1(f.readAll());
     check(rtf.contains(QLatin1String("\\li1134")) && rtf.contains(QLatin1String("\\ri567"))
               && rtf.contains(QLatin1String("\\fi283")) && rtf.contains(QLatin1String("\\sb120"))
@@ -205,7 +205,9 @@ void testRtf(const QString &dir)
     const QByteArray word = "{\\rtf1\\ansi{\\fonttbl\\f0 Times;}\\pard\\li720\\fi-720\\sb240\\sa120\\sl480\\slmult1 Ref one\\par}";
     const QString wp = dir + QStringLiteral("/word.rtf");
     QFile w(wp);
-    w.open(QIODevice::WriteOnly);
+    if (!w.open(QIODevice::WriteOnly)) {
+        qFatal("cannot open %s", qPrintable(w.fileName()));
+    }
     w.write(word);
     w.close();
     QTextDocument wd;

@@ -789,7 +789,7 @@ QMenu *BookSidebar::buildContextMenu(int row)
         });
         open->setEnabled(!m_book.isMissing(row));
         menu->addAction(QStringLiteral("Edit Details…"), this, [this, row]() { editChapter(row); });
-        QAction *rename = menu->addAction(QStringLiteral("Rename"), this, [this, row]() { renameChapter(row); });
+        menu->addAction(QStringLiteral("Rename"), this, [this, row]() { renameChapter(row); });
         menu->addSeparator();
         QAction *up = menu->addAction(QStringLiteral("Move Up"), this,
                                       [this, row]() { moveChapter(row, row - 1); });
@@ -1346,7 +1346,7 @@ void BookSidebar::confirmRemoveChapter(int row)
     box->addButton(QMessageBox::Cancel);
     box->setDefaultButton(remove);
     fitButtons(box);
-    connect(box, &QMessageBox::buttonClicked, this, [this, box, remove, del, path](QAbstractButton *b) {
+    connect(box, &QMessageBox::buttonClicked, this, [this, remove, del, path](QAbstractButton *b) {
         const int i = m_book.indexOf(path);
         if (i < 0) {
             return;

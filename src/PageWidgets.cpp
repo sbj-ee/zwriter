@@ -338,7 +338,12 @@ void PageTextEdit::setZoom(qreal zoom)
         connect(document()->documentLayout(), &QAbstractTextDocumentLayout::update, this,
                 [this](const QRectF &r) {
                     if (isZoomed()) {
-                        viewport()->update(toView(r.translated(-scrollOffset())).adjusted(-2, -2, 2, 2));
+                        // A full relayout reports a ~1e9-sized rect: clip in floating
+                        // point first, as int QRect arithmetic on it overflows.
+                        const QRectF d = r.translated(-scrollOffset());
+                        const QRectF v(d.topLeft() * m_zoom, d.size() * m_zoom);
+                        viewport()->update(
+                            v.adjusted(-2, -2, 2, 2).intersected(QRectF(viewport()->rect())).toAlignedRect());
                     }
                 });
         // QTextEdit re-sizes its scroll bars for zoom 1 from several private
@@ -673,7 +678,12 @@ void PageTextEdit::dragMoveEvent(QDragMoveEvent *event)
         QTextEdit::dragMoveEvent(event);
         return;
     }
-    QDragMoveEvent e(event->position().toPoint() / m_zoom, event->possibleActions(),
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+    const QPointF pos = (event->position().toPoint() / m_zoom).toPointF(); // QPointF ctor; the QPoint one is deprecated
+#else
+    const QPoint pos = event->position().toPoint() / m_zoom;
+#endif
+    QDragMoveEvent e(pos, event->possibleActions(),
                      event->mimeData(), event->buttons(), event->modifiers());
     QTextEdit::dragMoveEvent(&e);
     event->setDropAction(e.dropAction());

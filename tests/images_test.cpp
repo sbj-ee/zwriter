@@ -330,7 +330,9 @@ void testRtf(const QString &dir)
     QString err;
     check(DocumentIo::save(&doc, path, DocumentIo::Format::Rtf, &err), "T save RTF", err);
     QFile file(path);
-    file.open(QIODevice::ReadOnly);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(file.fileName()));
+    }
     const QByteArray rtf = file.readAll();
     check(rtf.contains("\\pngblip") && rtf.contains("\\jpegblip") && rtf.contains("\\picwgoal1200\\pichgoal900"),
           "T RTF has a PNG and a JPEG \\pict with the display size in twips");
@@ -355,7 +357,9 @@ void testRtf(const QString &dir)
         + " after.\\par}";
     const QString wpath = dir + QStringLiteral("/word.rtf");
     QFile wf(wpath);
-    wf.open(QIODevice::WriteOnly);
+    if (!wf.open(QIODevice::WriteOnly)) {
+        qFatal("cannot open %s", qPrintable(wf.fileName()));
+    }
     wf.write(word);
     wf.close();
     QTextDocument wdoc;
@@ -390,7 +394,9 @@ void testMarkdownAssets(const QString &dir)
     // Unreferenced: only zwriter's own names, only when the text doesn't link them.
     {
         QFile other(dir + QStringLiteral("/My notes.assets/diagram.png"));
-        other.open(QIODevice::WriteOnly);
+        if (!other.open(QIODevice::WriteOnly)) {
+            qFatal("cannot open %s", qPrintable(other.fileName()));
+        }
         other.write(encoded(solid(4, 4, Qt::gray), "PNG"));
     }
     const QString text = QStringLiteral("Intro\n\n") + Images::markdownImageLink(a) + QStringLiteral("\n\n![c](") + c + QStringLiteral(")\n");
@@ -447,7 +453,9 @@ void testRichToMarkdown(const QString &dir)
     QString err;
     check(copy && DocumentIo::save(copy.get(), md, DocumentIo::Format::Markdown, &err), "X save as Markdown", err);
     QFile file(md);
-    file.open(QIODevice::ReadOnly);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qFatal("cannot open %s", qPrintable(file.fileName()));
+    }
     const QString text = QString::fromUtf8(file.readAll());
     check(text.contains(QLatin1String("![image-001](Rich%20export.assets/image-001.png)"))
               && text.contains(QLatin1String("Photo: ![image-002](Rich%20export.assets/image-002.jpg)")),
