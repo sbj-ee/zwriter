@@ -3,6 +3,19 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.18.3] — 2026-10-31
+
+CI supply-chain pinning. No change to the app.
+
+- **EPUBCheck** download in CI is pinned to the SHA-256 of the official
+  `w3c/epubcheck` v5.4.0 release asset
+  (`33350c61038e71dfb3d45a76aed04bf5481e6d5500cb780f6e98db8bbd15a28c`, equal to GitHub's
+  published asset digest) and checked with `sha256sum -c` (`shasum -a 256 -c` on macOS); a
+  mismatch fails the job.
+- **Actions** in `ci.yml` are pinned to commit SHAs with a version comment, matching
+  `release.yml`: `actions/checkout` v7.0.1, `actions/upload-artifact` v7.0.2. All action tags
+  used in both workflows were checked to exist and to be the latest releases.
+
 ## [1.18.2] — 2026-10-31
 
 Test-only fix; the app is unchanged from 1.18.1 (whose release build failed and was not published).
