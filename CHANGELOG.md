@@ -3,6 +3,16 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.18.2] — 2026-10-31
+
+Test-only fix; the app is unchanged from 1.18.1 (whose release build failed and was not published).
+
+- **Fix (flaky test):** `mainwindow_test`'s "VZ PDF identical at 100% and 200%" compares two PDF
+  exports with the volatile lines stripped. Qt writes the XMP creation/modify dates as attributes on
+  one `rdf:Description` line (`xmp:CreateDate="…"`), which the `<xmp:` filter missed, so the test
+  failed whenever the two exports fell in different seconds (as in the macOS v1.18.1 release build).
+  Those attribute lines are now stripped too.
+
 ## [1.18.1] — 2026-10-31
 
 Compiler warnings on, a sanitizer CI job, and the fixes they surfaced.

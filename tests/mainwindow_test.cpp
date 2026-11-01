@@ -3101,8 +3101,11 @@ static QByteArray stripPdfVolatile(QByteArray pdf)
 {
     QList<QByteArray> keep;
     for (const QByteArray &line : pdf.split('\n')) {
+        // Qt writes the XMP dates as attributes (xmp:CreateDate="…" on one
+        // rdf:Description line), not <xmp:…> elements; match both forms.
         if (!line.contains("/CreationDate") && !line.contains("/ModDate") && !line.contains("/ID")
-            && !line.contains("<xmp:") && !line.contains("xmpMM:")) {
+            && !line.contains("xmp:CreateDate") && !line.contains("xmp:ModifyDate")
+            && !line.contains("xmp:MetadataDate") && !line.contains("<xmp:") && !line.contains("xmpMM:")) {
             keep << line;
         }
     }
