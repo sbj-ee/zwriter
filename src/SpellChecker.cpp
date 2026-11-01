@@ -26,7 +26,7 @@ QStringList dictionarySearchPaths()
           << QStringLiteral("/usr/local/share/hunspell")
           << QStringLiteral("/opt/homebrew/share/hunspell")
           << QStringLiteral("/usr/local/share/myspell");
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
     paths << QStringLiteral("/opt/homebrew/share/hunspell")
           << QStringLiteral("/usr/local/share/hunspell");
 #endif

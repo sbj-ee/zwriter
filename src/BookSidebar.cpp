@@ -1346,7 +1346,7 @@ void BookSidebar::confirmRemoveChapter(int row)
     box->addButton(QMessageBox::Cancel);
     box->setDefaultButton(remove);
     fitButtons(box);
-    connect(box, &QMessageBox::buttonClicked, this, [this, box, remove, del, path](QAbstractButton *b) {
+    connect(box, &QMessageBox::buttonClicked, this, [this, remove, del, path](QAbstractButton *b) {
         const int i = m_book.indexOf(path);
         if (i < 0) {
             return;

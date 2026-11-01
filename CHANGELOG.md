@@ -8,8 +8,8 @@ the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 Compiler warnings on, a sanitizer CI job, and the fixes they surfaced.
 
 - **Warnings:** zwriter's own targets build with `-Wall -Wextra` (GCC/Clang); vendored
-  `third_party/miniz` is built without them. The 41 distinct warnings this surfaced (GCC 15,
-  Qt 6.12) are fixed, so the build is warning-free; warnings are not errors.
+  `third_party/miniz` is built without them. The 41 distinct warnings this surfaced (GCC 15 and Apple Clang,
+  Qt 6.12; 44 counting the three Clang-only ones on macOS CI) are fixed, so the build is warning-free; warnings are not errors.
   - 27 ignored `QFile::open` results in tests (now fail the test with a message instead of
     reading an unopened file), unused variables, a missing-field initializer, a copying
     range loop, a `&&`/`||` precedence warning, and deprecated `QApplication::setActiveWindow`,

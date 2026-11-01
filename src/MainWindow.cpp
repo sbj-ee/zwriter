@@ -431,7 +431,7 @@ MainWindow::MainWindow(QWidget *parent)
             m_editor->setFocus();
         }
     };
-    connect(m_zoomCombo, &QComboBox::activated, this, [this, applyTyped](int) { applyTyped(); });
+    connect(m_zoomCombo, &QComboBox::activated, this, [applyTyped](int) { applyTyped(); });
     connect(m_zoomCombo->lineEdit(), &QLineEdit::editingFinished, this, applyTyped);
     statusBar()->addPermanentWidget(m_zoomCombo);
     statusBar()->setSizeGripEnabled(false);
