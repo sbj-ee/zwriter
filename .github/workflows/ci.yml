@@ -8,6 +8,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  EPUBCHECK_SHA256: 33350c61038e71dfb3d45a76aed04bf5481e6d5500cb780f6e98db8bbd15a28c
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -17,7 +20,7 @@ jobs:
     name: Linux amd64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Qt6 + build tools
         run: |
@@ -40,6 +43,9 @@ jobs:
       - name: EPUBCheck (whole-book EPUB export)
         run: |
           curl -sSfL -o epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.4.0/epubcheck-5.4.0.zip
+          # Pinned: SHA-256 of the official v5.4.0 release asset (matches GitHub's asset digest).
+          echo "${EPUBCHECK_SHA256}  epubcheck.zip" > epubcheck.zip.sha256
+          if command -v sha256sum >/dev/null; then sha256sum -c epubcheck.zip.sha256; else shasum -a 256 -c epubcheck.zip.sha256; fi
           unzip -q epubcheck.zip
           QT_QPA_PLATFORM=offscreen ZW_EPUB_OUT="$PWD/book.epub" ./build/book_export_test > /dev/null
           java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book.epub
@@ -49,7 +55,7 @@ jobs:
         run: QT_QPA_PLATFORM=offscreen ZW_SHOT_DIR="$PWD/shots" ./build/book_test > /dev/null
 
       - name: Upload screenshots
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zwriter-linux-screenshots
           path: shots/
@@ -63,7 +69,7 @@ jobs:
           dpkg-deb -f ./*.deb Depends | grep -q libsodium23
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zwriter-linux-amd64-deb
           path: build/*.deb
@@ -73,7 +79,7 @@ jobs:
     name: Linux ASan+UBSan (Debug)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Qt6 + build tools
         run: |
@@ -108,7 +114,7 @@ jobs:
     name: macOS arm64
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Qt + build tools (brew)
         run: brew install qt cmake ninja hunspell libsodium pkg-config
@@ -130,6 +136,9 @@ jobs:
       - name: EPUBCheck (whole-book EPUB export)
         run: |
           curl -sSfL -o epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.4.0/epubcheck-5.4.0.zip
+          # Pinned: SHA-256 of the official v5.4.0 release asset (matches GitHub's asset digest).
+          echo "${EPUBCHECK_SHA256}  epubcheck.zip" > epubcheck.zip.sha256
+          if command -v sha256sum >/dev/null; then sha256sum -c epubcheck.zip.sha256; else shasum -a 256 -c epubcheck.zip.sha256; fi
           unzip -q epubcheck.zip
           QT_QPA_PLATFORM=offscreen ZW_EPUB_OUT="$PWD/book.epub" ./build/book_export_test > /dev/null
           java -jar epubcheck-5.4.0/epubcheck.jar --failonwarnings book.epub
@@ -139,7 +148,7 @@ jobs:
         run: ZW_SHOT_DIR="$PWD/shots" ./build/book_test > /dev/null
 
       - name: Upload screenshots
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zwriter-macos-screenshots
           path: shots/
@@ -166,7 +175,7 @@ jobs:
           codesign -dv "$mnt/zwriter.app" 2>&1 | grep -E "Identifier|Signature|Format"
 
       - name: Upload .dmg artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zwriter-macos-arm64-dmg
           path: build/*.dmg
