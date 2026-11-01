@@ -8,12 +8,13 @@ the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 Compiler warnings on, a sanitizer CI job, and the fixes they surfaced.
 
 - **Warnings:** zwriter's own targets build with `-Wall -Wextra` (GCC/Clang); vendored
-  `third_party/miniz` is built without them. The 41 distinct warnings this surfaced (GCC 15 and Apple Clang,
-  Qt 6.12; 44 counting the three Clang-only ones on macOS CI) are fixed, so the build is warning-free; warnings are not errors.
+  `third_party/miniz` is built without them. The 44 distinct warnings this surfaced (41 from GCC 15 /
+  Qt 6.12, 3 more from Apple Clang) are fixed, so the build is warning-free; warnings are not errors.
   - 27 ignored `QFile::open` results in tests (now fail the test with a message instead of
     reading an unopened file), unused variables, a missing-field initializer, a copying
     range loop, a `&&`/`||` precedence warning, and deprecated `QApplication::setActiveWindow`,
-    `QTextCharFormat::fontFamily` and (Qt ≥ 6.12) the `QPoint` `QDragMoveEvent` constructor.
+    `QTextCharFormat::fontFamily`, `Q_OS_MAC` and (Qt ≥ 6.12) the `QPoint` `QDragMoveEvent`
+    constructor; two unused lambda captures (Clang).
   - `mainwindow_test`'s `wait()` helper is renamed `waitMs()` (it clashed with POSIX `wait`).
 - **Fix (found by Qt's checked-integer assert in a Debug build):** while zoomed, a full relayout
   reports a ~1e9-sized update rect; scaling it and adjusting it as an `int` `QRect` overflowed
