@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.18.3 LANGUAGES CXX)
+project(zwriter VERSION 1.19.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -118,6 +118,10 @@ link_libraries(zwriter_odf)
 add_executable(zwriter
   src/main.cpp
   src/MainWindow.cpp
+  src/MainWindowFile.cpp
+  src/MainWindowBook.cpp
+  src/MainWindowView.cpp
+  src/MainWindowInternal.hpp
   src/MainWindow.hpp
   src/DocumentIo.cpp
   src/Images.cpp
