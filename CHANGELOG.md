@@ -3,6 +3,29 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.21.0] — unreleased
+
+Outline mode, part two: edit the document by its outline.
+
+- **Move sections.** Edit → Move Section Up / Down (`Alt+Shift+Up` / `Alt+Shift+Down`) moves the
+  section the cursor is in (or the entry selected in the outline, when the list has the focus)
+  above the previous or below the next heading of the same level under the same parent. Its
+  subsections go with it. Also in the outline's right-click menu, and by **dragging an entry onto
+  a sibling** (drop on the upper half to go before it, the lower half to go after it). Other drops
+  are refused.
+- **Promote / Demote.** Edit → Promote / Demote Section (`Alt+Shift+Left` / `Alt+Shift+Right`)
+  changes the heading and every heading under it by one level. Refused when any would leave the
+  range (Heading 1–3 in rich documents, `#`–`######` in Markdown), with the reason in the status
+  bar. Rich headings take Heading 1–3's size, face, bold and italic, as Format → Heading does;
+  Markdown gets or loses one `#` per heading line.
+- Both work for ODT / RTF and Markdown, are **one undo step**, and keep the document's spacing:
+  the blank lines between sections stay where they were, text and block formats (alignment,
+  indents, lists, tables) move with their section, and a Markdown file's final newline (or the
+  lack of one) is untouched.
+- `OutlineEdit` (`src/OutlineEdit.{hpp,cpp}`); `MainWindow::applyHeading()` split into
+  `headingCharFormat` / `styleBlockAsHeading` so the outline reuses it. New test
+  `outline_edit_test`; pane and window checks in `outline_test` and `mainwindow_test`.
+
 ## [1.20.0] — unreleased
 
 Outline pane (first part of outline mode).

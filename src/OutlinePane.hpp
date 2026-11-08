@@ -11,6 +11,7 @@ class QTextEdit;
 class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QPoint;
 
 // The document's headings as a tree beside the editor (View > Outline,
 // Ctrl+Alt+O), for ODT and Markdown documents alike (Outline.hpp says what a
@@ -62,6 +63,15 @@ public:
     void focusTree();
 
     QTreeWidget *tree() const { return m_tree; }
+    // Heading position of the entry that has the keyboard focus (what the
+    // window's Move / Promote actions apply to when the tree has the focus),
+    // or -1.
+    int currentHeadingPosition() const;
+    bool treeHasFocus() const;
+    // Same check the drag and drop uses: both entries are siblings of one level.
+    bool isDropAllowed(int from, int to) const { return canDrop(from, to); }
+    // Tests: what a drop of entry `from` on entry `to` does.
+    void dropForTest(int from, int to, bool after) { emit moveToRequested(m_items[from].position, m_items[to].position, after); }
     QLabel *emptyLabel() const { return m_empty; }
     QLabel *footerLabel() const { return m_footer; }
 
@@ -77,6 +87,12 @@ signals:
     void headingActivated(int position);
     // Esc in the tree: the window gives the focus back to the editor.
     void escapePressed();
+    // Right-click menu / drag and drop in the tree. The pane never edits the
+    // document; the window does and the pane rebuilds from the result.
+    // positions are heading positions; delta is -1 (up / promote) or +1.
+    void moveRequested(int position, int delta);
+    void levelRequested(int position, int delta);
+    void moveToRequested(int position, int targetPosition, bool after);
 
 protected:
     void showEvent(QShowEvent *event) override;
@@ -88,6 +104,9 @@ private:
     void followCaret();
     void activate(QTreeWidgetItem *item);
     void applyRowStyle(QTreeWidgetItem *row, const Outline::Item &item) const;
+    void showContextMenu(const QPoint &pos);
+    bool canDrop(int from, int to) const;
+    int rowIndex(const QTreeWidgetItem *row) const;
 
     QTreeWidget *m_tree = nullptr;
     QLabel *m_title = nullptr;

@@ -1,9 +1,15 @@
 #include "OutlinePane.hpp"
 
+#include "OutlineEdit.hpp"
+
+#include <QAction>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QEvent>
 #include <QFont>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMenu>
 #include <QScrollBar>
 #include <QSettings>
 #include <QShowEvent>
@@ -14,8 +20,77 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <functional>
+
 namespace {
 constexpr int kIndexRole = Qt::UserRole + 1;
+
+// The tree lets entries be dragged but never moves them itself: a drop is
+// reported to the pane, which asks the window to move the section in the
+// document; the tree is then rebuilt from the document.
+class OutlineTree : public QTreeWidget
+{
+public:
+    using CanDrop = std::function<bool(int from, int to)>;
+    using Dropped = std::function<void(int from, int to, bool after)>;
+
+    OutlineTree(CanDrop canDrop, Dropped dropped, QWidget *parent)
+        : QTreeWidget(parent)
+        , m_canDrop(std::move(canDrop))
+        , m_dropped(std::move(dropped))
+    {
+        setDragEnabled(true);
+        setAcceptDrops(true);
+        setDropIndicatorShown(true);
+        setDragDropMode(QAbstractItemView::InternalMove);
+        setDefaultDropAction(Qt::IgnoreAction);
+    }
+
+protected:
+    void dragMoveEvent(QDragMoveEvent *event) override
+    {
+        int from = 0;
+        int to = 0;
+        bool after = false;
+        if (target(event->position().toPoint(), &from, &to, &after) && m_canDrop(from, to)) {
+            QTreeWidget::dragMoveEvent(event);
+            event->setDropAction(Qt::MoveAction);
+            event->accept();
+        } else {
+            event->ignore();
+        }
+    }
+
+    void dropEvent(QDropEvent *event) override
+    {
+        int from = 0;
+        int to = 0;
+        bool after = false;
+        if (target(event->position().toPoint(), &from, &to, &after) && m_canDrop(from, to)) {
+            m_dropped(from, to, after);
+        }
+        event->setDropAction(Qt::IgnoreAction); // the model is never changed by the drop itself
+        event->ignore();
+        viewport()->update();
+    }
+
+private:
+    bool target(const QPoint &pos, int *from, int *to, bool *after) const
+    {
+        QTreeWidgetItem *src = currentItem();
+        QTreeWidgetItem *dst = itemAt(pos);
+        if (!src || !dst || src == dst) {
+            return false;
+        }
+        *from = src->data(0, kIndexRole).toInt();
+        *to = dst->data(0, kIndexRole).toInt();
+        *after = pos.y() > visualItemRect(dst).center().y();
+        return true;
+    }
+
+    CanDrop m_canDrop;
+    Dropped m_dropped;
+};
 } // namespace
 
 OutlinePane::OutlinePane(QWidget *parent)
@@ -30,7 +105,14 @@ OutlinePane::OutlinePane(QWidget *parent)
     m_title->setObjectName(QStringLiteral("outlineTitle"));
     layout->addWidget(m_title);
 
-    m_tree = new QTreeWidget(this);
+    m_tree = new OutlineTree(
+        [this](int from, int to) { return canDrop(from, to); },
+        [this](int from, int to, bool after) {
+            if (from >= 0 && from < m_items.size() && to >= 0 && to < m_items.size()) {
+                emit moveToRequested(m_items[from].position, m_items[to].position, after);
+            }
+        },
+        this);
     m_tree->setObjectName(QStringLiteral("outlineTree"));
     m_tree->setHeaderHidden(true);
     m_tree->setColumnCount(1);
@@ -43,6 +125,8 @@ OutlinePane::OutlinePane(QWidget *parent)
     m_tree->setTextElideMode(Qt::ElideRight);
     m_tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_tree->installEventFilter(this);
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &OutlinePane::showContextMenu);
     layout->addWidget(m_tree, 1);
 
     m_empty = new QLabel(this);
@@ -278,6 +362,72 @@ void OutlinePane::activate(QTreeWidgetItem *item)
     if (ok && idx >= 0 && idx < m_items.size()) {
         emit headingActivated(m_items[idx].position);
     }
+}
+
+int OutlinePane::rowIndex(const QTreeWidgetItem *row) const
+{
+    bool ok = false;
+    const int idx = row ? row->data(0, kIndexRole).toInt(&ok) : -1;
+    return ok && idx >= 0 && idx < m_items.size() ? idx : -1;
+}
+
+bool OutlinePane::treeHasFocus() const
+{
+    return m_tree->hasFocus();
+}
+
+int OutlinePane::currentHeadingPosition() const
+{
+    const int idx = rowIndex(m_tree->currentItem());
+    return idx < 0 ? -1 : m_items[idx].position;
+}
+
+bool OutlinePane::canDrop(int from, int to) const
+{
+    if (from < 0 || to < 0 || from >= m_items.size() || to >= m_items.size() || from == to) {
+        return false;
+    }
+    // Only among siblings: walk from one to the other.
+    for (int i = OutlineEdit::nextSibling(m_items, from); i >= 0; i = OutlineEdit::nextSibling(m_items, i)) {
+        if (i == to) {
+            return true;
+        }
+    }
+    for (int i = OutlineEdit::previousSibling(m_items, from); i >= 0; i = OutlineEdit::previousSibling(m_items, i)) {
+        if (i == to) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void OutlinePane::showContextMenu(const QPoint &pos)
+{
+    QTreeWidgetItem *row = m_tree->itemAt(pos);
+    const int idx = rowIndex(row);
+    if (idx < 0) {
+        return;
+    }
+    m_tree->setCurrentItem(row);
+    const int where = m_items[idx].position;
+    QMenu menu(this);
+    menu.setObjectName(QStringLiteral("outlineMenu"));
+    auto add = [&](const QString &text, const QString &name, bool enabled, const std::function<void()> &run) {
+        QAction *a = menu.addAction(text);
+        a->setObjectName(name);
+        a->setEnabled(enabled);
+        connect(a, &QAction::triggered, this, run);
+    };
+    add(QStringLiteral("Move Section &Up"), QStringLiteral("outlineMoveUp"), OutlineEdit::canMove(m_items, idx, -1),
+        [this, where] { emit moveRequested(where, -1); });
+    add(QStringLiteral("Move Section &Down"), QStringLiteral("outlineMoveDown"), OutlineEdit::canMove(m_items, idx, +1),
+        [this, where] { emit moveRequested(where, +1); });
+    menu.addSeparator();
+    add(QStringLiteral("&Promote"), QStringLiteral("outlinePromote"),
+        OutlineEdit::canChangeLevel(m_items, idx, -1, m_markdown), [this, where] { emit levelRequested(where, -1); });
+    add(QStringLiteral("De&mote"), QStringLiteral("outlineDemote"),
+        OutlineEdit::canChangeLevel(m_items, idx, +1, m_markdown), [this, where] { emit levelRequested(where, +1); });
+    menu.exec(m_tree->viewport()->mapToGlobal(pos));
 }
 
 void OutlinePane::focusTree()

@@ -179,6 +179,16 @@ private slots:
     void insertCaptionHere();
     void fileNewMarkdown();
     void applyHeading();
+    QTextCharFormat headingCharFormat(int level) const;
+    void styleBlockAsHeading(QTextCursor &walk, int level, const QTextCharFormat &charFmt);
+    void setBlockHeadingLevel(int blockNumber, int level);
+    // Outline editing (1.21.0): Edit > Move Section Up / Down, Promote / Demote
+    // Section, the outline's right-click menu and drag and drop.
+    void moveSectionBy(int delta);
+    void changeSectionLevel(int delta);
+    void moveSectionTo(int position, int targetPosition, bool after);
+    int outlineEditPosition() const;
+    void finishOutlineEdit(bool ok, const QString &why, int position);
     void onFontFamilyChosen(const QFont &font);
     void onFontSizeChosen(int pointSize);
     void setThemePaper();
@@ -476,6 +486,10 @@ private:
     QAction *m_previewAction = nullptr;
     OutlinePane *m_outline = nullptr;
     QAction *m_outlineAction = nullptr;
+    QAction *m_moveSectionUpAction = nullptr;
+    QAction *m_moveSectionDownAction = nullptr;
+    QAction *m_promoteSectionAction = nullptr;
+    QAction *m_demoteSectionAction = nullptr;
     bool m_outlineWanted = false; // outline/visible; every document type
     QAction *m_libraryAction = nullptr;
     QAction *m_chooseLibraryAction = nullptr;

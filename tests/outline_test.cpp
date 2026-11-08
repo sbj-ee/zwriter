@@ -340,6 +340,35 @@ void testPane()
           "P26 switching mode rescans the same text");
 }
 
+// 1.21.0: the pane only reports edits (drag and drop, context menu); which drops
+// are allowed is decided here.
+void testPaneEdit()
+{
+    QTextEdit editor;
+    fillRich(editor.document(), {{1, QStringLiteral("A")}, {2, QStringLiteral("A1")}, {2, QStringLiteral("A2")},
+                                 {1, QStringLiteral("B")}, {2, QStringLiteral("B1")}, {1, QStringLiteral("C")}});
+    OutlinePane pane;
+    pane.attachEditor(&editor);
+    pane.show();
+    check(pane.items().size() == 6, "E1 six entries");
+    check(pane.isDropAllowed(0, 3) && pane.isDropAllowed(0, 5) && pane.isDropAllowed(5, 0) && pane.isDropAllowed(1, 2),
+          "E2 drops among siblings are allowed");
+    check(!pane.isDropAllowed(1, 4) && !pane.isDropAllowed(0, 1) && !pane.isDropAllowed(2, 3) && !pane.isDropAllowed(0, 0)
+              && !pane.isDropAllowed(-1, 0) && !pane.isDropAllowed(0, 9),
+          "E3 other parents, other levels, itself and out-of-range entries are refused");
+    int gotFrom = -1;
+    int gotTo = -1;
+    bool gotAfter = false;
+    QObject::connect(&pane, &OutlinePane::moveToRequested, &pane, [&](int f, int t, bool a) {
+        gotFrom = f;
+        gotTo = t;
+        gotAfter = a;
+    });
+    pane.dropForTest(0, 5, true);
+    check(gotFrom == pane.items()[0].position && gotTo == pane.items()[5].position && gotAfter,
+          "E4 a drop reports the headings' positions");
+}
+
 void testSettings()
 {
     QSettings().remove(OutlinePane::settingsKey());
@@ -373,6 +402,7 @@ int main(int argc, char **argv)
     testScanMarkdown();
     testIndexAt();
     testPane();
+    testPaneEdit();
     testSettings();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;

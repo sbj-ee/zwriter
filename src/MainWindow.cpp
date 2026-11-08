@@ -25,6 +25,7 @@
 #include "BookChapterDialog.hpp"
 #include "BookManifest.hpp"
 #include "PageWidgets.hpp"
+#include "OutlineEdit.hpp"
 #include "OutlinePane.hpp"
 #include "PreviewPane.hpp"
 #include "PrintLayout.hpp"
@@ -268,6 +269,17 @@ MainWindow::MainWindow(QWidget *parent)
     m_outline->attachEditor(m_editor);
     connect(m_outline, &OutlinePane::headingActivated, this, &MainWindow::goToOutlineHeading);
     connect(m_outline, &OutlinePane::escapePressed, this, [this]() { m_editor->setFocus(); });
+    connect(m_outline, &OutlinePane::moveRequested, this, [this](int position, int delta) {
+        const OutlineEdit::Result r = OutlineEdit::moveSection(m_editor->document(), m_markdownMode, position, delta);
+        finishOutlineEdit(r.ok, r.why, r.position);
+    });
+    connect(m_outline, &OutlinePane::levelRequested, this, [this](int position, int delta) {
+        const OutlineEdit::Result r = OutlineEdit::changeLevel(
+            m_editor->document(), m_markdownMode, position, delta,
+            [this](int block, int level) { setBlockHeadingLevel(block, level); });
+        finishOutlineEdit(r.ok, r.why, r.position);
+    });
+    connect(m_outline, &OutlinePane::moveToRequested, this, &MainWindow::moveSectionTo);
     // Focus moves from the editor straight to the chapter list (Ctrl+Tab;
     // Tab itself types a tab in the document), not to the sidebar header.
     QWidget::setTabOrder(m_editor, m_book->view());
@@ -842,6 +854,37 @@ void MainWindow::buildEditMenu()
     }
     replaceAct->setShortcuts(replaceKeys);
     connect(replaceAct, &QAction::triggered, this, &MainWindow::showReplace);
+
+    // Outline editing: sections move and change level as a whole, in rich
+    // and Markdown documents alike. Each is one undo step.
+    m_editMenu->addSeparator();
+    auto addSectionAction = [this](const QString &text, const QString &name, const QKeySequence &keys,
+                                   const QString &tip, int which) {
+        QAction *a = m_editMenu->addAction(text);
+        a->setObjectName(name);
+        a->setShortcut(keys);
+        a->setToolTip(tip);
+        connect(a, &QAction::triggered, this, [this, which]() {
+            if (which < 2) {
+                moveSectionBy(which == 0 ? -1 : +1);
+            } else {
+                changeSectionLevel(which == 2 ? -1 : +1);
+            }
+        });
+        return a;
+    };
+    m_moveSectionUpAction = addSectionAction(QStringLiteral("Move Section &Up"), QStringLiteral("editMoveSectionUp"),
+                                             QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_Up),
+                                             QStringLiteral("Move the section the cursor is in above the one before it (Alt+Shift+Up)"), 0);
+    m_moveSectionDownAction = addSectionAction(QStringLiteral("Move Section Dow&n"), QStringLiteral("editMoveSectionDown"),
+                                               QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_Down),
+                                               QStringLiteral("Move the section below the one after it (Alt+Shift+Down)"), 1);
+    m_promoteSectionAction = addSectionAction(QStringLiteral("&Promote Section"), QStringLiteral("editPromoteSection"),
+                                              QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_Left),
+                                              QStringLiteral("Make the heading and its subsections one level higher (Alt+Shift+Left)"), 2);
+    m_demoteSectionAction = addSectionAction(QStringLiteral("De&mote Section"), QStringLiteral("editDemoteSection"),
+                                             QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_Right),
+                                             QStringLiteral("Make the heading and its subsections one level lower (Alt+Shift+Right)"), 3);
 
     // Undo/redo/cut/copy availability follows the editor.
     m_undoAction->setEnabled(false);
@@ -1747,6 +1790,61 @@ void MainWindow::toggleOutline()
     if (m_outlineWanted) {
         m_outline->focusTree(); // arrows to pick a heading, Enter to go, Esc back to the page
     }
+}
+
+// The section an Edit > Move / Promote action applies to: the entry selected
+// in the outline when that has the focus, else the one the cursor is in.
+int MainWindow::outlineEditPosition() const
+{
+    if (m_outline->isVisible() && m_outline->treeHasFocus()) {
+        const int p = m_outline->currentHeadingPosition();
+        if (p >= 0) {
+            return p;
+        }
+    }
+    return m_editor->textCursor().position();
+}
+
+void MainWindow::finishOutlineEdit(bool ok, const QString &why, int position)
+{
+    if (!ok) {
+        statusBar()->showMessage(why, 4000);
+        return;
+    }
+    QTextCursor c(m_editor->document());
+    c.setPosition(qBound(0, position, qMax(0, m_editor->document()->characterCount() - 1)));
+    m_editor->setTextCursor(c);
+    if (m_outline->isVisible()) {
+        m_outline->rebuildNow();
+    }
+}
+
+void MainWindow::moveSectionBy(int delta)
+{
+    if (m_editor->isReadOnly()) {
+        return;
+    }
+    const OutlineEdit::Result r = OutlineEdit::moveSection(m_editor->document(), m_markdownMode, outlineEditPosition(), delta);
+    finishOutlineEdit(r.ok, r.why, r.position);
+}
+
+void MainWindow::moveSectionTo(int position, int targetPosition, bool after)
+{
+    if (m_editor->isReadOnly()) {
+        return;
+    }
+    const OutlineEdit::Result r = OutlineEdit::moveSectionTo(m_editor->document(), m_markdownMode, position, targetPosition, after);
+    finishOutlineEdit(r.ok, r.why, r.position);
+}
+
+void MainWindow::changeSectionLevel(int delta)
+{
+    if (m_editor->isReadOnly()) {
+        return;
+    }
+    const OutlineEdit::Result r = OutlineEdit::changeLevel(m_editor->document(), m_markdownMode, outlineEditPosition(), delta,
+                                                           [this](int block, int level) { setBlockHeadingLevel(block, level); });
+    finishOutlineEdit(r.ok, r.why, r.position);
 }
 
 void MainWindow::goToOutlineHeading(int position)
@@ -3079,21 +3177,8 @@ void MainWindow::toggleItalic()
     m_editor->setFocus();
 }
 
-void MainWindow::applyHeading()
+QTextCharFormat MainWindow::headingCharFormat(int level) const
 {
-    QAction *act = m_paragraphAction;
-    if (m_h1Action->isChecked()) {
-        act = m_h1Action;
-    } else if (m_h2Action->isChecked()) {
-        act = m_h2Action;
-    } else if (m_h3Action->isChecked()) {
-        act = m_h3Action;
-    }
-
-    const int level = act->data().toInt();
-    // Body Text / Heading replaces a named style (Title, Bibliography, ...).
-    ParagraphStyles::apply(m_editor->textCursor(), QString());
-
     // Size and face per style from Format > Styles… (1.15.0; built in:
     // Body 12, Heading 1 22, Heading 2 17, Heading 3 13 pt).
     const QString styleKey = StyleFonts::keyFor(level, QString());
@@ -3117,6 +3202,53 @@ void MainWindow::applyHeading()
         charFmt.setFontFamilies(StyleFonts::families(m_styleFonts, styleKey, DocumentIo::defaultFontFamilies(),
                                                      DocumentIo::headingFontFamilies()));
     }
+    return charFmt;
+}
+
+// One block takes a heading level (0 = body text) and the style's size and
+// face on the block and its text runs.
+void MainWindow::styleBlockAsHeading(QTextCursor &walk, int level, const QTextCharFormat &charFmt)
+{
+    QTextBlockFormat blockFmt = walk.blockFormat();
+    QTextCharFormat runFmt = charFmt;
+    if (blockFmt.headingLevel() == 3 && level != 3) {
+        runFmt.setFontItalic(false); // Heading 3's italic goes with it
+    }
+    blockFmt.setHeadingLevel(level);
+    walk.setBlockFormat(blockFmt);
+    walk.mergeBlockCharFormat(runFmt);
+    QTextCursor text(walk.block());
+    text.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+    text.mergeCharFormat(runFmt);
+}
+
+// Outline promote / demote: the same look as Format > Heading.
+void MainWindow::setBlockHeadingLevel(int blockNumber, int level)
+{
+    const QTextBlock block = m_editor->document()->findBlockByNumber(blockNumber);
+    if (!block.isValid()) {
+        return;
+    }
+    QTextCursor walk(block);
+    styleBlockAsHeading(walk, level, headingCharFormat(level));
+}
+
+void MainWindow::applyHeading()
+{
+    QAction *act = m_paragraphAction;
+    if (m_h1Action->isChecked()) {
+        act = m_h1Action;
+    } else if (m_h2Action->isChecked()) {
+        act = m_h2Action;
+    } else if (m_h3Action->isChecked()) {
+        act = m_h3Action;
+    }
+
+    const int level = act->data().toInt();
+    // Body Text / Heading replaces a named style (Title, Bibliography, ...).
+    ParagraphStyles::apply(m_editor->textCursor(), QString());
+
+    const QTextCharFormat charFmt = headingCharFormat(level);
 
     // Apply to every block the selection touches. The style has to reach the
     // text runs themselves: typed text carries an explicit font, which would
@@ -3128,17 +3260,7 @@ void MainWindow::applyHeading()
     QTextCursor walk(m_editor->document());
     walk.setPosition(first);
     while (true) {
-        QTextBlockFormat blockFmt = walk.blockFormat();
-        QTextCharFormat runFmt = charFmt;
-        if (blockFmt.headingLevel() == 3 && level != 3) {
-            runFmt.setFontItalic(false); // Heading 3's italic goes with it
-        }
-        blockFmt.setHeadingLevel(level);
-        walk.setBlockFormat(blockFmt);
-        walk.mergeBlockCharFormat(runFmt);
-        QTextCursor text(walk.block());
-        text.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
-        text.mergeCharFormat(runFmt);
+        styleBlockAsHeading(walk, level, charFmt);
         if (walk.block().next().isValid() && walk.block().next().position() <= last) {
             walk.setPosition(walk.block().next().position());
         } else {
