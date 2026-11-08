@@ -178,6 +178,8 @@ private slots:
     void insertImageFromFile();
     void insertCaptionHere();
     void fileNewMarkdown();
+    void fileNewFromOutline();
+    void startDocumentFromOutline(const QString &outline, bool markdown);
     void applyHeading();
     QTextCharFormat headingCharFormat(int level) const;
     void styleBlockAsHeading(QTextCursor &walk, int level, const QTextCharFormat &charFmt);
@@ -460,6 +462,7 @@ private:
     QAction *m_checkUpdatesAction = nullptr;
     QAction *m_checkUpdatesAtStartupAction = nullptr;
     QAction *m_newMarkdownAction = nullptr;
+    QAction *m_newFromOutlineAction = nullptr;
     QAction *m_insertTableAction = nullptr;
     QAction *m_insertImageAction = nullptr;
     QAction *m_insertCaptionAction = nullptr;

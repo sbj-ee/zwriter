@@ -25,6 +25,7 @@
 #include "BookChapterDialog.hpp"
 #include "BookManifest.hpp"
 #include "PageWidgets.hpp"
+#include "OutlineDraft.hpp"
 #include "OutlineEdit.hpp"
 #include "OutlinePane.hpp"
 #include "PreviewPane.hpp"
@@ -676,6 +677,12 @@ void MainWindow::buildFileMenu()
     m_newMarkdownAction->setToolTip(QStringLiteral(
         "Start a plain-text Markdown document with iA-style view defaults (Ctrl+Alt+N)"));
     connect(m_newMarkdownAction, &QAction::triggered, this, &MainWindow::fileNewMarkdown);
+
+    m_newFromOutlineAction = m_fileMenu->addAction(QStringLiteral("New from &Outline…"));
+    m_newFromOutlineAction->setObjectName(QStringLiteral("fileNewFromOutline"));
+    m_newFromOutlineAction->setToolTip(QStringLiteral(
+        "Type an outline and start a document (ODT or Markdown) with those headings"));
+    connect(m_newFromOutlineAction, &QAction::triggered, this, &MainWindow::fileNewFromOutline);
 
     // Books: both open the Book sidebar first, so the result is visible.
     auto *newBookAct = m_fileMenu->addAction(QStringLiteral("New &Book…"));
