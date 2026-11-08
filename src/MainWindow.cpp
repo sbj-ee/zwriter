@@ -280,6 +280,7 @@ MainWindow::MainWindow(QWidget *parent)
         finishOutlineEdit(r.ok, r.why, r.position);
     });
     connect(m_outline, &OutlinePane::moveToRequested, this, &MainWindow::moveSectionTo);
+    connect(m_outline, &OutlinePane::editRefused, this, [this](const QString &why) { statusBar()->showMessage(why, 5000); });
     // Focus moves from the editor straight to the chapter list (Ctrl+Tab;
     // Tab itself types a tab in the document), not to the sidebar header.
     QWidget::setTabOrder(m_editor, m_book->view());
@@ -1794,9 +1795,14 @@ void MainWindow::toggleOutline()
 
 // The section an Edit > Move / Promote action applies to: the entry selected
 // in the outline when that has the focus, else the one the cursor is in.
-int MainWindow::outlineEditPosition() const
+int MainWindow::outlineEditPosition()
 {
     if (m_outline->isVisible() && m_outline->treeHasFocus()) {
+        // The selected entry may be a few hundred ms behind the page: rescan,
+        // and edit nothing if its headings have changed since it was drawn.
+        if (!m_outline->syncBeforeEdit()) {
+            return -1;
+        }
         const int p = m_outline->currentHeadingPosition();
         if (p >= 0) {
             return p;
@@ -1824,7 +1830,11 @@ void MainWindow::moveSectionBy(int delta)
     if (m_editor->isReadOnly()) {
         return;
     }
-    const OutlineEdit::Result r = OutlineEdit::moveSection(m_editor->document(), m_markdownMode, outlineEditPosition(), delta);
+    const int at = outlineEditPosition();
+    if (at < 0) {
+        return;
+    }
+    const OutlineEdit::Result r = OutlineEdit::moveSection(m_editor->document(), m_markdownMode, at, delta);
     finishOutlineEdit(r.ok, r.why, r.position);
 }
 
@@ -1842,7 +1852,11 @@ void MainWindow::changeSectionLevel(int delta)
     if (m_editor->isReadOnly()) {
         return;
     }
-    const OutlineEdit::Result r = OutlineEdit::changeLevel(m_editor->document(), m_markdownMode, outlineEditPosition(), delta,
+    const int at = outlineEditPosition();
+    if (at < 0) {
+        return;
+    }
+    const OutlineEdit::Result r = OutlineEdit::changeLevel(m_editor->document(), m_markdownMode, at, delta,
                                                            [this](int block, int level) { setBlockHeadingLevel(block, level); });
     finishOutlineEdit(r.ok, r.why, r.position);
 }

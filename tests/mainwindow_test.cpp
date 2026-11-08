@@ -3834,6 +3834,37 @@ void testOutlineEditWindow(const QString &root)
     check(editor->textCursor().block().text() == QStringLiteral("## Morning"), "OE the caret is on the moved heading");
     editor->undo();
     check(editor->toPlainText() == original, "OE one undo puts the section back");
+
+    // 1.21.0 review fix: the outline is flushed before an edit from it, and an
+    // edit whose headings changed under it is refused instead of guessed.
+    {
+        auto *outline = w.findChild<OutlinePane *>();
+        auto *view = w.findChild<QAction *>(QStringLiteral("viewOutline"));
+        if (outline && view) {
+            if (!outline->isVisibleTo(&w)) {
+                view->trigger();
+            }
+            outline->rebuildNow();
+            const QString before = editor->toPlainText();
+            QTextCursor c(editor->document());
+            c.setPosition(editor->document()->findBlockByNumber(4).position() + 3); // inside "## Morning"
+            c.insertText(QStringLiteral("X")); // renamed less than 300 ms ago; the tree has not caught up
+            const QString renamed = editor->toPlainText();
+            w.statusBar()->clearMessage();
+            outline->requestMove(1, +1); // what the context menu does
+            check(editor->toPlainText() == renamed && !w.statusBar()->currentMessage().isEmpty(),
+                  "OE a menu / drag edit from a stale outline is refused and says so", w.statusBar()->currentMessage());
+            outline->requestMove(1, +1); // the tree is current now
+            check(editor->toPlainText() != renamed, "OE and goes ahead once the outline is current");
+            editor->undo();
+            editor->undo();
+            check(editor->toPlainText() == before, "OE back to the original with undo");
+            if (outline->isVisibleTo(&w)) {
+                view->trigger(); // as it was
+            }
+        }
+    }
+
     caretTo(QStringLiteral("Gulls."));
     up->trigger();
     check(editor->toPlainText() == original, "OE Morning is Harbor's first subsection, so Move Up changes nothing");

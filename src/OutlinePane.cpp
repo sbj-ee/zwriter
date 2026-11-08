@@ -108,9 +108,7 @@ OutlinePane::OutlinePane(QWidget *parent)
     m_tree = new OutlineTree(
         [this](int from, int to) { return canDrop(from, to); },
         [this](int from, int to, bool after) {
-            if (from >= 0 && from < m_items.size() && to >= 0 && to < m_items.size()) {
-                emit moveToRequested(m_items[from].position, m_items[to].position, after);
-            }
+            requestMoveTo(from, to, after);
         },
         this);
     m_tree->setObjectName(QStringLiteral("outlineTree"));
@@ -401,6 +399,41 @@ bool OutlinePane::canDrop(int from, int to) const
     return false;
 }
 
+bool OutlinePane::syncBeforeEdit()
+{
+    const QList<Outline::Item> fresh = Outline::scan(m_editor ? m_editor->document() : nullptr, m_markdown);
+    bool same = fresh.size() == m_items.size() && m_rows.size() == m_items.size();
+    for (int i = 0; same && i < fresh.size(); ++i) {
+        same = fresh[i].level == m_items[i].level && fresh[i].text == m_items[i].text;
+    }
+    rebuildNow(); // positions and word counts are refreshed in any case
+    if (!same) {
+        emit editRefused(QStringLiteral("The outline had changed; it is refreshed. Choose the heading again."));
+    }
+    return same;
+}
+
+void OutlinePane::requestMove(int index, int delta)
+{
+    if (syncBeforeEdit() && index >= 0 && index < m_items.size()) {
+        emit moveRequested(m_items[index].position, delta);
+    }
+}
+
+void OutlinePane::requestLevel(int index, int delta)
+{
+    if (syncBeforeEdit() && index >= 0 && index < m_items.size()) {
+        emit levelRequested(m_items[index].position, delta);
+    }
+}
+
+void OutlinePane::requestMoveTo(int from, int to, bool after)
+{
+    if (syncBeforeEdit() && from >= 0 && from < m_items.size() && to >= 0 && to < m_items.size()) {
+        emit moveToRequested(m_items[from].position, m_items[to].position, after);
+    }
+}
+
 void OutlinePane::showContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *row = m_tree->itemAt(pos);
@@ -409,7 +442,6 @@ void OutlinePane::showContextMenu(const QPoint &pos)
         return;
     }
     m_tree->setCurrentItem(row);
-    const int where = m_items[idx].position;
     QMenu menu(this);
     menu.setObjectName(QStringLiteral("outlineMenu"));
     auto add = [&](const QString &text, const QString &name, bool enabled, const std::function<void()> &run) {
@@ -419,14 +451,14 @@ void OutlinePane::showContextMenu(const QPoint &pos)
         connect(a, &QAction::triggered, this, run);
     };
     add(QStringLiteral("Move Section &Up"), QStringLiteral("outlineMoveUp"), OutlineEdit::canMove(m_items, idx, -1),
-        [this, where] { emit moveRequested(where, -1); });
+        [this, idx] { requestMove(idx, -1); });
     add(QStringLiteral("Move Section &Down"), QStringLiteral("outlineMoveDown"), OutlineEdit::canMove(m_items, idx, +1),
-        [this, where] { emit moveRequested(where, +1); });
+        [this, idx] { requestMove(idx, +1); });
     menu.addSeparator();
     add(QStringLiteral("&Promote"), QStringLiteral("outlinePromote"),
-        OutlineEdit::canChangeLevel(m_items, idx, -1, m_markdown), [this, where] { emit levelRequested(where, -1); });
+        OutlineEdit::canChangeLevel(m_items, idx, -1, m_markdown), [this, idx] { requestLevel(idx, -1); });
     add(QStringLiteral("De&mote"), QStringLiteral("outlineDemote"),
-        OutlineEdit::canChangeLevel(m_items, idx, +1, m_markdown), [this, where] { emit levelRequested(where, +1); });
+        OutlineEdit::canChangeLevel(m_items, idx, +1, m_markdown), [this, idx] { requestLevel(idx, +1); });
     menu.exec(m_tree->viewport()->mapToGlobal(pos));
 }
 
