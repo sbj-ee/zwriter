@@ -20,6 +20,7 @@
 #include "ImagePropertiesDialog.hpp"
 #include "PageWidgets.hpp"
 #include "MainWindow.hpp"
+#include "OutlineDraftDialog.hpp"
 #include <QMenu>
 #include <QPageLayout>
 #include <QPageSize>
@@ -3890,6 +3891,72 @@ void testOutlineEditWindow(const QString &root)
     w.close();
 }
 
+// 1.22.0: File > New from Outline… builds a document from typed headings.
+void testNewFromOutline()
+{
+    MainWindow w;
+    w.show();
+    QApplication::processEvents();
+    auto *action = w.findChild<QAction *>(QStringLiteral("fileNewFromOutline"));
+    check(action != nullptr, "NO File > New from Outline… exists");
+    QTextEdit *editor = editorOf(w);
+    if (!action || !editor) {
+        return;
+    }
+    auto run = [&](const QString &text, bool markdown, bool create) {
+        QTimer::singleShot(0, [=]() {
+            auto *d = qobject_cast<OutlineDraftDialog *>(QApplication::activeModalWidget());
+            if (!d) {
+                return;
+            }
+            d->setOutlineText(text);
+            d->setMarkdown(markdown);
+            if (create) {
+                d->createButton()->click();
+            } else {
+                d->reject();
+            }
+        });
+        action->trigger();
+        QApplication::processEvents();
+    };
+
+    run(QStringLiteral("Intro\n  Background\n  Aims\nResults\n      Too deep"), false, true);
+    QStringList got;
+    QList<int> levels;
+    for (QTextBlock b = editor->document()->begin(); b.isValid(); b = b.next()) {
+        got << b.text();
+        levels << b.blockFormat().headingLevel();
+    }
+    check(got == QStringList({"Intro", "", "Background", "", "Aims", "", "Results", "", "Too deep", ""}) &&
+              levels == QList<int>({1, 0, 2, 0, 2, 0, 1, 0, 2, 0}),
+          "NO an ODT outline becomes headings with an empty paragraph under each", got.join('|'));
+    QTextBlock intro = editor->document()->begin();
+    check(intro.begin().fragment().charFormat().fontWeight() >= QFont::Bold, "NO the headings look like headings");
+    check(editor->textCursor().blockNumber() == 1, "NO the cursor is under the first heading");
+    check(isDirty(w), "NO the new document is unsaved");
+    check(w.windowTitle().contains(QStringLiteral("*")) || isDirty(w), "NO and is marked modified");
+
+    // Markdown: bytes are exactly what a user would type.
+    w.close();
+    MainWindow w2;
+    w2.show();
+    QApplication::processEvents();
+    action = w2.findChild<QAction *>(QStringLiteral("fileNewFromOutline"));
+    editor = editorOf(w2);
+    run(QStringLiteral("# Plan\n## Budget\n## - Team"), true, true);
+    check(editor->toPlainText() == QStringLiteral("# Plan\n\n## Budget\n\n## Team\n\n"), "NO a Markdown outline becomes # lines",
+          QString(editor->toPlainText()).replace('\n', "\\n"));
+    check(editor->textCursor().block().text().isEmpty() && editor->textCursor().blockNumber() == 1,
+          "NO the cursor is on the blank line under the first heading");
+
+    // Cancel changes nothing.
+    const QString before = editor->toPlainText();
+    run(QStringLiteral("Something else"), false, false);
+    check(editor->toPlainText() == before, "NO Cancel leaves the document alone");
+    w2.close();
+}
+
 // 1.17.0: page guides, full screen and the toolbar layout carry over to the
 // next session (set, close the window, make a new one, compare).
 static void spWait(const std::function<bool()> &done)
@@ -4132,6 +4199,7 @@ int main(int argc, char **argv)
     testPageGuidesContainText();
     testOutlineWindow(dataDir.path());
     testOutlineEditWindow(dataDir.path());
+    testNewFromOutline();
     testPageSizeAndUnits(dataDir.path());
     testSymbols();
     testSubSuperscript(dataDir.path());

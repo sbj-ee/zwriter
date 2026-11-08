@@ -1,6 +1,10 @@
 // MainWindow, part: File: new/open/save/save-as, recent files, export PDF, print, page setup, properties.
 // Moved verbatim from MainWindow.cpp (1.19.0); no behaviour change.
 #include "MainWindow.hpp"
+#include "OutlineDraft.hpp"
+#include "OutlineDraftDialog.hpp"
+#include "OutlineEdit.hpp"
+#include "OutlinePane.hpp"
 #include "TableColumns.hpp"
 #include "ParagraphDialog.hpp"
 #include "ParagraphStyles.hpp"
@@ -228,6 +232,58 @@ void MainWindow::fileNew()
 void MainWindow::fileNewMarkdown()
 {
     startNewDocument(true);
+}
+
+void MainWindow::fileNewFromOutline()
+{
+    OutlineDraftDialog dlg(this);
+    if (dlg.exec() == QDialog::Accepted) {
+        startDocumentFromOutline(dlg.outlineText(), dlg.markdown());
+    }
+}
+
+// A new, unsaved document whose headings are the outline's, with an empty
+// paragraph under each. The cursor goes under the first heading.
+void MainWindow::startDocumentFromOutline(const QString &outline, bool markdown)
+{
+    const OutlineDraft::Parsed parsed = OutlineDraft::parse(
+        outline, markdown ? OutlineEdit::kMaxMarkdownLevel : OutlineEdit::kMaxRichLevel);
+    if (parsed.entries.isEmpty() || !maybeSave()) {
+        return;
+    }
+    startNewDocument(markdown);
+    if (m_dirty) {
+        return; // the save question was answered "Cancel" a second time
+    }
+    QTextDocument *doc = m_editor->document();
+    QTextCursor c(doc);
+    int firstBody = 0;
+    if (markdown) {
+        c.insertText(OutlineDraft::toMarkdown(parsed.entries));
+        applyMarkdownBlockFormat();
+        firstBody = 1;
+    } else {
+        // heading, body, heading, body ... (blocks 2i and 2i+1)
+        for (int i = 0; i < parsed.entries.size(); ++i) {
+            if (i > 0) {
+                c.insertBlock();
+            }
+            c.insertText(parsed.entries[i].title);
+            c.insertBlock();
+        }
+        for (int i = 0; i < parsed.entries.size(); ++i) {
+            setBlockHeadingLevel(2 * i, parsed.entries[i].level);
+            setBlockHeadingLevel(2 * i + 1, 0);
+        }
+        firstBody = 1;
+    }
+    doc->clearUndoRedoStacks();
+    QTextCursor caret(doc->findBlockByNumber(firstBody));
+    m_editor->setTextCursor(caret);
+    doc->setModified(true); // not saved anywhere yet
+    updateStats();
+    m_outline->rebuildNow();
+    m_editor->setFocus();
 }
 
 void MainWindow::startNewDocument(bool markdown)

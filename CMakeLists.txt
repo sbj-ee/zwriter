@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.21.0 LANGUAGES CXX)
+project(zwriter VERSION 1.22.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -183,6 +183,10 @@ add_executable(zwriter
   src/OutlinePane.hpp
   src/OutlineEdit.cpp
   src/OutlineEdit.hpp
+  src/OutlineDraft.cpp
+  src/OutlineDraft.hpp
+  src/OutlineDraftDialog.cpp
+  src/OutlineDraftDialog.hpp
   src/LibrarySidebar.cpp
   src/LibrarySidebar.hpp
   src/BookManifest.cpp
@@ -652,6 +656,10 @@ if(ZWRITER_BUILD_TESTS)
   )
   target_include_directories(outline_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(outline_edit_test PRIVATE Qt6::Gui)
+  add_executable(outline_draft_test tests/outline_draft_test.cpp src/OutlineDraft.cpp src/OutlineDraft.hpp)
+  target_include_directories(outline_draft_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(outline_draft_test PRIVATE Qt6::Core)
+  add_test(NAME outline_draft COMMAND outline_draft_test)
   add_test(NAME outline_edit COMMAND outline_edit_test)
   set_tests_properties(outline_edit PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 

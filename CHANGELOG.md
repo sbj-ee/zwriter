@@ -3,6 +3,25 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.22.0] — unreleased
+
+Outline mode, part three: start a document from an outline.
+
+- **File → New from Outline…** opens a box where you type an outline, one heading per line, and
+  choose **Document (ODT)** or **Markdown**. *Create* makes a new, unsaved document with those
+  headings and an empty paragraph under each, with the cursor under the first heading (the outline
+  pane, if open, lists them at once).
+  - A line's level comes from `#`s in front of it (`## Method`) or from its indentation (a tab or a
+    deeper indent is one level down; going back to an earlier indent is back to that level).
+    A leading bullet (`-`, `*`, `+`) or number (`1.`, `2.1`, `IV)`) is dropped; blank lines and
+    closing `#`s are ignored.
+  - A line is never more than one level below the one above it, and never deeper than the format
+    allows (Heading 3 for ODT, `######` for Markdown); the box says how many were moved up.
+  - ODT headings get the same size, face and weight as Format → Heading; Markdown gets plain
+    `# Title` lines separated by blank lines. The format you pick is remembered.
+- `OutlineDraft` (`src/OutlineDraft.{hpp,cpp}`, no widgets) and `OutlineDraftDialog`; new test
+  `outline_draft_test`, window checks in `mainwindow_test`.
+
 ## [1.21.0] — unreleased
 
 Outline mode, part two: edit the document by its outline.
