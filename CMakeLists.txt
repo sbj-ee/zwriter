@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.20.0 LANGUAGES CXX)
+project(zwriter VERSION 1.21.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -181,6 +181,8 @@ add_executable(zwriter
   src/Outline.hpp
   src/OutlinePane.cpp
   src/OutlinePane.hpp
+  src/OutlineEdit.cpp
+  src/OutlineEdit.hpp
   src/LibrarySidebar.cpp
   src/LibrarySidebar.hpp
   src/BookManifest.cpp
@@ -623,6 +625,7 @@ if(ZWRITER_BUILD_TESTS)
     tests/outline_test.cpp
     src/Outline.cpp
     src/Outline.hpp
+    src/OutlineEdit.cpp
     src/OutlinePane.cpp
     src/OutlinePane.hpp
     src/MarkdownSyntax.cpp
@@ -634,6 +637,23 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(outline_test PRIVATE Qt6::Widgets)
   add_test(NAME outline COMMAND outline_test)
   set_tests_properties(outline PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
+
+  # Outline editing (1.21.0): move sections, promote / demote, on rich text and
+  # Markdown documents, one undo step each, blank-line spacing and a file's
+  # final newline kept.
+  add_executable(outline_edit_test
+    tests/outline_edit_test.cpp
+    src/Outline.cpp
+    src/Outline.hpp
+    src/OutlineEdit.cpp
+    src/OutlineEdit.hpp
+    src/MarkdownSyntax.cpp
+    src/MarkdownSyntax.hpp
+  )
+  target_include_directories(outline_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(outline_edit_test PRIVATE Qt6::Gui)
+  add_test(NAME outline_edit COMMAND outline_edit_test)
+  set_tests_properties(outline_edit PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
   # Updater: version compare, release JSON, checksum, minisign (fixtures made
   # with the real minisign tool and a throwaway key), and the whole flow

@@ -3795,6 +3795,101 @@ void testOutlineWindow(const QString &root)
     w.close();
 }
 
+// 1.21.0: Edit > Move Section / Promote / Demote on Markdown and ODT documents.
+void testOutlineEditWindow(const QString &root)
+{
+    const QString md = root + QStringLiteral("/outline-edit.md");
+    check(writeFile(md, "# Harbor\n\nLight.\n\n## Morning\n\nGulls.\n\n## Evening\n\nQuiet.\n\n# Marsh\n\nReeds.\n"),
+          "OE write the Markdown file");
+    MainWindow w;
+    w.show();
+    QApplication::processEvents();
+    auto act = [&](const char *name) { return w.findChild<QAction *>(QString::fromLatin1(name)); };
+    QAction *up = act("editMoveSectionUp");
+    QAction *down = act("editMoveSectionDown");
+    QAction *promote = act("editPromoteSection");
+    QAction *demote = act("editDemoteSection");
+    check(up && down && promote && demote, "OE the four Edit actions exist");
+    check(w.openPathForTest(md), "OE open the Markdown file");
+    QTextEdit *editor = editorOf(w);
+    if (!up || !down || !promote || !demote || !editor) {
+        return;
+    }
+    auto caretTo = [&](const QString &blockText) {
+        for (QTextBlock b = editor->document()->begin(); b.isValid(); b = b.next()) {
+            if (b.text() == blockText) {
+                QTextCursor c(editor->document());
+                c.setPosition(b.position());
+                editor->setTextCursor(c);
+                return true;
+            }
+        }
+        return false;
+    };
+    const QString original = editor->toPlainText();
+    check(caretTo(QStringLiteral("Gulls.")), "OE caret in Morning");
+    down->trigger();
+    check(editor->toPlainText() == QStringLiteral("# Harbor\n\nLight.\n\n## Evening\n\nQuiet.\n\n## Morning\n\nGulls.\n\n# Marsh\n\nReeds.\n"),
+          "OE Move Section Down swaps Morning and Evening", QString(editor->toPlainText()).replace('\n', "\\n"));
+    check(editor->textCursor().block().text() == QStringLiteral("## Morning"), "OE the caret is on the moved heading");
+    editor->undo();
+    check(editor->toPlainText() == original, "OE one undo puts the section back");
+    caretTo(QStringLiteral("Gulls."));
+    up->trigger();
+    check(editor->toPlainText() == original, "OE Morning is Harbor's first subsection, so Move Up changes nothing");
+    caretTo(QStringLiteral("Light."));
+    demote->trigger();
+    check(editor->toPlainText().startsWith(QStringLiteral("## Harbor\n\nLight.\n\n### Morning\n\nGulls.\n\n### Evening")),
+          "OE Demote Section adds a # to the heading and its subsections");
+    editor->undo();
+    check(editor->toPlainText() == original, "OE one undo for the demote");
+    caretTo(QStringLiteral("Reeds."));
+    promote->trigger();
+    check(!w.statusBar()->currentMessage().isEmpty() && editor->toPlainText() == original,
+          "OE promoting a top-level heading says why it can't and changes nothing", w.statusBar()->currentMessage());
+
+    // ODT: levels change with the heading style's look.
+    const QString odt = root + QStringLiteral("/outline-edit.odt");
+    {
+        QTextDocument doc;
+        QTextCursor c(&doc);
+        bool first = true;
+        for (const auto &l : QList<QPair<int, QString>>{{1, QStringLiteral("Tides")}, {0, QStringLiteral("Slack.")},
+                                                        {2, QStringLiteral("Ebb")},   {0, QStringLiteral("Out.")},
+                                                        {1, QStringLiteral("Wind")},  {0, QStringLiteral("Gusts.")}}) {
+            if (!first) {
+                c.insertBlock();
+            }
+            first = false;
+            QTextBlockFormat bf = c.blockFormat();
+            bf.setHeadingLevel(l.first);
+            c.setBlockFormat(bf);
+            c.insertText(l.second);
+        }
+        QString err;
+        check(DocumentIo::save(&doc, odt, DocumentIo::Format::Odt, &err), "OE write the ODT file", err);
+    }
+    check(w.openPathForTest(odt), "OE open the ODT file");
+    editor = editorOf(w);
+    check(caretTo(QStringLiteral("Slack.")), "OE caret in Tides");
+    down->trigger();
+    check(editor->document()->begin().text() == QStringLiteral("Wind"), "OE an ODT section moves down");
+    editor->undo();
+    check(editor->document()->begin().text() == QStringLiteral("Tides"), "OE and back with one undo");
+    caretTo(QStringLiteral("Out."));
+    demote->trigger(); // Ebb: Heading 2 -> 3, gets Heading 3's italic
+    QTextBlock ebb = editor->document()->findBlockByNumber(2);
+    check(ebb.text() == QStringLiteral("Ebb") && ebb.blockFormat().headingLevel() == 3
+              && ebb.begin().fragment().charFormat().fontItalic(),
+          "OE demoting an ODT heading restyles it as Heading 3");
+    promote->trigger();
+    ebb = editor->document()->findBlockByNumber(2);
+    check(ebb.blockFormat().headingLevel() == 2 && !ebb.begin().fragment().charFormat().fontItalic()
+              && ebb.begin().fragment().charFormat().fontWeight() >= QFont::Bold,
+          "OE promoting it back restores Heading 2's look");
+    w.close();
+}
+
 // 1.17.0: page guides, full screen and the toolbar layout carry over to the
 // next session (set, close the window, make a new one, compare).
 static void spWait(const std::function<bool()> &done)
@@ -4036,6 +4131,7 @@ int main(int argc, char **argv)
     testBookFeedback(dataDir.path(), prompts);
     testPageGuidesContainText();
     testOutlineWindow(dataDir.path());
+    testOutlineEditWindow(dataDir.path());
     testPageSizeAndUnits(dataDir.path());
     testSymbols();
     testSubSuperscript(dataDir.path());
