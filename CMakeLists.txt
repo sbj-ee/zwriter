@@ -17,7 +17,7 @@ endif()
 # Single version source of truth (same scheme as zedit). Bump ONLY here.
 # Semver MAJOR.MINOR.PATCH; GitHub Release tags vX.Y.Z; CPack artifact
 # names include PROJECT_VERSION (see cmake/Packaging.cmake).
-project(zwriter VERSION 1.19.0 LANGUAGES CXX)
+project(zwriter VERSION 1.20.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -177,6 +177,10 @@ add_executable(zwriter
   src/AlignmentActions.hpp
   src/PreviewPane.cpp
   src/PreviewPane.hpp
+  src/Outline.cpp
+  src/Outline.hpp
+  src/OutlinePane.cpp
+  src/OutlinePane.hpp
   src/LibrarySidebar.cpp
   src/LibrarySidebar.hpp
   src/BookManifest.cpp
@@ -611,6 +615,25 @@ if(ZWRITER_BUILD_TESTS)
   target_link_libraries(panes_test PRIVATE Qt6::Widgets)
   add_test(NAME panes COMMAND panes_test)
   set_tests_properties(panes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
+
+  # Outline (1.20.0): the heading scanner (ODT levels, Markdown # lines, fences,
+  # generated ToC, section extents and word counts) and the pane beside the
+  # editor (debounce, caret follow, click / Enter to jump, settings key).
+  add_executable(outline_test
+    tests/outline_test.cpp
+    src/Outline.cpp
+    src/Outline.hpp
+    src/OutlinePane.cpp
+    src/OutlinePane.hpp
+    src/MarkdownSyntax.cpp
+    src/MarkdownSyntax.hpp
+    src/Theme.cpp
+    src/Theme.hpp
+  )
+  target_include_directories(outline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(outline_test PRIVATE Qt6::Widgets)
+  add_test(NAME outline COMMAND outline_test)
+  set_tests_properties(outline PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_STYLE_OVERRIDE=Fusion")
 
   # Updater: version compare, release JSON, checksum, minisign (fixtures made
   # with the real minisign tool and a throwaway key), and the whole flow

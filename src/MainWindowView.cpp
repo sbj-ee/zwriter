@@ -27,6 +27,7 @@
 #include "BookChapterDialog.hpp"
 #include "BookManifest.hpp"
 #include "PageWidgets.hpp"
+#include "OutlinePane.hpp"
 #include "PreviewPane.hpp"
 #include "PrintLayout.hpp"
 #include "PropertiesDialog.hpp"

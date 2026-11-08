@@ -3,6 +3,31 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.20.0] — unreleased
+
+Outline pane (first part of outline mode).
+
+- **View → Outline** (`Ctrl+Alt+O`, default off, remembered) shows the document's headings as a
+  tree in a pane to the right of the page, for ODT and Markdown documents alike. It sits between
+  the page and the Markdown preview, so with both on you get three columns.
+  - ODT / RTF: Heading 1–3 (the block's heading level). Markdown: `#` lines, levels 1–6, with
+    closing `#`s dropped; fenced code is skipped, as in the editor's highlighting. A `#` with no
+    text, and the generated table of contents, are not entries.
+  - **Click an entry, or press Enter on it, to jump to that heading.** Arrow keys only move
+    through the list. Esc gives the focus back to the page. Showing the pane from the menu puts
+    the focus in the list.
+  - The entry for the section the caret is in follows the caret as you write. A section is a
+    heading plus everything up to the next heading of the same or a higher level; the pane's
+    footer shows the heading count and the words in the current section, and each entry's tooltip
+    shows its section's words (subsections included).
+  - The tree is rebuilt about 300 ms after you stop typing, only while the pane is visible. An
+    edit that leaves every heading as it was keeps the entries (the list does not jump).
+- New `Outline` scanner (`src/Outline.{hpp,cpp}`) and `OutlinePane`; `MarkdownSyntax::BlockResult`
+  now also reports a heading's text range, so the outline and the highlighter agree on what a
+  heading is.
+- `tests/outline_test` (scanner, pane, settings) and an outline section in `mainwindow_test`.
+- Not in this release: moving or promoting / demoting sections, and folding.
+
 ## [1.19.0] — 2026-10-31
 
 Source reorganization only; no change in behaviour.
