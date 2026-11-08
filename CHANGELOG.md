@@ -41,6 +41,11 @@ Outline mode, part two: edit the document by its outline.
   the blank lines between sections stay where they were, text and block formats (alignment,
   indents, lists, tables) move with their section, and a Markdown file's final newline (or the
   lack of one) is untouched.
+- **Edits from the outline check that it is current.** The tree can be up to 300 ms behind the
+  page, so the right-click menu, drag and drop, and the Edit actions (when the list has the focus)
+  rescan the document first. If the headings (level or text) are no longer the ones the tree
+  showed, nothing is edited, the tree is refreshed and the status bar says to choose again; if only
+  text under a heading changed, the edit goes ahead at the heading's current position.
 - `OutlineEdit` (`src/OutlineEdit.{hpp,cpp}`); `MainWindow::applyHeading()` split into
   `headingCharFormat` / `styleBlockAsHeading` so the outline reuses it. New test
   `outline_edit_test`; pane and window checks in `outline_test` and `mainwindow_test`.
