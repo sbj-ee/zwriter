@@ -3835,6 +3835,37 @@ void testOutlineEditWindow(const QString &root)
     check(editor->textCursor().block().text() == QStringLiteral("## Morning"), "OE the caret is on the moved heading");
     editor->undo();
     check(editor->toPlainText() == original, "OE one undo puts the section back");
+
+    // 1.21.0 review fix: the outline is flushed before an edit from it, and an
+    // edit whose headings changed under it is refused instead of guessed.
+    {
+        auto *outline = w.findChild<OutlinePane *>();
+        auto *view = w.findChild<QAction *>(QStringLiteral("viewOutline"));
+        if (outline && view) {
+            if (!outline->isVisibleTo(&w)) {
+                view->trigger();
+            }
+            outline->rebuildNow();
+            const QString before = editor->toPlainText();
+            QTextCursor c(editor->document());
+            c.setPosition(editor->document()->findBlockByNumber(4).position() + 3); // inside "## Morning"
+            c.insertText(QStringLiteral("X")); // renamed less than 300 ms ago; the tree has not caught up
+            const QString renamed = editor->toPlainText();
+            w.statusBar()->clearMessage();
+            outline->requestMove(1, +1); // what the context menu does
+            check(editor->toPlainText() == renamed && !w.statusBar()->currentMessage().isEmpty(),
+                  "OE a menu / drag edit from a stale outline is refused and says so", w.statusBar()->currentMessage());
+            outline->requestMove(1, +1); // the tree is current now
+            check(editor->toPlainText() != renamed, "OE and goes ahead once the outline is current");
+            editor->undo();
+            editor->undo();
+            check(editor->toPlainText() == before, "OE back to the original with undo");
+            if (outline->isVisibleTo(&w)) {
+                view->trigger(); // as it was
+            }
+        }
+    }
+
     caretTo(QStringLiteral("Gulls."));
     up->trigger();
     check(editor->toPlainText() == original, "OE Morning is Harbor's first subsection, so Move Up changes nothing");
@@ -3892,7 +3923,7 @@ void testOutlineEditWindow(const QString &root)
 }
 
 // 1.22.0: File > New from Outline… builds a document from typed headings.
-void testNewFromOutline()
+void testNewFromOutline(const QString &root)
 {
     MainWindow w;
     w.show();
@@ -3954,6 +3985,87 @@ void testNewFromOutline()
     const QString before = editor->toPlainText();
     run(QStringLiteral("Something else"), false, false);
     check(editor->toPlainText() == before, "NO Cancel leaves the document alone");
+
+    // Unsaved changes: the question is asked once, whatever the answer.
+    struct Flow {
+        int boxes = 0;
+        QString answer; // "Save", "Don't Save" or "Cancel"
+        QTimer timer;
+    };
+    auto flow = [&](MainWindow &win, const QString &answer, int *boxes) {
+        Flow f;
+        f.answer = answer;
+        qApp->setProperty("zwHoldPrompts", true);
+        QObject::connect(&f.timer, &QTimer::timeout, [&] {
+            QWidget *top = QApplication::activeModalWidget();
+            if (auto *d = qobject_cast<OutlineDraftDialog *>(top)) {
+                d->setOutlineText(QStringLiteral("# Plan\n## Budget"));
+                d->setMarkdown(true);
+                d->createButton()->click();
+            } else if (auto *box = qobject_cast<QMessageBox *>(top)) {
+                ++f.boxes;
+                for (QAbstractButton *b : box->buttons()) {
+                    const QString t = QString(b->text()).remove(QLatin1Char('&'));
+                    const bool match = f.answer == QStringLiteral("Save") ? t == QStringLiteral("Save")
+                                       : f.answer == QStringLiteral("Cancel") ? t == QStringLiteral("Cancel")
+                                                                              : t.startsWith(QStringLiteral("Do"));
+                    if (match) {
+                        b->click();
+                        return;
+                    }
+                }
+            }
+        });
+        f.timer.start(10);
+        win.findChild<QAction *>(QStringLiteral("fileNewFromOutline"))->trigger();
+        QApplication::processEvents();
+        f.timer.stop();
+        qApp->setProperty("zwHoldPrompts", false);
+        *boxes = f.boxes;
+    };
+    for (const QString answer : {QStringLiteral("Save"), QStringLiteral("Don't Save"), QStringLiteral("Cancel")}) {
+        const QString path = root + QStringLiteral("/outline-new-") + (answer == "Save" ? "save" : answer == "Cancel" ? "cancel" : "discard") + ".md";
+        check(writeFile(path, "# Old\n"), "NO write a Markdown file to edit");
+        MainWindow w3;
+        w3.show();
+        QApplication::processEvents();
+        check(w3.openPathForTest(path), "NO open it");
+        QTextEdit *ed = editorOf(w3);
+        if (!ed) {
+            return;
+        }
+        QTextCursor c(ed->document());
+        c.movePosition(QTextCursor::End);
+        c.insertText(QStringLiteral("edited\n"));
+        int boxes = 0;
+        flow(w3, answer, &boxes);
+        QFile f(path);
+        f.open(QIODevice::ReadOnly);
+        const QByteArray onDisk = f.readAll();
+        const QString tag = "NO " + answer + ": ";
+        check(boxes == 1, qPrintable(tag + "asked once"), QString::number(boxes));
+        if (answer == "Cancel") {
+            check(ed->toPlainText().contains(QStringLiteral("edited")) && onDisk == "# Old\n",
+                  qPrintable(tag + "the document and the file are untouched"));
+        } else {
+            check(ed->toPlainText() == QStringLiteral("# Plan\n\n## Budget\n\n"), qPrintable(tag + "the outline's document replaces it"),
+                  QString(ed->toPlainText()).replace('\n', "\\n"));
+            check(answer == "Save" ? onDisk == "# Old\nedited\n" : onDisk == "# Old\n",
+                  qPrintable(tag + "the file was saved / left as it was"), QString::fromUtf8(onDisk));
+        }
+        w3.close();
+    }
+    {
+        // Nothing unsaved: no question at all.
+        MainWindow w4;
+        w4.show();
+        QApplication::processEvents();
+        int boxes = 0;
+        flow(w4, QStringLiteral("Cancel"), &boxes);
+        check(boxes == 0 && editorOf(w4) && editorOf(w4)->toPlainText().startsWith(QStringLiteral("# Plan")),
+              "NO a clean window is replaced without a question", QString::number(boxes));
+        w4.close();
+    }
     w2.close();
 }
 
@@ -4199,7 +4311,7 @@ int main(int argc, char **argv)
     testPageGuidesContainText();
     testOutlineWindow(dataDir.path());
     testOutlineEditWindow(dataDir.path());
-    testNewFromOutline();
+    testNewFromOutline(dataDir.path());
     testPageSizeAndUnits(dataDir.path());
     testSymbols();
     testSubSuperscript(dataDir.path());

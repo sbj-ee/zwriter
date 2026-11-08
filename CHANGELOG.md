@@ -3,6 +3,22 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.22.1] — unreleased
+
+Fixes from the review of outline mode (1.21.0 / 1.22.0).
+
+- **New from Outline asks about unsaved changes once.** Answering *Don't Save* used to bring the
+  question back a second time. `startNewDocument()` is now `maybeSave()` followed by a new
+  `resetDocument()` that never asks, and New from Outline asks once after *Create*, then resets
+  and fills the document. Cancel leaves the document and its file as they were. Tests cover Save,
+  Don't Save, Cancel and a window with nothing unsaved (no question).
+- **Edits from the outline check that it is current.** The tree can be up to 300 ms behind the
+  page, so the right-click menu, drag and drop, and the Edit → Move / Promote / Demote actions
+  (when the list has the focus) rescan the document first. If any heading's level or text is no
+  longer what the tree showed, nothing is edited, the tree is refreshed and the status bar says
+  to choose the heading again. If only text under a heading changed, the edit goes ahead at the
+  heading's current position. New `OutlinePane::syncBeforeEdit()` and `editRefused()`.
+
 ## [1.22.0] — unreleased
 
 Outline mode, part three: start a document from an outline.

@@ -189,7 +189,7 @@ private slots:
     void moveSectionBy(int delta);
     void changeSectionLevel(int delta);
     void moveSectionTo(int position, int targetPosition, bool after);
-    int outlineEditPosition() const;
+    int outlineEditPosition(); // -1: refused (outline out of date)
     void finishOutlineEdit(bool ok, const QString &why, int position);
     void onFontFamilyChosen(const QFont &font);
     void onFontSizeChosen(int pointSize);
@@ -266,7 +266,8 @@ private:
     void applyMarkdownBlockFormat();
     void syncRichActions();
     void updateColumnCap();
-    void startNewDocument(bool markdown);
+    void startNewDocument(bool markdown); // maybeSave(), then resetDocument()
+    void resetDocument(bool markdown);    // no question asked
     void setChromeVisible(bool visible);
     void setChromePinned(bool pinned);
     void loadWindowIcon();
