@@ -3,6 +3,22 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.22.1] — unreleased
+
+Fixes from the review of outline mode (1.21.0 / 1.22.0).
+
+- **New from Outline asks about unsaved changes once.** Answering *Don't Save* used to bring the
+  question back a second time. `startNewDocument()` is now `maybeSave()` followed by a new
+  `resetDocument()` that never asks, and New from Outline asks once after *Create*, then resets
+  and fills the document. Cancel leaves the document and its file as they were. Tests cover Save,
+  Don't Save, Cancel and a window with nothing unsaved (no question).
+- **Edits from the outline check that it is current.** The tree can be up to 300 ms behind the
+  page, so the right-click menu, drag and drop, and the Edit → Move / Promote / Demote actions
+  (when the list has the focus) rescan the document first. If any heading's level or text is no
+  longer what the tree showed, nothing is edited, the tree is refreshed and the status bar says
+  to choose the heading again. If only text under a heading changed, the edit goes ahead at the
+  heading's current position. New `OutlinePane::syncBeforeEdit()` and `editRefused()`.
+
 ## [1.22.0] — unreleased
 
 Outline mode, part three: start a document from an outline.
@@ -17,9 +33,6 @@ Outline mode, part three: start a document from an outline.
     closing `#`s are ignored.
   - A line is never more than one level below the one above it, and never deeper than the format
     allows (Heading 3 for ODT, `######` for Markdown); the box says how many were moved up.
-  - With unsaved changes you are asked once (Save / Don't Save / Cancel) after *Create*; Cancel
-    leaves the document as it was. (`startNewDocument` is now `maybeSave()` + `resetDocument()`,
-    so a caller that has already asked does not ask again.)
   - ODT headings get the same size, face and weight as Format → Heading; Markdown gets plain
     `# Title` lines separated by blank lines. The format you pick is remembered.
 - `OutlineDraft` (`src/OutlineDraft.{hpp,cpp}`, no widgets) and `OutlineDraftDialog`; new test
@@ -44,11 +57,6 @@ Outline mode, part two: edit the document by its outline.
   the blank lines between sections stay where they were, text and block formats (alignment,
   indents, lists, tables) move with their section, and a Markdown file's final newline (or the
   lack of one) is untouched.
-- **Edits from the outline check that it is current.** The tree can be up to 300 ms behind the
-  page, so the right-click menu, drag and drop, and the Edit actions (when the list has the focus)
-  rescan the document first. If the headings (level or text) are no longer the ones the tree
-  showed, nothing is edited, the tree is refreshed and the status bar says to choose again; if only
-  text under a heading changed, the edit goes ahead at the heading's current position.
 - `OutlineEdit` (`src/OutlineEdit.{hpp,cpp}`); `MainWindow::applyHeading()` split into
   `headingCharFormat` / `styleBlockAsHeading` so the outline reuses it. New test
   `outline_edit_test`; pane and window checks in `outline_test` and `mainwindow_test`.
