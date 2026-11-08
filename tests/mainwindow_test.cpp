@@ -42,11 +42,14 @@
 #include <QFontDatabase>
 #include <QCheckBox>
 #include "PageSettingsDialog.hpp"
+#include "OutlinePane.hpp"
 #include "PageSetup.hpp"
 #include "Ruler.hpp"
 #include "SymbolDialog.hpp"
 #include "Symbols.hpp"
 #include <QToolButton>
+#include <QSplitter>
+#include <QTreeWidget>
 #include <QMenuBar>
 #include "DocumentMeta.hpp"
 #include "ParagraphDialog.hpp"
@@ -3692,6 +3695,106 @@ void testStyleFonts(const QString &root)
     ed->document()->setModified(false);
 }
 
+static void spWait(const std::function<bool()> &done);
+
+// 1.20.0: the outline pane in the real window: its slot in the splitter, the
+// View action, ODT and Markdown headings, click-to-jump, caret follow, and that
+// none of it makes the document dirty.
+void testOutlineWindow(const QString &root)
+{
+    QSettings().remove(QStringLiteral("outline/visible"));
+    const QString md = root + QStringLiteral("/outline-window.md");
+    check(writeFile(md,
+                    "# Harbor\n\nFirst light on the water.\n\n## Morning\n\nGulls.\n\n## Evening\n\nQuiet.\n\n"
+                    "# Marsh\n\nReeds.\n"),
+          "OW write the Markdown file");
+    const QString odt = root + QStringLiteral("/outline-window.odt");
+    {
+        QTextDocument doc;
+        QTextCursor c(&doc);
+        const QList<QPair<int, QString>> lines{{1, QStringLiteral("Tides")}, {0, QStringLiteral("Slack water.")},
+                                               {2, QStringLiteral("Ebb")},   {0, QStringLiteral("Going out.")}};
+        bool first = true;
+        for (const auto &l : lines) {
+            if (!first) {
+                c.insertBlock();
+            }
+            first = false;
+            QTextBlockFormat bf = c.blockFormat();
+            bf.setHeadingLevel(l.first);
+            c.setBlockFormat(bf);
+            c.insertText(l.second);
+        }
+        QString err;
+        check(DocumentIo::save(&doc, odt, DocumentIo::Format::Odt, &err), "OW write the ODT file", err);
+    }
+
+    MainWindow w;
+    w.show();
+    QApplication::processEvents();
+    auto *outline = w.findChild<OutlinePane *>();
+    auto *action = w.findChild<QAction *>(QStringLiteral("viewOutline"));
+    auto *splitter = w.findChild<QSplitter *>(QStringLiteral("workspaceSplitter"));
+    auto *preview = w.findChild<QWidget *>(QStringLiteral("markdownPreviewPane"));
+    check(outline && action && splitter && preview, "OW outline pane, View action, splitter and preview exist");
+    if (!outline || !action || !splitter || !preview) {
+        return;
+    }
+    check(splitter->indexOf(outline) == splitter->indexOf(preview) - 1,
+          "OW the outline sits right of the page, left of the preview",
+          QStringLiteral("%1 / %2").arg(splitter->indexOf(outline)).arg(splitter->indexOf(preview)));
+    check(!outline->isVisibleTo(&w) && !action->isChecked(), "OW the outline is off by default");
+
+    check(w.openPathForTest(md), "OW open the Markdown file");
+    QTextEdit *editor = editorOf(w);
+    check(editor != nullptr, "OW editor found");
+    if (!editor) {
+        return;
+    }
+    action->trigger();
+    spWait([&] { return outline->items().size() == 4; });
+    check(outline->isVisibleTo(&w) && action->isChecked(), "OW View > Outline shows the pane");
+    check(QSettings().value(QStringLiteral("outline/visible")).toBool(), "OW the choice is remembered");
+    check(outline->isMarkdown() && outline->items().size() == 4, "OW a Markdown file lists its # headings",
+          QString::number(outline->items().size()));
+    check(!isDirty(w), "OW showing the outline does not dirty the document");
+
+    // Click "Marsh": the caret goes to its heading line.
+    QTreeWidgetItem *marsh = outline->tree()->topLevelItem(1);
+    check(marsh && marsh->text(0) == QStringLiteral("Marsh"), "OW second top-level entry is Marsh");
+    if (marsh) {
+        outline->tree()->itemClicked(marsh, 0);
+    }
+    check(editor->textCursor().block().text() == QStringLiteral("# Marsh"), "OW clicking an entry puts the caret on its heading",
+          editor->textCursor().block().text());
+    check(outline->currentIndex() == 3, "OW and that entry is the current one", QString::number(outline->currentIndex()));
+    check(!isDirty(w), "OW jumping does not dirty the document");
+
+    // Typing in a section moves the highlight with the caret, not the other way round.
+    QTextCursor c(editor->document());
+    c.setPosition(editor->document()->findBlockByNumber(6).position()); // "Gulls."
+    editor->setTextCursor(c);
+    check(outline->currentIndex() == 1, "OW the caret in Morning selects Morning", QString::number(outline->currentIndex()));
+
+    // The preview and the outline can be on together.
+    action->trigger(); // off
+    check(!outline->isVisibleTo(&w) && !QSettings().value(QStringLiteral("outline/visible")).toBool(),
+          "OW View > Outline hides it again and remembers that");
+    action->trigger(); // on
+
+    // An ODT document: heading levels, not # lines.
+    check(w.openPathForTest(odt), "OW open the ODT file");
+    spWait([&] { return !outline->isMarkdown() && outline->items().size() == 2; });
+    check(!outline->isMarkdown() && outline->items().size() == 2, "OW an ODT lists its Heading 1-3 entries",
+          QString::number(outline->items().size()));
+    check(outline->items().size() == 2 && outline->items()[0].text == QStringLiteral("Tides")
+              && outline->items()[1].level == 2,
+          "OW with their levels");
+    check(!isDirty(w), "OW opening an ODT with the outline on stays clean");
+    action->trigger(); // leave it off for the tests after this one
+    w.close();
+}
+
 // 1.17.0: page guides, full screen and the toolbar layout carry over to the
 // next session (set, close the window, make a new one, compare).
 static void spWait(const std::function<bool()> &done)
@@ -3932,6 +4035,7 @@ int main(int argc, char **argv)
     testCaptionsPdfMarkdown(dataDir.path(), prompts);
     testBookFeedback(dataDir.path(), prompts);
     testPageGuidesContainText();
+    testOutlineWindow(dataDir.path());
     testPageSizeAndUnits(dataDir.path());
     testSymbols();
     testSubSuperscript(dataDir.path());

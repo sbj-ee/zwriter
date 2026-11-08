@@ -25,6 +25,7 @@
 #include "BookChapterDialog.hpp"
 #include "BookManifest.hpp"
 #include "PageWidgets.hpp"
+#include "OutlinePane.hpp"
 #include "PreviewPane.hpp"
 #include "PrintLayout.hpp"
 #include "PropertiesDialog.hpp"
@@ -251,14 +252,22 @@ MainWindow::MainWindow(QWidget *parent)
     m_book->hide();
     m_splitter->addWidget(m_book);
     m_splitter->addWidget(m_desk);
+    // Outline: right of the page, left of the Markdown preview (1.20.0).
+    m_outline = new OutlinePane(m_splitter);
+    m_outline->hide();
+    m_splitter->addWidget(m_outline);
     m_preview = new PreviewPane(m_splitter);
     m_preview->hide();
     m_splitter->addWidget(m_preview);
     m_splitter->setStretchFactor(0, 0);
     m_splitter->setStretchFactor(1, 0);
     m_splitter->setStretchFactor(2, 3);
-    m_splitter->setStretchFactor(3, 2);
+    m_splitter->setStretchFactor(3, 0);
+    m_splitter->setStretchFactor(4, 2);
     m_preview->attachEditor(m_editor);
+    m_outline->attachEditor(m_editor);
+    connect(m_outline, &OutlinePane::headingActivated, this, &MainWindow::goToOutlineHeading);
+    connect(m_outline, &OutlinePane::escapePressed, this, [this]() { m_editor->setFocus(); });
     // Focus moves from the editor straight to the chapter list (Ctrl+Tab;
     // Tab itself types a tab in the document), not to the sidebar header.
     QWidget::setTabOrder(m_editor, m_book->view());
@@ -287,6 +296,7 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
     m_previewWanted = PreviewPane::loadVisibleSetting();
+    m_outlineWanted = OutlinePane::loadVisibleSetting();
     {
         const LibrarySidebar::Settings lib = LibrarySidebar::loadSettings();
         m_library->setRootPath(lib.rootPath);
@@ -1315,6 +1325,14 @@ void MainWindow::buildViewMenu()
         "Show the rendered Markdown beside the editor (Ctrl+Alt+P; Markdown documents only)"));
     connect(m_previewAction, &QAction::triggered, this, &MainWindow::toggleMarkdownPreview);
 
+    m_outlineAction = m_viewMenu->addAction(QStringLiteral("&Outline"));
+    m_outlineAction->setObjectName(QStringLiteral("viewOutline"));
+    m_outlineAction->setCheckable(true);
+    m_outlineAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_O));
+    m_outlineAction->setToolTip(QStringLiteral(
+        "Show the document's headings beside the editor; click one to jump to it (Ctrl+Alt+O)"));
+    connect(m_outlineAction, &QAction::triggered, this, &MainWindow::toggleOutline);
+
     m_libraryAction = m_viewMenu->addAction(QStringLiteral("Li&brary Sidebar"));
     m_libraryAction->setCheckable(true);
     m_libraryAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
@@ -1341,7 +1359,7 @@ void MainWindow::buildViewMenu()
     for (QAction *a : {m_typewriterScrollAction, m_focusModeAction, m_fullPageViewAction,
                        m_fitPageWidthAction, m_zoomInAction, m_zoomOutAction, m_zoomResetAction,
                        m_pageGuidesAction, m_keySoundsAction, fullscreenAct,
-                       m_previewAction, m_libraryAction, m_bookAction}) {
+                       m_previewAction, m_outlineAction, m_libraryAction, m_bookAction}) {
         addAction(a);
     }
 }
@@ -1697,6 +1715,13 @@ void MainWindow::syncViewActions()
         m_previewAction->setChecked(m_previewWanted);
         m_previewAction->setEnabled(m_markdownMode);
     }
+    if (m_outline) {
+        m_outline->setVisible(m_outlineWanted);
+    }
+    if (m_outlineAction) {
+        const QSignalBlocker b(m_outlineAction);
+        m_outlineAction->setChecked(m_outlineWanted);
+    }
     if (m_libraryAction && m_library) {
         const QSignalBlocker b(m_libraryAction);
         m_libraryAction->setChecked(m_library->isVisibleTo(this));
@@ -1712,6 +1737,24 @@ void MainWindow::toggleMarkdownPreview()
     m_previewWanted = !m_previewWanted;
     PreviewPane::saveVisibleSetting(m_previewWanted);
     syncViewActions();
+}
+
+void MainWindow::toggleOutline()
+{
+    m_outlineWanted = !m_outlineWanted;
+    OutlinePane::saveVisibleSetting(m_outlineWanted);
+    syncViewActions();
+    if (m_outlineWanted) {
+        m_outline->focusTree(); // arrows to pick a heading, Enter to go, Esc back to the page
+    }
+}
+
+void MainWindow::goToOutlineHeading(int position)
+{
+    QTextCursor c(m_editor->document());
+    c.setPosition(qBound(0, position, qMax(0, m_editor->document()->characterCount() - 1)));
+    m_editor->setTextCursor(c); // onCursorMoved() scrolls (typewriter centring, Full Page follow)
+    m_editor->setFocus();
 }
 
 void MainWindow::buildFormatToolbar()
@@ -1976,6 +2019,7 @@ void MainWindow::applyTheme()
         m_splitter->setStyleSheet(QStringLiteral("QSplitter#workspaceSplitter::handle { background-color: %1; }")
                                       .arg(c.border.name()));
         m_preview->applyTheme(c, markdownFont());
+        m_outline->applyTheme(c);
         m_library->applyTheme(c);
         m_book->applyTheme(c);
     }
@@ -2930,6 +2974,9 @@ void MainWindow::setMarkdownMode(bool on)
         m_hideAwayPinned = m_odtChromePinned;
     }
     m_markdownMode = on;
+    if (m_outline) {
+        m_outline->setMarkdown(on);
+    }
     if (m_ruler) {
         m_ruler->setVisible(!on && m_rulerAction && m_rulerAction->isChecked());
     }
@@ -3828,10 +3875,28 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         // a) Editor + preview.
         m_previewWanted = true; // not saved: capture leaves the settings alone
         syncViewActions();
-        m_splitter->setSizes({0, 0, 720, 560});
+        m_splitter->setSizes({0, 0, 720, 0, 560});
         m_preview->renderNow();
         QApplication::processEvents();
         grab().save(dir + QStringLiteral("/markdown-preview.png"), "PNG");
+
+        // a2) Editor + outline, then outline + preview together (1.20.0).
+        m_outlineWanted = true; // not saved: capture leaves the settings alone
+        m_previewWanted = false;
+        syncViewActions();
+        m_splitter->setSizes({0, 0, 760, 260, 0});
+        m_outline->rebuildNow();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/outline.png"), "PNG");
+        m_previewWanted = true;
+        syncViewActions();
+        m_splitter->setSizes({0, 0, 440, 230, 350});
+        m_preview->renderNow();
+        QApplication::processEvents();
+        grab().save(dir + QStringLiteral("/outline-and-preview.png"), "PNG");
+        m_outlineWanted = false;
+        syncViewActions();
+        m_splitter->setSizes({0, 0, 720, 0, 560});
 
         // b) The same in the Dark room theme.
         m_themeId = QStringLiteral("dark");
@@ -3846,7 +3911,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         m_library->setRootPath(lib);
         m_library->show();
         syncViewActions();
-        m_splitter->setSizes({250, 0, 1030, 0});
+        m_splitter->setSizes({250, 0, 1030, 0, 0});
         QElapsedTimer loading;
         loading.start();
         const QModelIndex chapters = m_library->model()->index(lib + QStringLiteral("/Chapters"));
@@ -3864,7 +3929,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
         // d) Everything: library, editor, preview.
         m_previewWanted = true;
         syncViewActions();
-        m_splitter->setSizes({250, 0, 560, 470});
+        m_splitter->setSizes({250, 0, 560, 0, 470});
         m_preview->renderNow();
         QApplication::processEvents();
         grab().save(dir + QStringLiteral("/library-and-preview.png"), "PNG");
@@ -3943,7 +4008,7 @@ void MainWindow::captureDemoScreenshots(const QString &dir)
             m_book->show();
             m_book->setCurrentFile(m_currentPath);
             syncViewActions();
-            m_splitter->setSizes({0, 270, 1010, 0});
+            m_splitter->setSizes({0, 270, 1010, 0, 0});
             QApplication::processEvents();
             grab().save(dir + QStringLiteral("/book-sidebar.png"), "PNG");
 

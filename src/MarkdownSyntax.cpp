@@ -342,6 +342,8 @@ BlockResult scan(const QString &line, int previousState)
         if (c.hasMatch()) {
             textEnd = int(c.capturedStart());
         }
+        r.headingTextStart = textStart;
+        r.headingTextEnd = textEnd;
         mark(r.flags, 0, n, Heading);
         mark(r.flags, 0, textStart, Markup);
         mark(r.flags, textEnd, n, Markup);

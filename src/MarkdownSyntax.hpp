@@ -44,6 +44,10 @@ struct BlockResult
     QList<quint16> flags; // one entry per character of the line
     int state = kStateNormal;
     int headingLevel = 0; // 1..6 on an ATX heading line, else 0
+    // On a heading line: the heading text as [start, end) offsets into the line
+    // (after the "#"s and before an optional closing run of "#"s); not trimmed.
+    int headingTextStart = 0;
+    int headingTextEnd = 0;
 };
 
 BlockResult scan(const QString &line, int previousState);

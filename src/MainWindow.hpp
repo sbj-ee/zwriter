@@ -48,6 +48,7 @@ namespace Alignment { class Actions; }
 class SpellChecker;
 class WritingHighlighter;
 class PreviewPane;
+class OutlinePane;
 class LibrarySidebar;
 class BookSidebar;
 class QSplitter;
@@ -193,6 +194,9 @@ private slots:
     void toggleSmartQuotes();
     void toggleSpellCheck();
     void toggleMarkdownPreview();
+    void toggleOutline();
+    // Outline pane: the caret goes to the heading at `position`, focus to the editor.
+    void goToOutlineHeading(int position);
     void toggleLibrary();
     void toggleBook();
     void chooseLibraryFolder();
@@ -470,6 +474,9 @@ private:
     bool m_metaDirty = false; // header/footer or properties edited (not in the text)
     PreviewPane *m_preview = nullptr;
     QAction *m_previewAction = nullptr;
+    OutlinePane *m_outline = nullptr;
+    QAction *m_outlineAction = nullptr;
+    bool m_outlineWanted = false; // outline/visible; every document type
     QAction *m_libraryAction = nullptr;
     QAction *m_chooseLibraryAction = nullptr;
     QAction *m_bookAction = nullptr;
