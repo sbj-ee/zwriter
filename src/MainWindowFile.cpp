@@ -248,13 +248,10 @@ void MainWindow::startDocumentFromOutline(const QString &outline, bool markdown)
 {
     const OutlineDraft::Parsed parsed = OutlineDraft::parse(
         outline, markdown ? OutlineEdit::kMaxMarkdownLevel : OutlineEdit::kMaxRichLevel);
-    if (parsed.entries.isEmpty() || !maybeSave()) {
+    if (parsed.entries.isEmpty() || !maybeSave()) { // asks once: Save, Don't Save or Cancel
         return;
     }
-    startNewDocument(markdown);
-    if (m_dirty) {
-        return; // the save question was answered "Cancel" a second time
-    }
+    resetDocument(markdown);
     QTextDocument *doc = m_editor->document();
     QTextCursor c(doc);
     int firstBody = 0;
@@ -288,9 +285,15 @@ void MainWindow::startDocumentFromOutline(const QString &outline, bool markdown)
 
 void MainWindow::startNewDocument(bool markdown)
 {
-    if (!maybeSave()) {
-        return;
+    if (maybeSave()) {
+        resetDocument(markdown);
     }
+}
+
+// An empty, clean, unnamed document of the given kind, replacing the one in the
+// window. Never asks about unsaved changes: the callers have (maybeSave()).
+void MainWindow::resetDocument(bool markdown)
+{
     m_editor->clear();
     DocumentIo::resetMarkdownFileFormat(m_editor->document()); // LF, no BOM
     m_meta = DocumentMeta{};

@@ -266,7 +266,8 @@ private:
     void applyMarkdownBlockFormat();
     void syncRichActions();
     void updateColumnCap();
-    void startNewDocument(bool markdown);
+    void startNewDocument(bool markdown); // maybeSave(), then resetDocument()
+    void resetDocument(bool markdown);    // no question asked
     void setChromeVisible(bool visible);
     void setChromePinned(bool pinned);
     void loadWindowIcon();

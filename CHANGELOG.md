@@ -17,6 +17,9 @@ Outline mode, part three: start a document from an outline.
     closing `#`s are ignored.
   - A line is never more than one level below the one above it, and never deeper than the format
     allows (Heading 3 for ODT, `######` for Markdown); the box says how many were moved up.
+  - With unsaved changes you are asked once (Save / Don't Save / Cancel) after *Create*; Cancel
+    leaves the document as it was. (`startNewDocument` is now `maybeSave()` + `resetDocument()`,
+    so a caller that has already asked does not ask again.)
   - ODT headings get the same size, face and weight as Format → Heading; Markdown gets plain
     `# Title` lines separated by blank lines. The format you pick is remembered.
 - `OutlineDraft` (`src/OutlineDraft.{hpp,cpp}`, no widgets) and `OutlineDraftDialog`; new test
