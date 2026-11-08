@@ -70,8 +70,21 @@ public:
     bool treeHasFocus() const;
     // Same check the drag and drop uses: both entries are siblings of one level.
     bool isDropAllowed(int from, int to) const { return canDrop(from, to); }
-    // Tests: what a drop of entry `from` on entry `to` does.
-    void dropForTest(int from, int to, bool after) { emit moveToRequested(m_items[from].position, m_items[to].position, after); }
+
+    // Before any edit made from the pane (or from its selected entry): rescan
+    // the document now instead of trusting the tree, which can be up to 300 ms
+    // behind the page. True when the headings (levels and text, in order) are
+    // the ones the tree showed, so entry numbers and positions can be trusted;
+    // the tree is refreshed either way. When false the edit must not go ahead:
+    // editRefused() has been emitted.
+    bool syncBeforeEdit();
+
+    // What the context menu and the drag and drop call (entry numbers are
+    // rows of items()): sync first, then emit the request with fresh positions,
+    // or emit editRefused() and nothing else.
+    void requestMove(int index, int delta);
+    void requestLevel(int index, int delta);
+    void requestMoveTo(int from, int to, bool after);
     QLabel *emptyLabel() const { return m_empty; }
     QLabel *footerLabel() const { return m_footer; }
 
@@ -93,6 +106,9 @@ signals:
     void moveRequested(int position, int delta);
     void levelRequested(int position, int delta);
     void moveToRequested(int position, int targetPosition, bool after);
+    // The tree was out of date (the headings changed under it): it has been
+    // refreshed and nothing was edited. Short text for the status bar.
+    void editRefused(const QString &why);
 
 protected:
     void showEvent(QShowEvent *event) override;

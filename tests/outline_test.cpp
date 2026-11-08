@@ -364,9 +364,54 @@ void testPaneEdit()
         gotTo = t;
         gotAfter = a;
     });
-    pane.dropForTest(0, 5, true);
+    pane.requestMoveTo(0, 5, true);
     check(gotFrom == pane.items()[0].position && gotTo == pane.items()[5].position && gotAfter,
           "E4 a drop reports the headings' positions");
+
+    // A stale tree must not be trusted: the page changed less than a debounce ago.
+    pane.setDebounceInterval(60000);
+    int moves = 0;
+    int levels = 0;
+    int moveToCount = 0;
+    int refused = 0;
+    int lastMovePos = -1;
+    QObject::connect(&pane, &OutlinePane::moveRequested, &pane, [&](int p, int) { ++moves; lastMovePos = p; });
+    QObject::connect(&pane, &OutlinePane::levelRequested, &pane, [&](int, int) { ++levels; });
+    QObject::connect(&pane, &OutlinePane::moveToRequested, &pane, [&](int, int, bool) { ++moveToCount; });
+    QObject::connect(&pane, &OutlinePane::editRefused, &pane, [&](const QString &) { ++refused; });
+    gotFrom = -1;
+
+    {
+        QTextCursor c(editor.document());
+        c.setPosition(0);
+        c.insertText(QStringLiteral("xx")); // heading "A" becomes "xxA"
+    }
+    pane.requestMove(3, +1); // heading A changed, so even an unrelated entry is refused
+    check(moves == 0 && refused == 1, "E5 a heading renamed since the tree was drawn refuses the edit");
+    check(pane.items()[0].text == QStringLiteral("xxA"), "E6 and the tree has been refreshed", pane.items()[0].text);
+    pane.requestMove(3, +1);
+    check(moves == 1 && refused == 1, "E7 asked again, the edit goes ahead");
+
+    editor.document()->setPlainText(QString()); // headings vanish entirely
+    pane.requestLevel(1, +1);
+    pane.requestMoveTo(0, 3, true);
+    pane.requestMove(0, -1);
+    check(levels == 0 && moveToCount == 0 && moves == 1 && refused >= 2, "E8 promote, drop and move are all refused when the headings are gone");
+    check(pane.items().isEmpty(), "E9 and the tree is empty now");
+
+    // Same headings, text typed in a section: positions are refreshed, not refused.
+    fillRich(editor.document(), {{1, QStringLiteral("One")}, {0, QStringLiteral("body")}, {1, QStringLiteral("Two")}, {0, QStringLiteral("more")}});
+    pane.rebuildNow();
+    const int refusedBefore = refused;
+    {
+        QTextCursor c(editor.document());
+        c.setPosition(editor.document()->findBlockByNumber(1).position());
+        c.insertText(QStringLiteral("lots of new words "));
+    }
+    pane.requestMove(1, -1);
+    check(refused == refusedBefore && moves == 2 && lastMovePos == editor.document()->findBlockByNumber(2).position(),
+          "E10 text typed under a heading does not refuse, and the position is the current one",
+          QStringLiteral("%1 vs %2").arg(lastMovePos).arg(editor.document()->findBlockByNumber(2).position()));
 }
 
 void testSettings()
