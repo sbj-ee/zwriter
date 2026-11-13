@@ -48,6 +48,7 @@ namespace Alignment { class Actions; }
 class SpellChecker;
 class WritingHighlighter;
 class PreviewPane;
+class HelpDialog;
 class OutlinePane;
 class LibrarySidebar;
 class BookSidebar;
@@ -135,6 +136,10 @@ public:
     QMenu *insertMenu() const { return m_insertMenu; }
     class SymbolDialog *symbolDialog() const;
     void showSymbolDialog();
+    // Help → zwriter Help (F1); public for tests.
+    QAction *helpGuideAction() const { return m_helpGuideAction; }
+    class HelpDialog *helpDialog() const;
+    void showHelpDialog();
     QAction *subscriptAction() const { return m_subscriptAction; }
     QAction *superscriptAction() const { return m_superscriptAction; }
     // View zoom (1.14.0), display only.
@@ -470,6 +475,8 @@ private:
     QAction *m_pageBreakAction = nullptr;
     QAction *m_headerFooterAction = nullptr;
     QMenu *m_helpMenu = nullptr;
+    QAction *m_helpGuideAction = nullptr;
+    QPointer<class HelpDialog> m_helpDialog;
     QAction *m_tableInsertRowAction = nullptr;
     QAction *m_tableInsertColAction = nullptr;
     QAction *m_tableRemoveRowAction = nullptr;

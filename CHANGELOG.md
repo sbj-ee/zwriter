@@ -3,6 +3,20 @@
 All notable changes to zwriter. Versions follow [Semantic Versioning](https://semver.org/);
 the version lives only in `project(zwriter VERSION …)` in `CMakeLists.txt`.
 
+## [1.23.0] — unreleased
+
+In-app user guide.
+
+- **Help → zwriter Help** (`F1`) opens a single scrollable guide in a themed dialog (the same
+  Markdown styling as the preview pane and the update dialog). The guide is embedded in the app
+  and covers documents and modes, the hide-away toolbar and view modes, books and the table of
+  contents, the outline and styles, export and printing, keyboard shortcuts, and updates. External
+  links open only if they are `https`; in-page links jump to a section. Opening Help again while
+  the guide is already open raises that window instead of creating another. The dialog follows
+  Paper / Dark room / Inverse if the theme changes while it is open.
+- New `HelpDialog` (`src/HelpDialog.{hpp,cpp}`) and `src/ui/zwriter-help.md` (via `ui.qrc`). Tests
+  in `help_test` and `mainwindow_test`.
+
 ## [1.22.1] — unreleased
 
 Fixes from the review of outline mode (1.21.0 / 1.22.0).
