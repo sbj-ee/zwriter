@@ -6,5 +6,6 @@
         <file>ui/arrow-up-dark.png</file>
         <file>ui/check-paper.png</file>
         <file>ui/check-dark.png</file>
+        <file>ui/zwriter-help.md</file>
     </qresource>
 </RCC>

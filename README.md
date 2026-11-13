@@ -122,7 +122,7 @@ never installed.
 - **Export / print the whole book** — File → Export Book → PDF or EPUB, and File → Print Book… (also in the Book sidebar menu): every chapter in book order, each on a new page, with an optional title page, table of contents (page numbers, dot leaders) and figure numbers; a book with a Contents chapter gets its table there, in its place, and no second one; pages are numbered through the book. EPUB is EPUB 3 (checked with EPUBCheck in CI) with the paragraph styles and indents in its stylesheet
 - **Manual page break** (Format → Insert Page Break, `Ctrl+Enter`): splits the paragraph and starts a new page; Backspace at the start of the new page removes it. Saved to ODT (`fo:break-before="page"`) and honoured in Full Page view, print and PDF
 - **Spell check** (View → Spell Check, default on): Hunspell en_US live underlines; right-click suggestions / ignore / add to user dictionary; no cloud grammar
-- **Help** menu: About zwriter (shows PROJECT_VERSION), Check for Updates and Check for Updates at Startup — see [Updates](#updates)
+- **Help** menu: **zwriter Help** (`F1`, a scrollable in-app guide), About zwriter (shows PROJECT_VERSION), Check for Updates and Check for Updates at Startup — see [Updates](#updates)
 - CI builds + packages on Linux amd64 (`.deb`) and macOS arm64 (`.dmg` with a self-contained, ad-hoc signed `zwriter.app`; CI fails if anything in it still references `/opt/homebrew` or `/usr/local`)
 
 ### Still roadmap / known limits
@@ -158,7 +158,7 @@ never installed.
 - **Find and replace** (Ctrl+F / Ctrl+H)
 - **Recent files** menu (QSettings)
 - **Smart quotes / dashes** (toggle, default **off**)
-- **Help → About** + **Check for Updates** (downloads, verifies and installs; see [Updates](#updates))
+- **Help → zwriter Help** (`F1`) + **About** + **Check for Updates** (downloads, verifies and installs; see [Updates](#updates))
 - **Tables** (insert, edit cells, add/remove row/column; ODT round-trip)
 - **Header & Footer** + opt-in page numbers (`{page}` / `{pages}`; off by default)
 - **Spell check** (Hunspell en_US; toggle; context suggestions)

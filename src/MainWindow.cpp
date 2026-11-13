@@ -98,6 +98,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
+#include "HelpDialog.hpp"
 #include "SymbolDialog.hpp"
 #include "Symbols.hpp"
 #include <QSignalBlocker>
@@ -1219,6 +1220,22 @@ void MainWindow::showSymbolDialog()
     m_symbolDialog->activateWindow();
 }
 
+HelpDialog *MainWindow::helpDialog() const
+{
+    return m_helpDialog.data();
+}
+
+void MainWindow::showHelpDialog()
+{
+    if (!m_helpDialog) {
+        m_helpDialog = new HelpDialog(this);
+        m_helpDialog->applyTheme(Theme::colors(m_themeId));
+    }
+    m_helpDialog->show();
+    m_helpDialog->raise();
+    m_helpDialog->activateWindow();
+}
+
 void MainWindow::buildViewMenu()
 {
     m_viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
@@ -1674,6 +1691,16 @@ void MainWindow::tableRemoveColumn()
 void MainWindow::buildHelpMenu()
 {
     m_helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
+
+    m_helpGuideAction = m_helpMenu->addAction(QStringLiteral("zwriter &Help"));
+    m_helpGuideAction->setObjectName(QStringLiteral("helpGuide"));
+    m_helpGuideAction->setShortcut(QKeySequence(Qt::Key_F1));
+    m_helpGuideAction->setShortcutContext(Qt::ApplicationShortcut);
+    m_helpGuideAction->setToolTip(QStringLiteral("Open the zwriter user guide (F1)"));
+    connect(m_helpGuideAction, &QAction::triggered, this, &MainWindow::showHelpDialog);
+    addAction(m_helpGuideAction); // so F1 works while the menu bar is hidden away
+
+    m_helpMenu->addSeparator();
 
     auto *aboutAct = m_helpMenu->addAction(QStringLiteral("&About zwriter"));
     connect(aboutAct, &QAction::triggered, this, &MainWindow::helpAbout);
@@ -2141,6 +2168,9 @@ void MainWindow::applyTheme()
         m_outline->applyTheme(c);
         m_library->applyTheme(c);
         m_book->applyTheme(c);
+    }
+    if (m_helpDialog) {
+        m_helpDialog->applyTheme(c);
     }
 
     // Typed text carries no explicit colour, so it follows the theme.

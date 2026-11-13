@@ -19,6 +19,7 @@
 #include "Images.hpp"
 #include "ImagePropertiesDialog.hpp"
 #include "PageWidgets.hpp"
+#include "HelpDialog.hpp"
 #include "MainWindow.hpp"
 #include "OutlineDraftDialog.hpp"
 #include <QMenu>
@@ -4081,6 +4082,74 @@ static void spWait(const std::function<bool()> &done)
     QApplication::processEvents();
 }
 
+
+void testHelpGuide()
+{
+    MainWindow w;
+    QAction *help = w.helpGuideAction();
+    check(help, "H Help → zwriter Help action exists");
+    if (!help) {
+        return;
+    }
+    check(help->text() == QStringLiteral("zwriter &Help"), "H action text is zwriter Help", help->text());
+    check(help->shortcut() == QKeySequence(Qt::Key_F1), "H shortcut is F1", help->shortcut().toString());
+
+    // The action sits above About / Check for Updates (separators ignored).
+    QMenu *menu = nullptr;
+    for (QAction *a : w.menuBar()->actions()) {
+        if (a->menu() && a->menu()->title() == QStringLiteral("&Help")) {
+            menu = a->menu();
+            break;
+        }
+    }
+    check(menu, "H Help menu exists");
+    if (menu) {
+        QStringList labels;
+        for (QAction *a : menu->actions()) {
+            if (!a->isSeparator()) {
+                labels << a->text();
+            }
+        }
+        check(!labels.isEmpty() && labels.first() == QStringLiteral("zwriter &Help"),
+              "H zwriter Help is the first item", labels.join(QLatin1Char('|')));
+        const int helpAt = labels.indexOf(QStringLiteral("zwriter &Help"));
+        const int aboutAt = labels.indexOf(QStringLiteral("&About zwriter"));
+        const int updatesAt = labels.indexOf(QStringLiteral("Check for &Updates…"));
+        check(helpAt >= 0 && aboutAt > helpAt && updatesAt > aboutAt,
+              "H order is zwriter Help, then About, then Check for Updates",
+              labels.join(QStringLiteral(", ")));
+    }
+
+    check(w.helpDialog() == nullptr, "H dialog starts closed");
+    help->trigger();
+    QApplication::processEvents();
+    HelpDialog *dlg = w.helpDialog();
+    check(dlg && dlg->isVisible(), "H triggering the action opens the dialog");
+    if (!dlg) {
+        return;
+    }
+    check(dlg->objectName() == QStringLiteral("helpDialog"), "H dialog objectName");
+    check(dlg->browser() && !dlg->browser()->toPlainText().trimmed().isEmpty(),
+          "H dialog shows non-empty rendered content");
+    check(dlg->sourceMarkdown() == HelpDialog::loadGuideMarkdown() && !dlg->sourceMarkdown().isEmpty(),
+          "H content comes from the embedded resource");
+
+    HelpDialog *first = dlg;
+    help->trigger();
+    QApplication::processEvents();
+    check(w.helpDialog() == first && first->isVisible(), "H opening Help again reuses the same dialog");
+    int helpDialogs = 0;
+    for (QWidget *wid : QApplication::topLevelWidgets()) {
+        if (qobject_cast<HelpDialog *>(wid)) {
+            ++helpDialogs;
+        }
+    }
+    check(helpDialogs == 1, "H no duplicate Help dialogs", QString::number(helpDialogs));
+
+    first->close();
+    QApplication::processEvents();
+}
+
 void testSettingsPersist()
 {
     {
@@ -4330,6 +4399,7 @@ int main(int argc, char **argv)
     testTocPagesRetest(dataDir.path());
     testBigBookTimings(dataDir.path());
     testStyleFonts(dataDir.path());
+    testHelpGuide();
     testSettingsPersist();
     std::printf("%s (%d failure%s)\n", g_failures ? "FAILED" : "OK", g_failures, g_failures == 1 ? "" : "s");
     return g_failures ? 1 : 0;
